@@ -120,7 +120,17 @@ def kappa(
     # Whitening: L L^T = Σ̂; transform to standardize units
     # We compute L^T H L (not L H L^T) because the quadratic form is
     # already symmetric and we want eigenvalues of the whitened Hessian.
-    L = jnp.linalg.cholesky(cov_params)
+    try:
+        L = jnp.linalg.cholesky(cov_params)
+    except Exception:
+        # Ridge-regularize for rank-deficient Σ̂ (common with HC/cluster estimators)
+        diag_mean = jnp.mean(jnp.diag(cov_params))
+        ridge = 1e-8 * diag_mean
+        reg_cov = cov_params + ridge * jnp.eye(cov_params.shape[0])
+        try:
+            L = jnp.linalg.cholesky(reg_cov)
+        except Exception:
+            return float("inf")
 
     H_white = L.T @ H @ L
     grad_white = L.T @ grad

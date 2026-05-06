@@ -27,6 +27,8 @@ session-level arguments specify the *posture*.
 
 from __future__ import annotations
 from typing import Callable, Optional, Union, Any
+import weakref
+
 import jax.numpy as jnp
 import numpy as np
 
@@ -45,7 +47,6 @@ from ._estimands import (
 )
 from ._scenarios import (
     expand_scenario,
-    expand_with_over,
     make_aggregation_resolver,
 )
 from ._kappa import session_kappa
@@ -238,6 +239,12 @@ class Margins:
         self.adapter.attach(self)
 
         # Gradient backend resolution
+        if strict and gradient_backend == "auto":
+            raise ValueError(
+                "strict=True: gradient_backend='auto' is not allowed. "
+                "Specify an explicit backend ('autodiff', 'fd', 'wrapped_fd')."
+            )
+
         if gradient_backend == "auto":
             self.gradient_backend = self.adapter.gradient_backend_recommendation
         else:
@@ -294,9 +301,7 @@ class Margins:
         *,
         atexog: Optional[Union[dict, "pd.DataFrame"]] = None,
         over: Optional[Union[str, list[str]]] = None,
-        compose: Optional[Callable] = None,
-        method: Optional[InferenceMethod] = None,
-        level: Optional[float] = None,
+        transform: Optional[Callable] = None,
     ) -> MarginsResult:
         """Adjusted prediction (level quantity).
 
@@ -326,32 +331,39 @@ class Margins:
             Subgroup variable(s). Estimand is computed within each group
             level; result is vector-valued with one entry per group.
 
-        compose : callable, optional
-            Differentiable function applied to predictions before
-            aggregation (averaging). Receives the per-row prediction array; returns
-            scalar or vector. Must be JAX-compatible for delta inference.
+        transform : callable, optional
+            Differentiable per-row mapping applied to predictions before
+            aggregation (averaging). Receives the per-row prediction array
+            ``μ`` of shape ``(n_rows,)`` and returns an array of the same
+            shape (or broadcastable). Must be JAX-compatible for delta
+            inference.
 
-        method : str, optional
-            Per-call override of session's inference method.
-
-        level : float, optional
-            Per-call override of session's confidence level.
+            Distinct from ``evaluate(compose=…)``, which composes a function
+            *across already-aggregated scenario predictions*; ``transform``
+            here is a per-row mapping that runs *before* aggregation.
 
         Returns
         -------
         result : MarginsResult
+            For ``over=`` with k group levels, a length-k vector result
+            with one estimate per level and joint inference. For multiple
+            ``over=`` variables, a vector over the Cartesian product of
+            observed level combinations.
         """
-        if over is not None:
-            raise NotImplementedError(
-                "over= is not yet implemented. Use explicit subgroup "
-                "scenarios with contrasts() instead."
-            )
         scenario = {"atexog": atexog, "over": over}
-        h = self._build_prediction_estimand(scenario, compose)
-        config = self._inference_config(method, level)
+        h, labels = self._build_prediction_estimand(scenario, transform)
+        config = self._inference_config()
+        meta = {"kind": "prediction"}
+        if labels is not None:
+            meta["labels"] = labels
+        if over is not None:
+            meta["over"] = [over] if isinstance(over, str) else list(over)
         result_data = run_inference(
             h, self.adapter, config,
-            estimand_metadata={"kind": "prediction"},
+            estimand_metadata=meta,
+            h_factory=lambda new_adapter: self._build_prediction_estimand(
+                scenario, transform, adapter=new_adapter
+            )[0],
         )
         return self._wrap_result(result_data)
 
@@ -361,9 +373,7 @@ class Margins:
         *,
         atexog: Optional[Union[dict, "pd.DataFrame"]] = None,
         over: Optional[Union[str, list[str]]] = None,
-        compose: Optional[Callable] = None,
-        method: Optional[InferenceMethod] = None,
-        level: Optional[float] = None,
+        transform: Optional[Callable] = None,
     ) -> MarginsResult:
         """Slope (∂μ/∂x_j) for continuous covariates.
 
@@ -394,17 +404,20 @@ class Margins:
                     "for discrete contrasts."
                 )
 
-        if over is not None:
-            raise NotImplementedError(
-                "over= is not yet implemented. Use explicit subgroup "
-                "scenarios with contrasts() instead."
-            )
         scenario = {"atexog": atexog, "over": over}
-        h = self._build_slope_estimand(scenario, var_list, compose)
-        config = self._inference_config(method, level)
+        h, labels = self._build_slope_estimand(scenario, var_list, transform)
+        config = self._inference_config()
+        meta = {"kind": "slope", "variables": var_list}
+        if labels is not None:
+            meta["labels"] = labels
+        if over is not None:
+            meta["over"] = [over] if isinstance(over, str) else list(over)
         result_data = run_inference(
             h, self.adapter, config,
-            estimand_metadata={"kind": "slope", "variables": var_list},
+            estimand_metadata=meta,
+            h_factory=lambda new_adapter: self._build_slope_estimand(
+                scenario, var_list, transform, adapter=new_adapter
+            )[0],
         )
         return self._wrap_result(result_data)
 
@@ -413,8 +426,6 @@ class Margins:
         *,
         scenarios: list[dict],
         contrasts: ContrastSpec,
-        method: Optional[InferenceMethod] = None,
-        level: Optional[float] = None,
     ) -> MarginsResult:
         """Linear combination(s) of predictions across scenarios.
 
@@ -451,8 +462,6 @@ class Margins:
                                              contrasts, auto-labeled
             All weight vectors must have length len(scenarios).
 
-        method, level : optional per-call overrides.
-
         Returns
         -------
         result : MarginsResult
@@ -462,19 +471,6 @@ class Margins:
         """
         if len(scenarios) == 0:
             raise ValueError("contrasts() requires at least one scenario")
-
-        # Build per-scenario design matrices
-        scenarios_X = []
-        for scenario in scenarios:
-            df, _ = expand_scenario(
-                scenario,
-                base_data=self._base_data,
-                aggregation_resolver=make_aggregation_resolver(
-                    self.at, self.weights,
-                ),
-                variable_metadata=self.adapter.variable_metadata(),
-            )
-            scenarios_X.append(self.adapter.design_matrix_from_df(df))
 
         # Normalize the contrasts argument into the dict-or-vector forms
         # accepted by make_linear_combination_estimand.
@@ -507,17 +503,15 @@ class Margins:
                     f"{n_scenarios} scenarios were provided."
                 )
 
-        h = make_linear_combination_estimand(
-            self.adapter,
-            scenarios_X=scenarios_X,
-            weights=weights_arg,
-            phi_inv=self.phi_inv,
-        )
-        config = self._inference_config(method, level)
+        h = self._build_contrast_estimand(scenarios, weights_arg)
+        config = self._inference_config()
 
         result_data = run_inference(
             h, self.adapter, config,
             estimand_metadata={"kind": "contrasts", "labels": labels},
+            h_factory=lambda new_adapter: self._build_contrast_estimand(
+                scenarios, weights_arg, adapter=new_adapter
+            ),
         )
         return self._wrap_result(result_data)
 
@@ -526,8 +520,6 @@ class Margins:
         *,
         scenarios: list[dict],
         compose: Callable,
-        method: Optional[InferenceMethod] = None,
-        level: Optional[float] = None,
     ) -> MarginsResult:
         """Arbitrary differentiable function of scenario predictions.
 
@@ -554,36 +546,20 @@ class Margins:
             values). If non-differentiable, the engine auto-routes to
             simulation or bootstrap.
 
-        method, level : optional per-call overrides.
-
         Returns
         -------
         result : MarginsResult
         """
-        scenarios_X = []
-        for scenario in scenarios:
-            df, _ = expand_scenario(
-                scenario,
-                base_data=self._base_data,
-                aggregation_resolver=make_aggregation_resolver(
-                    self.at, self.weights,
-                ),
-                variable_metadata=self.adapter.variable_metadata(),
-            )
-            scenarios_X.append(self.adapter.design_matrix_from_df(df))
-
-        h = make_evaluate_estimand(
-            self.adapter,
-            scenarios_X=scenarios_X,
-            compose=compose,
-            phi_inv=self.phi_inv,
-        )
-        config = self._inference_config(method, level)
+        h = self._build_evaluate_estimand(scenarios, compose)
+        config = self._inference_config()
 
         labels = [s.get("label", f"scenario[{i}]") for i, s in enumerate(scenarios)]
         result_data = run_inference(
             h, self.adapter, config,
             estimand_metadata={"kind": "evaluate", "labels": labels},
+            h_factory=lambda new_adapter: self._build_evaluate_estimand(
+                scenarios, compose, adapter=new_adapter
+            ),
         )
         return self._wrap_result(result_data)
 
@@ -636,7 +612,7 @@ class Margins:
         ]
 
         beta = self.adapter.coefficients()
-        Sigma = self.adapter.covariance(self.vcov_spec)
+        Sigma = self._frozen_cov()
 
         # Build a per-row prediction estimand factory
         def h_factory(x_row):
@@ -727,15 +703,16 @@ class Margins:
                 "override Margins._base_data."
             ) from exc
 
-    def _inference_config(
-        self,
-        method: Optional[InferenceMethod],
-        level: Optional[float],
-    ) -> InferenceConfig:
-        """Build the InferenceConfig for a single call, applying overrides."""
+    def _inference_config(self) -> InferenceConfig:
+        """Build the InferenceConfig for a single call.
+
+        All inference-related settings are session-level; per-call overrides
+        are not supported by design. Switching method, level, vcov, or scale
+        requires constructing a new ``Margins`` instance.
+        """
         return InferenceConfig(
-            method=method or self.method,
-            level=level if level is not None else self.level,
+            method=self.method,
+            level=self.level,
             phi=self.phi,
             phi_inv=self.phi_inv,
             kappa_threshold=self.kappa_threshold,
@@ -745,11 +722,28 @@ class Margins:
             n_boot=self.n_boot,
             rng_seed=None,
             diagnostics=self.diagnostics,
-            cov_params=self.adapter.covariance(self.vcov_spec),
+            cov_params=self._frozen_cov(),
         )
 
+    def _frozen_cov(self) -> jnp.ndarray:
+        """Resolve Σ̂ once per call and cache on the instance.
+
+        Σ̂ is part of the session's analytical posture (vcov_spec is
+        session-level). Caching ensures every result from this session
+        carries the same Σ̂ reference even if the underlying model object
+        is later mutated or re-fit by the user.
+        """
+        if not hasattr(self, "_cov_cache"):
+            self._cov_cache = self.adapter.covariance(self.vcov_spec)
+        return self._cov_cache
+
     def _wrap_result(self, result_data: dict) -> MarginsResult:
-        """Wrap a raw result dict from the engine in a MarginsResult."""
+        """Wrap a raw result dict from the engine in a MarginsResult.
+
+        The session's resolved Σ̂ is frozen onto the result so downstream
+        composition and hypothesis tests do not re-fetch it from the
+        adapter (which could change if the underlying model is mutated).
+        """
         return MarginsResult(
             estimate=np.asarray(result_data["estimate"]),
             std_error=np.asarray(result_data["std_error"]),
@@ -764,102 +758,243 @@ class Margins:
             estimand_metadata=result_data.get("estimand_metadata", {}),
             gradient=result_data.get("gradient"),
             draws=result_data.get("draws"),
-            session=self,
+            cov_params=np.asarray(self._frozen_cov()),
+            session=weakref.ref(self),
         )
 
     def _build_prediction_estimand(
         self,
         scenario: dict,
-        compose: Optional[Callable],
-    ) -> Callable:
+        transform: Optional[Callable],
+        adapter: Optional[ModelAdapter] = None,
+    ) -> tuple[Callable, Optional[list[str]]]:
         """Construct the prediction estimand for predict() calls.
 
         Resolves the scenario into a design matrix using the session's
-        `at` setting, then wraps it in make_prediction_estimand with
-        phi_inv applied to lift onto the inference scale.
+        ``at`` setting, then wraps it in ``make_prediction_estimand`` with
+        ``phi_inv`` applied to lift onto the inference scale.
+
+        When the scenario produces multiple atoms (over-stratification, an
+        atexog grid, or both), returns a stacked vector estimand with one
+        component per (group × grid point) and the corresponding labels.
+        Returns ``(h, None)`` for the single-atom case.
         """
-        df, _ = expand_scenario(
-            scenario,
-            base_data=self._base_data,
-            aggregation_resolver=make_aggregation_resolver(
-                self.at, self.weights,
-            ),
-            variable_metadata=self.adapter.variable_metadata(),
-        )
-        X = self.adapter.design_matrix_from_df(df)
+        adapter = adapter if adapter is not None else self.adapter
+        base_data = self._get_base_data(adapter)
+        var_meta = adapter.variable_metadata()
+        resolver = make_aggregation_resolver(self.at, self.weights)
+        groups, over_keys = self._enumerate_groups(scenario, base_data, var_meta)
 
-        # If the resolved design matrix has many rows and at is "overall",
-        # we average across rows. If the design has 1 row
-        # (because at is typical/mean/etc.), we use that single row as the
-        # estimand evaluation point.
-        if self.at == "overall":
-            agg_kind = "overall"
-        else:
-            agg_kind = "none" if X.shape[0] == 1 else "overall"
+        sub_scenario = {k: v for k, v in scenario.items() if k != "over"}
+        atoms: list[tuple[Optional[str], Callable]] = []
 
-        return make_prediction_estimand(
-            self.adapter,
-            X,
-            aggregate=agg_kind,
-            weights=jnp.asarray(self.weights) if self.weights is not None else None,
-            phi_inv=self.phi_inv,
-            compose=compose,
-        )
+        for group_label, group_df in groups:
+            df, meta = expand_scenario(
+                sub_scenario, group_df, resolver, var_meta,
+            )
+            X = adapter.design_matrix_from_df(df)
+            n_grid = meta.get("n_grid_points", 1)
+            rows_per = meta.get("rows_per_grid_point", len(df))
+
+            for i in range(n_grid):
+                X_i = X[i * rows_per : (i + 1) * rows_per]
+                if self.at == "overall":
+                    agg_kind = "overall"
+                else:
+                    agg_kind = "none" if X_i.shape[0] == 1 else "overall"
+                h_atom = make_prediction_estimand(
+                    adapter, X_i,
+                    aggregate=agg_kind,
+                    weights=jnp.asarray(self.weights) if self.weights is not None else None,
+                    phi_inv=self.phi_inv,
+                    transform=transform,
+                )
+                grid_suffix = f"grid[{i}]" if n_grid > 1 else None
+                label = self._format_atom_label(group_label, over_keys, grid_suffix)
+                atoms.append((label, h_atom))
+
+        return self._finalize_atoms(atoms)
+
+    def _enumerate_groups(
+        self,
+        scenario: dict,
+        base_data,
+        variable_metadata: dict,
+    ):
+        """Resolve ``scenario['over']`` into a list of (group_label, df) pairs.
+
+        Returns a singleton ``[(None, base_data)]`` when no ``over`` is set,
+        so downstream code has a uniform shape.
+        """
+        over_spec = scenario.get("over")
+        if over_spec is None:
+            return [(None, base_data)], None
+        over_keys = [over_spec] if isinstance(over_spec, str) else list(over_spec)
+        unknown = set(over_keys) - set(variable_metadata.keys())
+        if unknown:
+            raise ValueError(
+                f"Unknown over variable(s): {sorted(unknown)}. "
+                f"Known variables: {sorted(variable_metadata.keys())}."
+            )
+        groups = [(g, gdf) for g, gdf in base_data.groupby(over_keys, sort=True)]
+        if not groups:
+            raise ValueError(
+                f"over={over_keys!r} produced no groups; base data may be empty."
+            )
+        return groups, over_keys
+
+    @staticmethod
+    def _format_atom_label(
+        group_label,
+        over_keys: Optional[list[str]],
+        suffix: Optional[str],
+    ) -> Optional[str]:
+        """Build a stable label for one atom of a stacked estimand.
+
+        Combines an over-group identifier (``"region=west"``) with an
+        optional suffix (a grid index for atexog grids, a variable name
+        for multi-variable slopes). Returns ``None`` when the atom is
+        unique and unlabeled.
+        """
+        parts: list[str] = []
+        if over_keys is not None:
+            gl = group_label if isinstance(group_label, tuple) else (group_label,)
+            parts.extend(f"{k}={v}" for k, v in zip(over_keys, gl))
+        if suffix is not None:
+            parts.append(suffix)
+        return ", ".join(parts) if parts else None
+
+    @staticmethod
+    def _finalize_atoms(
+        atoms: list[tuple[Optional[str], Callable]],
+    ) -> tuple[Callable, Optional[list[str]]]:
+        """Reduce a list of (label, h_atom) pairs to (h, labels).
+
+        Single atom: return its h directly with no labels. Multiple atoms:
+        stack into a vector estimand and return the labels list.
+        """
+        if len(atoms) == 1:
+            return atoms[0][1], None
+        individual_h = [h for _, h in atoms]
+        labels = [lab for lab, _ in atoms]
+        def h_vector(beta):
+            return jnp.stack([hi(beta) for hi in individual_h])
+        return h_vector, labels
+
+    def _get_base_data(self, adapter: Optional[ModelAdapter] = None):
+        """Get base data from an adapter, falling back to the session's."""
+        adapter = adapter if adapter is not None else self.adapter
+        try:
+            return adapter.training_data
+        except NotImplementedError:
+            return self._base_data
 
     def _build_slope_estimand(
         self,
         scenario: dict,
         var_list: list[str],
-        compose: Optional[Callable],
-    ) -> Callable:
+        transform: Optional[Callable],
+        adapter: Optional[ModelAdapter] = None,
+    ) -> tuple[Callable, Optional[list[str]]]:
         """Construct the slope estimand for dydx() calls.
 
-        For multiple variables, returns a vector-valued estimand stacking
-        the slopes (with joint inference). For a single variable, returns
-        scalar.
+        Produces one atom per (over-group × variable). With a single
+        variable and no ``over``, returns a scalar estimand. Otherwise
+        returns a stacked vector estimand with one component per atom.
         """
-        df, _ = expand_scenario(
-            scenario,
-            base_data=self._base_data,
-            aggregation_resolver=make_aggregation_resolver(
-                self.at, self.weights,
-            ),
-            variable_metadata=self.adapter.variable_metadata(),
-        )
-        X = self.adapter.design_matrix_from_df(df)
+        adapter = adapter if adapter is not None else self.adapter
+        base_data = self._get_base_data(adapter)
+        var_meta = adapter.variable_metadata()
+        resolver = make_aggregation_resolver(self.at, self.weights)
+        groups, over_keys = self._enumerate_groups(scenario, base_data, var_meta)
 
-        if self.at == "overall":
-            agg_kind = "overall"
-        else:
-            agg_kind = "none" if X.shape[0] == 1 else "overall"
+        var_indices = [adapter.column_index_of_variable(v) for v in var_list]
+        sub_scenario = {k: v for k, v in scenario.items() if k != "over"}
+        atoms: list[tuple[Optional[str], Callable]] = []
 
-        # Determine column indices for each variable; the adapter knows how
-        # variable names map to design matrix columns.
-        var_indices = [self.adapter.column_index_of_variable(v) for v in var_list]
-
-        if len(var_list) == 1:
-            return make_slope_estimand(
-                self.adapter, X, var_index=var_indices[0],
-                aggregate=agg_kind,
-                weights=jnp.asarray(self.weights) if self.weights is not None else None,
-                phi_inv=self.phi_inv,
-                compose=compose,
+        for group_label, group_df in groups:
+            df, _ = expand_scenario(
+                sub_scenario, group_df, resolver, var_meta,
             )
-        else:
-            # Vector-valued: stack per-variable slope estimands
-            individual_h = [
-                make_slope_estimand(
-                    self.adapter, X, var_index=idx,
+            X = adapter.design_matrix_from_df(df)
+            if self.at == "overall":
+                agg_kind = "overall"
+            else:
+                agg_kind = "none" if X.shape[0] == 1 else "overall"
+
+            for var_name, var_idx in zip(var_list, var_indices):
+                h_atom = make_slope_estimand(
+                    adapter, X, var_index=var_idx,
                     aggregate=agg_kind,
                     weights=jnp.asarray(self.weights) if self.weights is not None else None,
                     phi_inv=self.phi_inv,
-                    compose=compose,
+                    transform=transform,
+                    backend=self.gradient_backend,
+                    fd_step=self.fd_step,
                 )
-                for idx in var_indices
-            ]
-            def h_stacked(beta):
-                return jnp.stack([h_i(beta) for h_i in individual_h])
-            return h_stacked
+                var_suffix = var_name if len(var_list) > 1 else None
+                label = self._format_atom_label(group_label, over_keys, var_suffix)
+                atoms.append((label, h_atom))
+
+        return self._finalize_atoms(atoms)
+
+    def _build_contrast_estimand(
+        self,
+        scenarios: list[dict],
+        weights_arg,
+        adapter: Optional[ModelAdapter] = None,
+    ) -> Callable:
+        """Construct a linear combination estimand for contrasts() calls."""
+        adapter = adapter if adapter is not None else self.adapter
+        base_data = self._get_base_data(adapter)
+
+        scenarios_X = []
+        for scenario in scenarios:
+            df, _ = expand_scenario(
+                scenario,
+                base_data=base_data,
+                aggregation_resolver=make_aggregation_resolver(
+                    self.at, self.weights,
+                ),
+                variable_metadata=adapter.variable_metadata(),
+            )
+            scenarios_X.append(adapter.design_matrix_from_df(df))
+
+        return make_linear_combination_estimand(
+            adapter,
+            scenarios_X=scenarios_X,
+            weights=weights_arg,
+            phi_inv=self.phi_inv,
+        )
+
+    def _build_evaluate_estimand(
+        self,
+        scenarios: list[dict],
+        compose: Callable,
+        adapter: Optional[ModelAdapter] = None,
+    ) -> Callable:
+        """Construct an arbitrary composition estimand for evaluate() calls."""
+        adapter = adapter if adapter is not None else self.adapter
+        base_data = self._get_base_data(adapter)
+
+        scenarios_X = []
+        for scenario in scenarios:
+            df, _ = expand_scenario(
+                scenario,
+                base_data=base_data,
+                aggregation_resolver=make_aggregation_resolver(
+                    self.at, self.weights,
+                ),
+                variable_metadata=adapter.variable_metadata(),
+            )
+            scenarios_X.append(adapter.design_matrix_from_df(df))
+
+        return make_evaluate_estimand(
+            adapter,
+            scenarios_X=scenarios_X,
+            compose=compose,
+            phi_inv=self.phi_inv,
+        )
 
 
 # ---------------------------------------------------------------------------

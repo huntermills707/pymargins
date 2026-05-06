@@ -23,7 +23,7 @@ Design questions handled here
   level, with the group variable substituted in.
 - Formula expansion: factor encoding, interactions, splines must match the
   model's design exactly. Adapters provide framework-specific implementations
-  via design_matrix().
+  via design_matrix_from_df().
 """
 
 from __future__ import annotations

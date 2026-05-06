@@ -14,6 +14,8 @@ method, how to handle non-differentiable estimands.
 from __future__ import annotations
 from typing import Callable, Optional, Literal, Any
 from dataclasses import dataclass
+import warnings
+
 import jax.numpy as jnp
 import numpy as np
 
@@ -106,6 +108,7 @@ def run_inference(
     config: InferenceConfig,
     *,
     estimand_metadata: Optional[dict] = None,
+    h_factory: Optional[Callable[[ModelAdapter], Callable]] = None,
 ) -> dict:
     """Compute estimate, SE, CI, and diagnostics for an estimand.
 
@@ -150,11 +153,20 @@ def run_inference(
         if not is_jax_differentiable(h, beta):
             if "simulation" in supported:
                 # Auto-route to simulation with a warning marker in the result
+                warnings.warn(
+                    "Estimand is not JAX-differentiable; falling back to simulation.",
+                    UserWarning, stacklevel=2,
+                )
                 return _run_simulation(h, adapter, config, estimand_metadata,
                                        fallback_reason="non_differentiable")
             elif "bootstrap" in supported:
+                warnings.warn(
+                    "Estimand is not JAX-differentiable; falling back to bootstrap.",
+                    UserWarning, stacklevel=2,
+                )
                 return _run_bootstrap(h, adapter, config, estimand_metadata,
-                                      fallback_reason="non_differentiable")
+                                      fallback_reason="non_differentiable",
+                                      h_factory=h_factory)
             else:
                 raise ValueError(
                     "Estimand is not JAX-differentiable, and no fallback "
@@ -166,7 +178,7 @@ def run_inference(
         return _run_simulation(h, adapter, config, estimand_metadata)
 
     elif method == "bootstrap":
-        return _run_bootstrap(h, adapter, config, estimand_metadata)
+        return _run_bootstrap(h, adapter, config, estimand_metadata, h_factory=h_factory)
 
     else:
         raise ValueError(f"Unknown method: {method!r}")
@@ -199,6 +211,11 @@ def _run_delta(h, adapter, config, estimand_metadata):
         max_k = float(k) if jnp.ndim(k) == 0 else float(jnp.max(jnp.asarray(k)))
         if max_k > config.kappa_threshold:
             # Auto-fallback to simulation
+            warnings.warn(
+                f"Delta-method curvature κ={max_k:.3f} exceeds threshold "
+                f"({config.kappa_threshold}); falling back to simulation.",
+                UserWarning, stacklevel=2,
+            )
             sim_result = _run_simulation(
                 h, adapter, config, estimand_metadata,
                 fallback_reason=f"kappa={max_k:.3f}>threshold={config.kappa_threshold}",
@@ -263,27 +280,20 @@ def _run_simulation(h, adapter, config, estimand_metadata, *, fallback_reason=No
     draws_beta = rng.multivariate_normal(beta_np, Sigma_np, size=config.n_sim)
 
     estimate = h(beta)
-    h_draws = np.array([np.asarray(h(jnp.asarray(b))) for b in draws_beta])
+    h_draws_inf = np.array([np.asarray(h(jnp.asarray(b))) for b in draws_beta])
+    se = np.std(h_draws_inf, axis=0, ddof=1)
 
     # Apply phi to draws and estimate for reporting
     if config.phi is not None:
-        h_draws = np.asarray(config.phi(jnp.asarray(h_draws)))
+        h_draws = np.asarray(config.phi(jnp.asarray(h_draws_inf)))
         estimate_report = np.asarray(config.phi(estimate))
     else:
+        h_draws = h_draws_inf
         estimate_report = np.asarray(estimate)
 
     alpha = (1.0 - config.level) / 2.0
     lower = np.quantile(h_draws, alpha, axis=0)
     upper = np.quantile(h_draws, 1.0 - alpha, axis=0)
-
-    # SE on inference scale (before phi). Standard practice: report the SE
-    # of the inference-scale draws, not the report-scale draws.
-    if config.phi is not None:
-        # Recompute draws on inference scale for SE
-        h_draws_inf = np.array([np.asarray(h(jnp.asarray(b))) for b in draws_beta])
-        se = np.std(h_draws_inf, axis=0, ddof=1)
-    else:
-        se = np.std(h_draws, axis=0, ddof=1)
 
     return {
         "estimate": estimate_report,
@@ -306,36 +316,83 @@ def _run_simulation(h, adapter, config, estimand_metadata, *, fallback_reason=No
 # Bootstrap path
 # ---------------------------------------------------------------------------
 
-def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=None):
+def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=None, h_factory=None):
     """Nonparametric bootstrap: refit the model on resampled data, recompute
     h, take quantiles.
 
-    This path requires adapter.refit() to be implemented. The estimand
-    function h is typically rebuilt on each refit to use the new adapter's
-    predict. Bootstrap is the heaviest inference method; expect O(n_boot)
-    refits, which can take minutes for nontrivial models.
+    This path requires ``adapter.refit()`` and ``adapter.training_data`` to
+    be implemented. On each bootstrap replicate the training data is
+    resampled with replacement, the model is refit, the estimand is rebuilt
+    via ``h_factory(new_adapter)``, and the estimand is evaluated at the new
+    coefficients.
 
-    Implementation note for implementers: this function is a sketch. A
-    complete implementation needs:
-      - Data extraction from the adapter (training data and any indices for
-        cluster bootstrap)
-      - Resampling strategy (i.i.d., block, cluster) — currently i.i.d. only
-      - Estimand reconstruction on each refit (since h depends on the
-        adapter's predict, which changes between refits)
-      - Parallelization across replicates (joblib or similar)
-
-    The skeleton below illustrates the shape but does not implement the
-    estimand-rebuilding logic. Concrete implementations of bootstrap belong
-    in the engine that has access to the original estimand-construction
-    pipeline.
+    Bootstrap is the heaviest inference method; expect O(n_boot) refits,
+    which can take minutes for nontrivial models.
     """
-    raise NotImplementedError(
-        "Bootstrap path requires session-level orchestration to rebuild the "
-        "estimand against each refit. This function is a placeholder; "
-        "the actual implementation lives in Margins._run_bootstrap, which "
-        "has access to the scenario specification and can recompute h "
-        "against each resampled adapter."
-    )
+    if h_factory is None:
+        raise ValueError(
+            "Bootstrap inference requires h_factory. "
+            "The estimand must be rebuilt for each resampled model."
+        )
+    # Extract training data
+    try:
+        data = adapter.training_data
+    except NotImplementedError as exc:
+        raise NotImplementedError(
+            "Bootstrap inference requires the adapter to expose training_data. "
+            f"{type(adapter).__name__} does not implement it."
+        ) from exc
+
+    data = np.asarray(data) if not hasattr(data, "iloc") else data
+    n_obs = len(data)
+
+    rng = np.random.default_rng(config.rng_seed)
+    h_draws_inf = []
+
+    for b in range(config.n_boot):
+        idx = rng.integers(0, n_obs, size=n_obs)
+        if hasattr(data, "iloc"):
+            resampled = data.iloc[idx]
+        else:
+            resampled = data[idx]
+
+        new_adapter = adapter.refit(resampled)
+        h_b = h_factory(new_adapter)
+        h_draws_inf.append(np.asarray(h_b(new_adapter.coefficients())))
+
+    h_draws_inf = np.stack(h_draws_inf, axis=0)  # shape (n_boot, ...)
+
+    estimate = h(adapter.coefficients())
+
+    # Apply phi to draws and estimate for reporting
+    if config.phi is not None:
+        h_draws = np.asarray(config.phi(jnp.asarray(h_draws_inf)))
+        estimate_report = np.asarray(config.phi(estimate))
+    else:
+        h_draws = h_draws_inf
+        estimate_report = np.asarray(estimate)
+
+    alpha = (1.0 - config.level) / 2.0
+    lower = np.quantile(h_draws, alpha, axis=0)
+    upper = np.quantile(h_draws, 1.0 - alpha, axis=0)
+
+    se = np.std(h_draws_inf, axis=0, ddof=1)
+
+    return {
+        "estimate": estimate_report,
+        "std_error": se,
+        "conf_int_lower": lower,
+        "conf_int_upper": upper,
+        "method": "bootstrap",
+        "level": config.level,
+        "kappa": None,
+        "delta_sim_disagreement": None,
+        "fallback_triggered": fallback_reason is not None,
+        "fallback_reason": fallback_reason,
+        "gradient": None,
+        "draws": h_draws,
+        "estimand_metadata": estimand_metadata or {},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -394,21 +451,29 @@ def run_test(
             alternative=alternative,
         )
     elif draws is not None:
-        # Empirical p-value from draws
+        # Empirical p-value from draws: compare observed estimate to the
+        # simulated sampling distribution.
+        estimate = np.asarray(estimate)
+        null_value = np.asarray(null_value)
+        draws = np.asarray(draws)
         if alternative == "two-sided":
-            two_tail = 2.0 * np.minimum(
-                np.mean(draws <= null_value, axis=0),
-                np.mean(draws >= null_value, axis=0),
-            )
-            p = np.minimum(two_tail, 1.0)
+            # Two-sided p-value via 2*min(tail probabilities).
+            # Correct for asymmetric simulation distributions.
+            p_left = np.mean(draws <= null_value, axis=0)
+            p_right = np.mean(draws >= null_value, axis=0)
+            p = np.clip(2.0 * np.minimum(p_left, p_right), a_min=None, a_max=1.0)
         elif alternative == "greater":
+            # H1: effect > null. Under H0, draws are centered at estimate;
+            # the null lies to the left. Small p when null is in the lower
+            # tail of the simulated distribution.
             p = np.mean(draws <= null_value, axis=0)
         elif alternative == "less":
+            # H1: effect < null. Small p when null is in the upper tail.
             p = np.mean(draws >= null_value, axis=0)
         else:
             raise ValueError(f"Unknown alternative: {alternative!r}")
-        # No statistic in the Wald sense; return effect-size-like value
-        statistic = np.mean(draws, axis=0) - null_value
+        # Return the observed estimate minus null as the effect-size statistic
+        statistic = estimate - null_value
         return statistic, np.asarray(p)
     else:
         raise ValueError(

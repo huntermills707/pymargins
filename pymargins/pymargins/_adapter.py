@@ -14,7 +14,7 @@ Adapter responsibilities
 3. Provide a JAX-compatible predict function (`predict`) — either via JAX
    reimplementation, custom JVP using the framework's analytical derivative,
    or custom JVP wrapping a non-differentiable predict via FD
-4. Build design matrices from scenario dicts (`design`)
+4. Build design matrices from DataFrames (`design_matrix_from_df`)
 5. Expose variable type metadata for at=typical averaging (`variable_metadata`)
 6. Declare what inference methods this model class supports
    (`supported_inference_methods`)
@@ -113,14 +113,15 @@ class ModelAdapter:
       - covariance()
       - predict()
       - design_matrix_from_df()
+      - column_index_of_variable()
       - variable_metadata()
+      - training_data (property)
       - supported_inference_methods (property)
 
     Subclasses MAY implement:
       - attach() to validate session compatibility
       - refit() if bootstrap inference should be supported
       - native_predict() if direct framework calls are needed elsewhere
-      - training_data if diagnose() and scenario expansion should work
     """
 
     # -----------------------------------------------------------------------
@@ -316,6 +317,29 @@ class ModelAdapter:
             "Margins._base_data."
         )
 
+    def column_index_of_variable(self, name: str) -> int:
+        """Return the design-matrix column index corresponding to a variable.
+
+        Used by ``dydx()`` to compute slopes ∂μ/∂x_j. Only meaningful for
+        continuous variables that map to a single design column. For
+        categorical or factor-expanded variables this should raise
+        ``ValueError`` — slope is undefined for such variables, and
+        ``Margins.dydx`` validates ``var_type`` before calling this.
+
+        Parameters
+        ----------
+        name : str
+            Variable name as it appears in ``variable_metadata()`` and in
+            user-facing scenario specs.
+
+        Returns
+        -------
+        index : int
+            Zero-based column index in the design matrix produced by
+            ``design_matrix_from_df``.
+        """
+        raise NotImplementedError
+
     def variable_metadata(self) -> dict[str, VariableInfo]:
         """Return per-variable metadata used by averaging and validation.
 
@@ -379,6 +403,27 @@ class GLMAdapter(ModelAdapter):
     Both produce identical numerical results; choose based on the discussion
     in the design docs.
     """
+
+    def attach(self, session: "Margins") -> None:
+        # Validate that phi and phi_inv are approximate inverses.
+        # This catches the most common session-configuration error
+        # (mismatched scale transforms) early, before any inference runs.
+        phi = getattr(session, "phi", None)
+        phi_inv = getattr(session, "phi_inv", None)
+        if phi is not None and phi_inv is not None:
+            test_val = jnp.array(0.5)
+            try:
+                recon = float(phi(phi_inv(test_val)))
+                if not np.isclose(recon, float(test_val), rtol=1e-4):
+                    raise ValueError(
+                        f"phi and phi_inv do not appear to be inverses: "
+                        f"phi(phi_inv({float(test_val)})) = {recon}"
+                    )
+            except Exception as exc:
+                raise ValueError(
+                    f"phi/phi_inv validation failed at test point {float(test_val)}: {exc}"
+                ) from exc
+        super().attach(session)
 
     @property
     def supports_jax_autodiff(self) -> bool:

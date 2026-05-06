@@ -6,9 +6,8 @@ the inference engine differentiates and evaluates. This module builds these
 functions from user-facing arguments (variables, scenarios, contrasts, etc.).
 
 This layer is internal — users do not construct estimand functions directly.
-The Margins entry-point methods (predict, dydx, contrasts, linear_combination,
-evaluate) call into this module to assemble the appropriate h(β) for the
-inference engine.
+The Margins entry-point methods (predict, dydx, contrasts, evaluate) call
+into this module to assemble the appropriate h(β) for the inference engine.
 
 Design
 ------
@@ -41,12 +40,12 @@ def make_prediction_estimand(
     weights: Optional[jnp.ndarray] = None,
     phi_inv: Optional[Callable] = None,
     offset: Optional[jnp.ndarray] = None,
-    compose: Optional[Callable] = None,
+    transform: Optional[Callable] = None,
 ) -> Callable[[jnp.ndarray], jnp.ndarray]:
     """Construct h(β) for an adjusted prediction.
 
     The returned function evaluates predictions at the design rows X,
-    aggregates per the rule, optionally applies a user composition function,
+    optionally applies a per-row user transform, aggregates per the rule,
     and lifts to the inference scale via phi_inv.
 
     Parameters
@@ -74,16 +73,16 @@ def make_prediction_estimand(
 
     phi_inv : callable, optional
         Forward transform from reporting scale to inference scale. Applied
-        after compose and averaging. None for identity scale.
+        after transform and averaging. None for identity scale.
 
     offset : jax array of shape (n_rows,), optional
         Offset for the prediction, passed to adapter.predict.
 
-    compose : callable, optional
-        User-defined function of predictions. Receives the per-row
-        prediction vector (before averaging) and returns either a scalar
-        or vector. If provided, the compose output is what gets aggregated
-        (or returned directly if aggregate="none").
+    transform : callable, optional
+        Per-row mapping applied to predictions before aggregation. Receives
+        the per-row prediction array ``μ`` and returns an array of matching
+        shape (or broadcastable). Distinct from the cross-scenario
+        composition used by ``make_evaluate_estimand``.
 
     Returns
     -------
@@ -92,17 +91,23 @@ def make_prediction_estimand(
     """
     def h(beta):
         mu = adapter.predict(beta, X, offset=offset)
-        if compose is not None:
-            mu = compose(mu)
+        if transform is not None:
+            mu = transform(mu)
         if aggregate == "overall":
-            value = jnp.mean(mu)
+            # For multi-output, average over rows (axis=0), keeping outputs
+            value = jnp.mean(mu, axis=0) if mu.ndim > 1 else jnp.mean(mu)
         elif aggregate == "weighted":
             if weights is None:
-                value = jnp.mean(mu)
+                value = jnp.mean(mu, axis=0) if mu.ndim > 1 else jnp.mean(mu)
             else:
-                value = jnp.sum(weights * mu) / jnp.sum(weights)
+                if mu.ndim > 1:
+                    # weights (n_rows,) broadcast against mu (n_rows, n_outputs)
+                    value = jnp.sum(weights[:, None] * mu, axis=0) / jnp.sum(weights)
+                else:
+                    value = jnp.sum(weights * mu) / jnp.sum(weights)
         elif aggregate == "none":
-            value = mu
+            # Squeeze singleton row dimension for scalar estimands
+            value = mu[0] if mu.shape[0] == 1 else mu
         else:
             raise ValueError(f"Unknown aggregate rule: {aggregate!r}")
         if phi_inv is not None:
@@ -125,11 +130,13 @@ def make_slope_estimand(
     weights: Optional[jnp.ndarray] = None,
     phi_inv: Optional[Callable] = None,
     offset: Optional[jnp.ndarray] = None,
-    compose: Optional[Callable] = None,
+    transform: Optional[Callable] = None,
+    backend: str = "autodiff",
+    fd_step: float = 1e-6,
 ) -> Callable[[jnp.ndarray], jnp.ndarray]:
     """Construct h(β) for a slope (marginal effect of a continuous variable).
 
-    Computes ∂μ/∂x_j per row via JAX autodiff over the design matrix
+    Computes ∂μ/∂x_j per row via autodiff (or FD) over the design matrix
     direction, aggregates per rule, applies phi_inv. The double-derivative
     structure (inner ∂/∂x for the slope, outer ∂/∂β for inference) is
     handled cleanly by JAX's nested differentiation.
@@ -154,33 +161,46 @@ def make_slope_estimand(
 
     weights, phi_inv, offset : as in make_prediction_estimand.
 
-    compose : callable, optional
-        Applied to per-row slopes before averaging.
+    transform : callable, optional
+        Per-row mapping applied to slopes before averaging.
+
+    backend : str, default "autodiff"
+        Gradient backend for the inner ∂/∂x derivative. Passed to
+        directional_derivative. Should match the session's gradient_backend.
+
+    fd_step : float, default 1e-6
+        FD step for the inner derivative when backend is "fd" or "wrapped_fd".
 
     Returns
     -------
     h : callable (beta) -> scalar or vector
     """
-    import jax
+    from ._gradients import directional_derivative
 
     def slope_at_row(beta, x_row):
-        # Differentiate prediction at this single row with respect to x[var_index]
+        # Directional derivative of prediction at this row along x[var_index]
         def predict_at_x(x):
             return adapter.predict(beta, x[None, :], offset=offset)[0]
-        full_grad = jax.grad(predict_at_x)(x_row)
-        return full_grad[var_index]
+        direction = jnp.zeros_like(x_row).at[var_index].set(1.0)
+        return directional_derivative(
+            predict_at_x, x_row, direction,
+            backend=backend, fd_step=fd_step,
+        )
 
     def h(beta):
         slopes = jax.vmap(slope_at_row, in_axes=(None, 0))(beta, X)
-        if compose is not None:
-            slopes = compose(slopes)
+        if transform is not None:
+            slopes = transform(slopes)
         if aggregate == "overall":
-            value = jnp.mean(slopes)
+            value = jnp.mean(slopes, axis=0) if slopes.ndim > 1 else jnp.mean(slopes)
         elif aggregate == "weighted":
             if weights is None:
-                value = jnp.mean(slopes)
+                value = jnp.mean(slopes, axis=0) if slopes.ndim > 1 else jnp.mean(slopes)
             else:
-                value = jnp.sum(weights * slopes) / jnp.sum(weights)
+                if slopes.ndim > 1:
+                    value = jnp.sum(weights[:, None] * slopes, axis=0) / jnp.sum(weights)
+                else:
+                    value = jnp.sum(weights * slopes) / jnp.sum(weights)
         elif aggregate == "none":
             value = slopes
         else:
@@ -400,14 +420,32 @@ def is_jax_differentiable(h: Callable, beta: jnp.ndarray) -> bool:
         True if jax.grad(h)(beta) succeeds.
     """
     import jax
+    out = h(beta)
+    # Narrow to JAX tracer/concretization errors and TypeError.
+    # Avoid catching bare Exception so genuine programming errors in
+    # estimand factories propagate rather than being silently treated as
+    # non-differentiable.
+    jax_tracer_errors: tuple = (TypeError,)
+    if hasattr(jax, "errors"):
+        tracer_errs = []
+        for name in (
+            "TracerIntegerConversionError",
+            "TracerArrayConversionError",
+            "TracerTupleConversionError",
+            "ConcretizationTypeError",
+            "UnexpectedTracerError",
+        ):
+            if hasattr(jax.errors, name):
+                tracer_errs.append(getattr(jax.errors, name))
+        if tracer_errs:
+            jax_tracer_errors = tuple(tracer_errs)
     try:
-        out = h(beta)
         if jnp.ndim(out) == 0:
             jax.grad(h)(beta)
         else:
             jax.jacobian(h)(beta)
         return True
-    except Exception:
+    except jax_tracer_errors:
         return False
 
 

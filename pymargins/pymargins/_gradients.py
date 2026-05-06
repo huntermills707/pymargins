@@ -275,8 +275,8 @@ def make_predict_with_fd_jvp(
     -------
     predict_wrapped : callable (beta_jax, X) -> array_jax
         JAX-compatible wrapper. jax.grad, jax.hessian, and jax.jvp all work
-        through this function. The X argument is passed through unchanged
-        (it is not differentiated against; only β is).
+        through this function. Both β and X can be differentiated against
+        (the latter is needed for dydx slopes).
     """
     @jax.custom_jvp
     def predict_wrapped(beta, X):
@@ -285,14 +285,29 @@ def make_predict_with_fd_jvp(
     @predict_wrapped.defjvp
     def predict_wrapped_jvp(primals, tangents):
         beta, X = primals
-        beta_dot, _ = tangents
+        beta_dot, X_dot = tangents
         beta_np = np.asarray(beta)
-        beta_dot_np = np.asarray(beta_dot)
 
-        plus = predict_native(beta_np + fd_step * beta_dot_np, X)
-        minus = predict_native(beta_np - fd_step * beta_dot_np, X)
-        deriv = (plus - minus) / (2 * fd_step)
+        # Beta directional derivative
+        deriv_beta = 0.0
+        if beta_dot is not None:
+            beta_dot_np = np.asarray(beta_dot)
+            if beta_dot_np.size > 0 and np.any(beta_dot_np != 0):
+                plus = predict_native(beta_np + fd_step * beta_dot_np, X)
+                minus = predict_native(beta_np - fd_step * beta_dot_np, X)
+                deriv_beta = (plus - minus) / (2 * fd_step)
 
+        # X directional derivative
+        deriv_X = 0.0
+        if X_dot is not None:
+            X_dot_np = np.asarray(X_dot)
+            if X_dot_np.size > 0 and np.any(X_dot_np != 0):
+                X_np = np.asarray(X)
+                plus = predict_native(beta_np, X_np + fd_step * X_dot_np)
+                minus = predict_native(beta_np, X_np - fd_step * X_dot_np)
+                deriv_X = (plus - minus) / (2 * fd_step)
+
+        deriv = deriv_beta + deriv_X
         return predict_wrapped(beta, X), jnp.asarray(deriv)
 
     return predict_wrapped
@@ -341,7 +356,7 @@ def make_glm_jvp_wrapper(
     @predict_wrapped.defjvp
     def predict_wrapped_jvp(primals, tangents):
         beta, X, offset = primals
-        beta_dot, X_dot, _ = tangents
+        beta_dot, X_dot, offset_dot = tangents
         beta_np = np.asarray(beta)
         beta_dot_np = np.asarray(beta_dot)
         X_np = np.asarray(X)
@@ -354,11 +369,13 @@ def make_glm_jvp_wrapper(
         mu = link.inverse(eta)
 
         # Tangent: dμ/dt = (dg⁻¹/dη) · (dη/dt)
-        # dη/dt = X · β̇ + Ẋ · β  (handles both differentiating directions)
+        # dη/dt = X · β̇ + Ẋ · β + offseṫ  (handles all differentiating directions)
         eta_dot = X_np @ beta_dot_np
         if X_dot is not None and not isinstance(X_dot, type(None)):
             X_dot_np = np.asarray(X_dot)
             eta_dot = eta_dot + X_dot_np @ beta_np
+        if offset_dot is not None and not isinstance(offset_dot, type(None)):
+            eta_dot = eta_dot + np.asarray(offset_dot)
 
         mu_dot = link.inverse_deriv(eta) * eta_dot
 

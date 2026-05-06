@@ -16,8 +16,16 @@ different sessions cannot be composed without explicit scale conversion.
 from __future__ import annotations
 from typing import Optional, Union, Literal, Any
 from dataclasses import dataclass, field
+import weakref
+import warnings
+
+import jax.numpy as jnp
 import numpy as np
 import pandas as pd
+from scipy import stats
+
+from ._inference import run_test
+from ._delta import delta_confint_from_se, joint_wald_test
 
 
 # ---------------------------------------------------------------------------
@@ -209,9 +217,17 @@ class MarginsResult:
         simulation/bootstrap results; used for inter-call composition with
         other simulation/bootstrap results.
 
+    cov_params : array, optional
+        Σ̂ frozen at the time the result was produced. Used by hypothesis
+        tests and inter-call composition so that downstream operations are
+        not affected by later mutation or re-fitting of the model wrapped
+        by ``session``.
+
     session : Margins
         Reference to the originating session. Used to validate composability
-        and to retrieve Σ̂ for joint inference.
+        (same-session check). Σ̂ is read from ``cov_params`` rather than
+        re-fetched from ``session.adapter`` to make results robust to model
+        mutation and to make ``materialize()`` semantically clean.
     """
     estimate: np.ndarray
     std_error: np.ndarray
@@ -227,18 +243,27 @@ class MarginsResult:
     estimand_metadata: dict = field(default_factory=dict)
     gradient: Optional[np.ndarray] = None
     draws: Optional[np.ndarray] = None
+    cov_params: Optional[np.ndarray] = None
     session: Optional[Any] = None
 
     # -----------------------------------------------------------------------
     # Reporting
     # -----------------------------------------------------------------------
 
+    def _session_obj(self):
+        """Dereference the session, handling weak references."""
+        if self.session is None:
+            return None
+        if isinstance(self.session, weakref.ref):
+            return self.session()
+        return self.session
+
     def summary(self) -> str:
         """Human-readable summary including diagnostics."""
         lines = ["MarginsResult"]
         lines.append(f"  Method: {self.method}, level={self.level}")
         if self.fallback_triggered:
-            lines.append(f"  Fallback: {self.fallback_reason}")
+            lines.append(f"  WARNING — Fallback triggered: {self.fallback_reason}")
         est = np.atleast_1d(self.estimate)
         se = np.atleast_1d(self.std_error)
         lo = np.atleast_1d(self.conf_int_lower)
@@ -252,6 +277,12 @@ class MarginsResult:
                 f"  {label}: estimate={est[i]:.4f}  "
                 f"SE={se[i]:.4f}  "
                 f"CI=[{lo[i]:.4f}, {hi[i]:.4f}]"
+            )
+        # Mention scale asymmetry when inference and reporting scales differ
+        sess = self._session_obj()
+        if sess is not None and getattr(sess, "phi", None) is not None:
+            lines.append(
+                "  Note: SE is on the inference scale; estimate and CI are on the reporting scale."
             )
         if self.kappa is not None:
             kappa_str = (f"{float(self.kappa):.3f}"
@@ -277,9 +308,12 @@ class MarginsResult:
 
         data = {
             "estimate": est,
+            "estimate_scale": np.repeat("reporting", est.size),
             "std_error": se,
+            "se_scale": np.repeat("inference", se.size),
             "ci_lower": lo,
             "ci_upper": hi,
+            "ci_scale": np.repeat("reporting", est.size),
         }
         if self.kappa is not None:
             kvals = np.atleast_1d(self.kappa)
@@ -312,12 +346,11 @@ class MarginsResult:
         if level is None or level == self.level:
             return self.conf_int_lower, self.conf_int_upper
 
-        if self.gradient is not None and self.session is not None:
+        if self.gradient is not None and self._session_obj() is not None:
             # Recompute via delta
-            from ._delta import delta_confint_from_se
-            phi = getattr(self.session, "phi", None)
+            phi = getattr(self._session_obj(), "phi", None)
             # Convert reporting-scale estimate back to inference scale if needed
-            phi_inv = getattr(self.session, "phi_inv", None)
+            phi_inv = getattr(self._session_obj(), "phi_inv", None)
             est_inf = phi_inv(self.estimate) if phi_inv else self.estimate
             lower, upper = delta_confint_from_se(
                 est_inf, self.std_error, level=level, phi=phi,
@@ -342,6 +375,7 @@ class MarginsResult:
         value: float = 0.0,
         kind: str = "wald",
         alternative: Literal["two-sided", "greater", "less"] = "two-sided",
+        null_scale: Literal["reporting", "inference"] = "reporting",
     ) -> TestResult:
         """Test H₀: estimand = value (per-component).
 
@@ -351,37 +385,60 @@ class MarginsResult:
         Parameters
         ----------
         value : float, default 0.0
-            Hypothesized value. Specified on the reporting scale; converted
-            to inference scale internally via phi_inv if applicable.
+            Hypothesized value. By default interpreted on the reporting
+            scale (what ``estimate`` is reported on, after ``phi``). For
+            common nulls under non-identity scales, this is what users
+            typically want — under ``log_scale`` the natural "no effect"
+            null is RR=1, written ``value=1.0``; the test internally
+            converts via ``phi_inv`` to the inference-scale null log(1)=0.
 
         kind : str, default "wald"
             Test type.
 
         alternative : str
 
+        null_scale : {"reporting", "inference"}, default "reporting"
+            Which scale ``value`` is supplied on.
+              "reporting"  : interpret on the reporting scale (after ``phi``);
+                             the test applies ``phi_inv`` to obtain the
+                             inference-scale null. Use ``value=1.0`` for the
+                             natural null under ``log_scale``, ``value=0.5``
+                             under ``logit_scale`` (when phi=expit), etc.
+              "inference"  : interpret directly on the inference scale; no
+                             transformation is applied. Use ``value=0.0``
+                             for the natural null on any session whose
+                             inference scale represents "no effect" at zero
+                             (log, logit, fisher_z, identity).
+
+            For identity-scale sessions (``phi=None``) the two are
+            equivalent.
+
         Returns
         -------
         result : TestResult
         """
-        from ._inference import run_test
+        phi_inv = getattr(self._session_obj(), "phi_inv", None) if self._session_obj() else None
 
-        # Convert null value to inference scale
-        phi_inv = getattr(self.session, "phi_inv", None) if self.session else None
-        null_inf = phi_inv(value) if phi_inv else value
+        if null_scale == "inference" or phi_inv is None:
+            null_inf = value
+        elif null_scale == "reporting":
+            null_inf = phi_inv(value)
+        else:
+            raise ValueError(
+                f"null_scale must be 'reporting' or 'inference', got {null_scale!r}"
+            )
 
-        # Get inference-scale estimate
-        phi_inv = getattr(self.session, "phi_inv", None) if self.session else None
+        # Get inference-scale estimate and draws
         est_inf = phi_inv(self.estimate) if phi_inv else self.estimate
+        draws_inf = phi_inv(self.draws) if phi_inv is not None and self.draws is not None else self.draws
 
-        cov = (self.session.adapter.covariance()
-               if self.session and self.gradient is not None
-               else None)
+        cov = self.cov_params if self.gradient is not None else None
 
         statistic, pvalue = run_test(
             estimate=np.asarray(est_inf),
             grad=self.gradient,
             cov_params=cov,
-            draws=self.draws,
+            draws=draws_inf,
             null_value=null_inf,
             alternative=alternative,
             method=kind,
@@ -399,6 +456,7 @@ class MarginsResult:
         self,
         value: Optional[np.ndarray] = None,
         kind: str = "wald",
+        null_scale: Literal["reporting", "inference"] = "reporting",
     ) -> TestResult:
         """Joint test H₀: all estimand components equal (vector-valued) value.
 
@@ -407,10 +465,19 @@ class MarginsResult:
         Parameters
         ----------
         value : array, optional
-            Hypothesized vector on the reporting scale. Defaults to zero
-            vector.
+            Hypothesized vector. By default interpreted on the reporting
+            scale (see ``test`` for full discussion). Defaults to a zero
+            vector, which under ``null_scale="reporting"`` is the natural
+            null only on identity scale; under log/logit/fisher_z the
+            natural "no effect" null on the reporting scale is 1, 0.5,
+            and 0 respectively. To pass an inference-scale zero directly
+            (the universal "no effect" point on the inference scale), use
+            ``null_scale="inference"``.
 
         kind : str, default "wald"
+
+        null_scale : {"reporting", "inference"}, default "reporting"
+            Which scale ``value`` is supplied on. See ``test`` for details.
 
         Returns
         -------
@@ -422,23 +489,29 @@ class MarginsResult:
                 "gradients. For simulation/bootstrap, use the empirical "
                 "joint distribution from result.draws."
             )
-        if self.session is None:
+        if self.cov_params is None:
             raise ValueError(
-                "Joint test requires a session reference. "
-                "Materialized results cannot be joint-tested."
+                "Joint test requires Σ̂ on the result; this result has no "
+                "frozen cov_params (likely materialized without it)."
             )
 
-        from ._delta import joint_wald_test
-        import jax.numpy as jnp
+        phi_inv = getattr(self._session_obj(), "phi_inv", None) if self._session_obj() else None
 
-        phi_inv = getattr(self.session, "phi_inv", None) if self.session else None
         if value is None:
+            # Default null = zero on the inference scale (the universal
+            # "no effect" point regardless of phi).
             value_inf = jnp.zeros_like(jnp.asarray(self.estimate))
+        elif null_scale == "inference" or phi_inv is None:
+            value_inf = jnp.asarray(value)
+        elif null_scale == "reporting":
+            value_inf = phi_inv(jnp.asarray(value))
         else:
-            value_inf = phi_inv(jnp.asarray(value)) if phi_inv else jnp.asarray(value)
+            raise ValueError(
+                f"null_scale must be 'reporting' or 'inference', got {null_scale!r}"
+            )
 
         est_inf = phi_inv(self.estimate) if phi_inv else self.estimate
-        cov = self.session.adapter.covariance()
+        cov = jnp.asarray(self.cov_params)
 
         chi2, p, df = joint_wald_test(
             jnp.asarray(est_inf),
@@ -462,11 +535,13 @@ class MarginsResult:
 
     def _check_compatible(self, other: "MarginsResult") -> None:
         """Verify two results came from the same session and are composable."""
-        if self.session is None or other.session is None:
+        self_sess = self._session_obj()
+        other_sess = other._session_obj()
+        if self_sess is None or other_sess is None:
             raise ValueError(
                 "Composition requires both results to carry a session reference."
             )
-        if self.session is not other.session:
+        if self_sess is not other_sess:
             raise ValueError(
                 "Cannot compose results from different Margins sessions. "
                 "Different sessions may have different inference scales and "
@@ -519,6 +594,7 @@ class MarginsResult:
             gradient=(self.gradient * scalar
                       if self.gradient is not None else None),
             draws=(self.draws * scalar if self.draws is not None else None),
+            cov_params=self.cov_params,
             session=self.session,
         )
 
@@ -584,6 +660,7 @@ class MarginsResult:
             estimand_metadata=self.estimand_metadata,
             gradient=None,
             draws=None,
+            cov_params=None,
             session=None,
         )
 
@@ -601,7 +678,7 @@ def _combine_results(
 ) -> MarginsResult:
     """Combine two results from the same session via a linear operation."""
     # Inference-scale estimates and combined gradient
-    phi_inv = getattr(a.session, "phi_inv", None)
+    phi_inv = getattr(a._session_obj(), "phi_inv", None)
     a_inf = phi_inv(a.estimate) if phi_inv else a.estimate
     b_inf = phi_inv(b.estimate) if phi_inv else b.estimate
     combined_inf = estimate_combine(a_inf, b_inf)
@@ -615,18 +692,31 @@ def _combine_results(
 
     new_grad = grad_combine(a.gradient, b.gradient)
 
-    # New SE and CI from delta on the combined gradient
-    import jax.numpy as jnp
-    cov = a.session.adapter.covariance()
+    # Guard against vector-valued results — composition only defined for scalars
+    if jnp.ndim(new_grad) != 1:
+        raise NotImplementedError(
+            "Composition is only supported for scalar estimands. "
+            "For vector results, compose elementwise or use evaluate()."
+        )
+
+    # New SE and CI from delta on the combined gradient.
+    # Both results are from the same session and were produced with the
+    # same vcov_spec, so a.cov_params is the canonical Σ̂ for composition.
+    if a.cov_params is None:
+        raise ValueError(
+            "Composition requires Σ̂ on the result (cov_params). The "
+            "originating session should have populated it; if this result "
+            "was constructed manually, supply cov_params."
+        )
+    cov = jnp.asarray(a.cov_params)
     var = jnp.dot(jnp.asarray(new_grad), cov @ jnp.asarray(new_grad))
     se = float(jnp.sqrt(var))
 
-    from scipy import stats
     z = stats.norm.ppf(0.5 + a.level / 2.0)
     lo_inf = combined_inf - z * se
     hi_inf = combined_inf + z * se
 
-    phi = getattr(a.session, "phi", None)
+    phi = getattr(a._session_obj(), "phi", None)
     if phi is not None:
         estimate_report = phi(combined_inf)
         lower_report = phi(lo_inf)
@@ -652,6 +742,7 @@ def _combine_results(
         estimand_metadata={"labels": [label_combine(a_label, b_label)]},
         gradient=new_grad,
         draws=None,
+        cov_params=a.cov_params,
         session=a.session,
     )
 

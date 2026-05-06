@@ -185,10 +185,13 @@ class StatsmodelsGLMAdapter(GLMAdapter):
         """
         if variable_name in self._exog_names:
             return self._exog_names.index(variable_name)
-        # Heuristic: look for a column whose name starts with variable_name
-        for i, name in enumerate(self._exog_names):
-            if name.startswith(variable_name):
-                return i
+        # Heuristic: look for a patsy-expanded column like "var[level]" or "var.level"
+        # Avoid matching "x_squared" when looking for "x".
+        for sep in ("[", ".", ":"):
+            prefixed = f"{variable_name}{sep}"
+            for i, name in enumerate(self._exog_names):
+                if name.startswith(prefixed):
+                    return i
         raise ValueError(
             f"Cannot locate variable {variable_name!r} in design matrix. "
             f"exog_names: {self._exog_names}"
