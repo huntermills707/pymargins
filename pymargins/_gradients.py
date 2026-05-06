@@ -241,6 +241,15 @@ def hessian_vector_product(
         raise ValueError(f"Unknown gradient backend: {backend!r}")
 
 
+def _concrete_primal(x):
+    """Extract the concrete primal value from a JAX array or JVPTracer."""
+    if x is None:
+        return None
+    if hasattr(x, "primal"):
+        return x.primal
+    return x
+
+
 def make_predict_with_fd_jvp(
     predict_native: Callable,
     fd_step: float = 1e-6,
@@ -286,29 +295,61 @@ def make_predict_with_fd_jvp(
     def predict_wrapped_jvp(primals, tangents):
         beta, X = primals
         beta_dot, X_dot = tangents
-        beta_np = np.asarray(beta)
+        # During forward-mode (jax.jvp, jax.hessian) primals may be JVPTracers.
+        # Extract the concrete underlying arrays for FD evaluations.
+        beta_np = np.asarray(_concrete_primal(beta))
+        X_np = np.asarray(_concrete_primal(X))
 
+        # Evaluate at primal to get output shape
+        f0 = predict_native(beta_np, X_np)
+        is_scalar = np.ndim(f0) == 0
+        f0 = np.atleast_1d(f0)
+        n_out = f0.shape[0]
+
+        # ------------------------------------------------------------------
         # Beta directional derivative
+        # ------------------------------------------------------------------
+        # beta_dot may be a JAX tracer (during reverse-mode autodiff),
+        # so we cannot convert it to NumPy. Instead, we compute the full
+        # Jacobian w.r.t. beta via FD using basis vectors, then compute
+        # the matrix-vector product J @ beta_dot in JAX space.
         deriv_beta = 0.0
         if beta_dot is not None:
-            beta_dot_np = np.asarray(beta_dot)
-            if beta_dot_np.size > 0 and np.any(beta_dot_np != 0):
-                plus = predict_native(beta_np + fd_step * beta_dot_np, X)
-                minus = predict_native(beta_np - fd_step * beta_dot_np, X)
-                deriv_beta = (plus - minus) / (2 * fd_step)
+            n_params = beta_np.shape[0]
+            J_beta = np.zeros((n_out, n_params))
+            for j in range(n_params):
+                e_j = np.zeros(n_params)
+                e_j[j] = fd_step
+                f_plus = np.atleast_1d(predict_native(beta_np + e_j, X_np))
+                f_minus = np.atleast_1d(predict_native(beta_np - e_j, X_np))
+                J_beta[:, j] = (f_plus - f_minus) / (2 * fd_step)
+            J_beta_jax = jnp.asarray(J_beta)
+            if n_out == 1:
+                deriv_beta = jnp.dot(J_beta_jax.ravel(), beta_dot)
+            else:
+                deriv_beta = J_beta_jax @ beta_dot
 
-        # X directional derivative
+        # ------------------------------------------------------------------
+        # X directional derivative (same tracer-safe pattern)
+        # ------------------------------------------------------------------
         deriv_X = 0.0
         if X_dot is not None:
-            X_dot_np = np.asarray(X_dot)
-            if X_dot_np.size > 0 and np.any(X_dot_np != 0):
-                X_np = np.asarray(X)
-                plus = predict_native(beta_np, X_np + fd_step * X_dot_np)
-                minus = predict_native(beta_np, X_np - fd_step * X_dot_np)
-                deriv_X = (plus - minus) / (2 * fd_step)
+            n_obs, n_features = X_np.shape
+            J_X = np.zeros((n_out, n_obs, n_features))
+            for i in range(n_obs):
+                for j in range(n_features):
+                    e_ij = np.zeros_like(X_np)
+                    e_ij[i, j] = fd_step
+                    f_plus = np.atleast_1d(predict_native(beta_np, X_np + e_ij))
+                    f_minus = np.atleast_1d(predict_native(beta_np, X_np - e_ij))
+                    J_X[:, i, j] = (f_plus - f_minus) / (2 * fd_step)
+            J_X_jax = jnp.asarray(J_X)
+            deriv_X = jnp.einsum('oij,ij->o', J_X_jax, X_dot)
 
         deriv = deriv_beta + deriv_X
-        return predict_wrapped(beta, X), jnp.asarray(deriv)
+        if is_scalar:
+            deriv = deriv.reshape(())
+        return predict_wrapped(beta, X), deriv
 
     return predict_wrapped
 
@@ -357,25 +398,26 @@ def make_glm_jvp_wrapper(
     def predict_wrapped_jvp(primals, tangents):
         beta, X, offset = primals
         beta_dot, X_dot, offset_dot = tangents
-        beta_np = np.asarray(beta)
-        beta_dot_np = np.asarray(beta_dot)
-        X_np = np.asarray(X)
+        # During forward-mode (jax.jvp, jax.hessian) primals may be JVPTracers.
+        beta_np = np.asarray(_concrete_primal(beta))
+        X_np = np.asarray(_concrete_primal(X))
+        offset_np = np.asarray(_concrete_primal(offset)) if offset is not None else None
 
         eta = X_np @ beta_np
-        if offset is not None:
-            eta = eta + np.asarray(offset)
+        if offset_np is not None:
+            eta = eta + offset_np
 
-        # Forward
+        # Forward (concrete, for statsmodels link functions)
         mu = link.inverse(eta)
 
         # Tangent: dμ/dt = (dg⁻¹/dη) · (dη/dt)
         # dη/dt = X · β̇ + Ẋ · β + offseṫ  (handles all differentiating directions)
-        eta_dot = X_np @ beta_dot_np
+        # We keep the tangent computation in JAX space so it works with tracers.
+        eta_dot = X_np @ beta_dot
         if X_dot is not None and not isinstance(X_dot, type(None)):
-            X_dot_np = np.asarray(X_dot)
-            eta_dot = eta_dot + X_dot_np @ beta_np
+            eta_dot = eta_dot + X_dot @ beta_np
         if offset_dot is not None and not isinstance(offset_dot, type(None)):
-            eta_dot = eta_dot + np.asarray(offset_dot)
+            eta_dot = eta_dot + offset_dot
 
         mu_dot = link.inverse_deriv(eta) * eta_dot
 

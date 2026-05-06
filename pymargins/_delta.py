@@ -78,6 +78,16 @@ def delta_variance(
         )
 
 
+def _safe_sqrt_diag(var: jnp.ndarray) -> jnp.ndarray:
+    """Return sqrt(diag(var)) with negative entries clipped to 0.
+
+    Numerical noise (e.g., from an ill-conditioned Σ̂) can produce tiny
+    negative diagonal entries. Clipping avoids NaN SEs.
+    """
+    diag = jnp.diag(var)
+    return jnp.sqrt(jnp.maximum(diag, 0.0))
+
+
 def delta_se(
     grad: jnp.ndarray,
     cov_params: jnp.ndarray,
@@ -111,9 +121,9 @@ def delta_se(
     """
     var = delta_variance(grad, cov_params)
     if jnp.ndim(var) == 0:
-        return jnp.sqrt(var)
+        return jnp.sqrt(jnp.maximum(var, 0.0))
     else:
-        return jnp.sqrt(jnp.diag(var))
+        return _safe_sqrt_diag(var)
 
 
 # ---------------------------------------------------------------------------
@@ -262,14 +272,23 @@ def delta_wald_test(
         z-statistic(s) and p-value(s).
     """
     se = delta_se(grad, cov_params)
-    z = (estimate - null_value) / se
+    # Guard against division by zero: if SE is exactly 0, the estimand is
+    # a deterministic function of beta at this point (e.g., a prediction at
+    # the exact fitted value). The z-statistic is +inf if estimate > null,
+    # -inf if estimate < null, and 0 if they are equal.
+    z = jnp.where(
+        se == 0.0,
+        jnp.where(estimate == null_value, 0.0, jnp.sign(estimate - null_value) * jnp.inf),
+        (estimate - null_value) / se,
+    )
 
+    z_np = np.asarray(z)
     if alternative == "two-sided":
-        p = 2.0 * (1.0 - stats.norm.cdf(np.abs(np.asarray(z))))
+        p = 2.0 * (1.0 - stats.norm.cdf(np.abs(z_np)))
     elif alternative == "greater":
-        p = 1.0 - stats.norm.cdf(np.asarray(z))
+        p = 1.0 - stats.norm.cdf(z_np)
     elif alternative == "less":
-        p = stats.norm.cdf(np.asarray(z))
+        p = stats.norm.cdf(z_np)
     else:
         raise ValueError(f"Unknown alternative: {alternative!r}")
 
@@ -319,8 +338,16 @@ def joint_wald_test(
     diff = estimate - null_value
     Sigma_g = delta_variance(grad, cov_params)
 
-    # Solve rather than invert for numerical stability
-    chi2 = float(diff @ jnp.linalg.solve(Sigma_g, diff))
+    # Solve rather than invert for numerical stability.
+    # If Sigma_g is singular (e.g., perfectly collinear estimands),
+    # add a tiny ridge and retry once.
+    solved = jnp.linalg.solve(Sigma_g, diff)
+    chi2 = float(diff @ solved)
+    if not np.isfinite(chi2):
+        ridge = 1e-12 * float(jnp.trace(Sigma_g)) / Sigma_g.shape[0]
+        Sigma_g_reg = Sigma_g + ridge * jnp.eye(Sigma_g.shape[0])
+        chi2 = float(diff @ jnp.linalg.solve(Sigma_g_reg, diff))
+
     df = int(diff.shape[0])
     p = float(1.0 - stats.chi2.cdf(chi2, df))
 

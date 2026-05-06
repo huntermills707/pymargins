@@ -415,7 +415,10 @@ def delta_simulation_disagreement(
     Sigma_np = np.asarray(cov_params)
     beta_np = np.asarray(beta)
     draws = rng.multivariate_normal(beta_np, Sigma_np, size=n_sim)
-    h_draws = np.array([float(h(jnp.asarray(b))) for b in draws])
+    try:
+        h_draws = np.asarray(jax.vmap(h)(jnp.asarray(draws)))
+    except Exception:
+        h_draws = np.array([float(h(jnp.asarray(b))) for b in draws])
 
     if phi is not None:
         h_draws = np.asarray(phi(jnp.asarray(h_draws)))
