@@ -25,6 +25,7 @@ estimand function.
 
 from __future__ import annotations
 from typing import Callable, Optional, Union, Any
+import jax
 import jax.numpy as jnp
 
 
@@ -94,8 +95,15 @@ def make_prediction_estimand(
         if transform is not None:
             mu = transform(mu)
         if aggregate == "overall":
-            # For multi-output, average over rows (axis=0), keeping outputs
-            value = jnp.mean(mu, axis=0) if mu.ndim > 1 else jnp.mean(mu)
+            if weights is None:
+                # For multi-output, average over rows (axis=0), keeping outputs
+                value = jnp.mean(mu, axis=0) if mu.ndim > 1 else jnp.mean(mu)
+            else:
+                if mu.ndim > 1:
+                    # weights (n_rows,) broadcast against mu (n_rows, n_outputs)
+                    value = jnp.sum(weights[:, None] * mu, axis=0) / jnp.sum(weights)
+                else:
+                    value = jnp.sum(weights * mu) / jnp.sum(weights)
         elif aggregate == "weighted":
             if weights is None:
                 value = jnp.mean(mu, axis=0) if mu.ndim > 1 else jnp.mean(mu)
@@ -276,7 +284,9 @@ def make_linear_combination_estimand(
     def per_scenario_value(beta, X, offset, w):
         mu = adapter.predict(beta, X, offset=offset)
         if scenario_aggregate == "overall":
-            return jnp.mean(mu)
+            if w is None:
+                return jnp.mean(mu)
+            return jnp.sum(w * mu) / jnp.sum(w)
         elif scenario_aggregate == "weighted":
             if w is None:
                 return jnp.mean(mu)

@@ -223,6 +223,15 @@ class MarginsResult:
         not affected by later mutation or re-fitting of the model wrapped
         by ``session``.
 
+    phi : callable, optional
+        Back-transform from inference scale to reporting scale. Captured at
+        construction so reporting works even if the session is garbage
+        collected.
+
+    phi_inv : callable, optional
+        Forward transform from reporting scale to inference scale. Captured
+        at construction for the same reason as ``phi``.
+
     session : Margins
         Reference to the originating session. Used to validate composability
         (same-session check). Σ̂ is read from ``cov_params`` rather than
@@ -244,6 +253,8 @@ class MarginsResult:
     gradient: Optional[np.ndarray] = None
     draws: Optional[np.ndarray] = None
     cov_params: Optional[np.ndarray] = None
+    phi: Optional[Callable] = None
+    phi_inv: Optional[Callable] = None
     session: Optional[Any] = None
 
     # -----------------------------------------------------------------------
@@ -279,8 +290,7 @@ class MarginsResult:
                 f"CI=[{lo[i]:.4f}, {hi[i]:.4f}]"
             )
         # Mention scale asymmetry when inference and reporting scales differ
-        sess = self._session_obj()
-        if sess is not None and getattr(sess, "phi", None) is not None:
+        if self.phi is not None:
             lines.append(
                 "  Note: SE is on the inference scale; estimate and CI are on the reporting scale."
             )
@@ -346,14 +356,11 @@ class MarginsResult:
         if level is None or level == self.level:
             return self.conf_int_lower, self.conf_int_upper
 
-        if self.gradient is not None and self._session_obj() is not None:
+        if self.gradient is not None:
             # Recompute via delta
-            phi = getattr(self._session_obj(), "phi", None)
-            # Convert reporting-scale estimate back to inference scale if needed
-            phi_inv = getattr(self._session_obj(), "phi_inv", None)
-            est_inf = phi_inv(self.estimate) if phi_inv else self.estimate
+            est_inf = self.phi_inv(self.estimate) if self.phi_inv is not None else self.estimate
             lower, upper = delta_confint_from_se(
-                est_inf, self.std_error, level=level, phi=phi,
+                est_inf, self.std_error, level=level, phi=self.phi,
             )
             return np.asarray(lower), np.asarray(upper)
         elif self.draws is not None:
@@ -417,20 +424,18 @@ class MarginsResult:
         -------
         result : TestResult
         """
-        phi_inv = getattr(self._session_obj(), "phi_inv", None) if self._session_obj() else None
-
-        if null_scale == "inference" or phi_inv is None:
+        if null_scale == "inference" or self.phi_inv is None:
             null_inf = value
         elif null_scale == "reporting":
-            null_inf = phi_inv(value)
+            null_inf = self.phi_inv(value)
         else:
             raise ValueError(
                 f"null_scale must be 'reporting' or 'inference', got {null_scale!r}"
             )
 
         # Get inference-scale estimate and draws
-        est_inf = phi_inv(self.estimate) if phi_inv else self.estimate
-        draws_inf = phi_inv(self.draws) if phi_inv is not None and self.draws is not None else self.draws
+        est_inf = self.phi_inv(self.estimate) if self.phi_inv is not None else self.estimate
+        draws_inf = self.phi_inv(self.draws) if self.phi_inv is not None and self.draws is not None else self.draws
 
         cov = self.cov_params if self.gradient is not None else None
 
@@ -495,22 +500,20 @@ class MarginsResult:
                 "frozen cov_params (likely materialized without it)."
             )
 
-        phi_inv = getattr(self._session_obj(), "phi_inv", None) if self._session_obj() else None
-
         if value is None:
             # Default null = zero on the inference scale (the universal
             # "no effect" point regardless of phi).
             value_inf = jnp.zeros_like(jnp.asarray(self.estimate))
-        elif null_scale == "inference" or phi_inv is None:
+        elif null_scale == "inference" or self.phi_inv is None:
             value_inf = jnp.asarray(value)
         elif null_scale == "reporting":
-            value_inf = phi_inv(jnp.asarray(value))
+            value_inf = self.phi_inv(jnp.asarray(value))
         else:
             raise ValueError(
                 f"null_scale must be 'reporting' or 'inference', got {null_scale!r}"
             )
 
-        est_inf = phi_inv(self.estimate) if phi_inv else self.estimate
+        est_inf = self.phi_inv(self.estimate) if self.phi_inv is not None else self.estimate
         cov = jnp.asarray(self.cov_params)
 
         chi2, p, df = joint_wald_test(
@@ -576,15 +579,34 @@ class MarginsResult:
                 "Product of two MarginsResults is nonlinear; use evaluate() "
                 "with a custom compose function instead."
             )
-        # Scaling by a constant
         scalar = float(other)
+
+        # Scale-aware: SE/gradient/draws are on the inference scale;
+        # estimate and CI bounds are on the reporting scale.
+        if self.phi is not None and self.phi_inv is not None:
+            new_est = np.asarray(self.phi(scalar * self.phi_inv(self.estimate)))
+            lo = np.asarray(self.phi(scalar * self.phi_inv(self.conf_int_lower)))
+            hi = np.asarray(self.phi(scalar * self.phi_inv(self.conf_int_upper)))
+            if scalar < 0:
+                lo, hi = hi, lo
+            new_lo, new_hi = lo, hi
+            new_draws = (
+                np.asarray(self.phi(scalar * self.phi_inv(self.draws)))
+                if self.draws is not None else None
+            )
+        else:
+            new_est = self.estimate * scalar
+            new_lo = (self.conf_int_lower * scalar
+                      if scalar > 0 else self.conf_int_upper * scalar)
+            new_hi = (self.conf_int_upper * scalar
+                      if scalar > 0 else self.conf_int_lower * scalar)
+            new_draws = self.draws * scalar if self.draws is not None else None
+
         return MarginsResult(
-            estimate=self.estimate * scalar,
+            estimate=new_est,
             std_error=self.std_error * abs(scalar),
-            conf_int_lower=(self.conf_int_lower * scalar
-                            if scalar > 0 else self.conf_int_upper * scalar),
-            conf_int_upper=(self.conf_int_upper * scalar
-                            if scalar > 0 else self.conf_int_lower * scalar),
+            conf_int_lower=new_lo,
+            conf_int_upper=new_hi,
             method=self.method,
             level=self.level,
             kappa=self.kappa,
@@ -593,8 +615,10 @@ class MarginsResult:
                                           for l in self.estimand_metadata.get("labels", [])]},
             gradient=(self.gradient * scalar
                       if self.gradient is not None else None),
-            draws=(self.draws * scalar if self.draws is not None else None),
+            draws=new_draws,
             cov_params=self.cov_params,
+            phi=self.phi,
+            phi_inv=self.phi_inv,
             session=self.session,
         )
 
@@ -661,6 +685,8 @@ class MarginsResult:
             gradient=None,
             draws=None,
             cov_params=None,
+            phi=self.phi,
+            phi_inv=self.phi_inv,
             session=None,
         )
 
@@ -678,9 +704,8 @@ def _combine_results(
 ) -> MarginsResult:
     """Combine two results from the same session via a linear operation."""
     # Inference-scale estimates and combined gradient
-    phi_inv = getattr(a._session_obj(), "phi_inv", None)
-    a_inf = phi_inv(a.estimate) if phi_inv else a.estimate
-    b_inf = phi_inv(b.estimate) if phi_inv else b.estimate
+    a_inf = a.phi_inv(a.estimate) if a.phi_inv is not None else a.estimate
+    b_inf = b.phi_inv(b.estimate) if b.phi_inv is not None else b.estimate
     combined_inf = estimate_combine(a_inf, b_inf)
 
     if a.gradient is None or b.gradient is None:
@@ -716,11 +741,10 @@ def _combine_results(
     lo_inf = combined_inf - z * se
     hi_inf = combined_inf + z * se
 
-    phi = getattr(a._session_obj(), "phi", None)
-    if phi is not None:
-        estimate_report = phi(combined_inf)
-        lower_report = phi(lo_inf)
-        upper_report = phi(hi_inf)
+    if a.phi is not None:
+        estimate_report = np.asarray(a.phi(combined_inf))
+        lower_report = np.asarray(a.phi(lo_inf))
+        upper_report = np.asarray(a.phi(hi_inf))
     else:
         estimate_report = combined_inf
         lower_report = lo_inf

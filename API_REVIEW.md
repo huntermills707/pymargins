@@ -14,10 +14,15 @@ That said, the API has bugs, mostly in the user-facing layer where
 scale-handling crosses module boundaries. Find them now, before downstream
 tests hide them as test-level workarounds.
 
+> **Post-fix changelog** — The definite bugs B1, B2/B3, B4, B6, B10, B14, B15,
+> B27 and the design issues A1, A6 identified in this review have been resolved
+> in the implementation. See the individual items below for details.
+> Remaining open items: B16, B17, A4, A5, A8, A11, B12, B13, B18.
+
 
 ## Definite bugs
 
-**B1 — Missing `jax` import breaks every `dydx()` call**
+**B1 — Missing `jax` import breaks every `dydx()` call** *(FIXED)*
 `pymargins/_estimands.py:191`
 `make_slope_estimand` calls `jax.vmap(...)` but the module imports only
 `jax.numpy as jnp` (line 28). `jax` is not in this module's namespace. First
@@ -25,7 +30,7 @@ call to `dydx()` raises `NameError`. (`is_jax_differentiable` correctly
 imports `jax` inside the function — line 422 — confirming this was an
 oversight, not a pattern.)
 
-**B2/B3 — `weights` silently dropped in the "overall" aggregate path**
+**B2/B3 — `weights` silently dropped in the "overall" aggregate path** *(FIXED)*
 `pymargins/_estimands.py:96-98, 278-279`
 Both `make_prediction_estimand` and `make_linear_combination_estimand` accept
 a `weights` kwarg. The "overall" branch ignores it; only "weighted" honors
@@ -34,14 +39,14 @@ it. Margins always passes `aggregate="overall"` for `at="overall"`
 Either fold "weighted" into "overall" or document that "overall" means
 unweighted.
 
-**B4 — Cholesky NaN passthrough on non-PSD `Σ̂`**
+**B4 — Cholesky NaN passthrough on non-PSD `Σ̂`** *(FIXED)*
 `pymargins/_kappa.py:124-133`
 `jnp.linalg.cholesky` on JAX returns a NaN-filled matrix for non-PSD inputs
 *without raising*. The `try/except Exception` block won't fire; `L` becomes
 NaN and propagates silently into κ. Need an explicit `jnp.isnan(L).any()`
 check, then route to ridge.
 
-**B6 — Simulation path is a Python for-loop over `h`**
+**B6 — Simulation path is a Python for-loop over `h`** *(FIXED)*
 `pymargins/_inference.py:283`
 `h_draws_inf = np.array([np.asarray(h(jnp.asarray(b))) for b in draws_beta])`
 runs `n_sim=4000` independent JAX traces. With κ-driven auto-fallback firing
@@ -49,7 +54,7 @@ for borderline estimands, this becomes the hot path and will be unusable for
 nontrivial models. Use `jax.vmap(h)(draws_beta)` for the JAX path.
 
 **B10 — `MarginsResult.__mul__` (and therefore `scaled()`) is wrong on
-non-identity scales**
+non-identity scales** *(FIXED)*
 `pymargins/_result.py:573-599`
 For a log-scale result with `estimate=1.5` (RR=1.5), `result * 2` returns
 `estimate=3.0`. The mathematically correct value is `1.5² = 2.25` (since
@@ -59,13 +64,13 @@ restrict to identity scale or apply `phi(scalar * phi_inv(estimate))`
 properly. PRIMER §7 explicitly says scaling is cosmetic; the implementation
 breaks that promise off identity scale.
 
-**B14 — No reproducibility seed plumbed through**
+**B14 — No reproducibility seed plumbed through** *(FIXED)*
 `pymargins/margins.py:723`
 `_inference_config()` hardcodes `rng_seed=None`. There is no session-level
 `rng_seed`; running the same `m.contrasts(...)` twice gives different draws.
 Add `rng_seed` as a session-level argument.
 
-**B15 — `Σ̂` is cached lazily, not at session construction**
+**B15 — `Σ̂` is cached lazily, not at session construction** *(FIXED)*
 `pymargins/margins.py:736-738`
 `_frozen_cov` only computes Σ̂ on first method call. Between `Margins(...)`
 and the first `.predict(...)`, mutating the underlying model changes what
@@ -86,14 +91,14 @@ DataFrames.
 non-pandas `training_data` will fail here. Either make pandas part of the
 adapter contract or guard explicitly.
 
-**B27 — Wasted gradient trace**
+**B27 — Wasted gradient trace** *(FIXED)*
 `pymargins/_inference.py:153, 197`
 `is_jax_differentiable(h, beta)` traces through `jax.grad(h)` to test, then
 `_run_delta` immediately calls `gradient(h, beta)` again. For known-autodiff
 adapters, skip the check entirely (use `adapter.supports_jax_autodiff`).
 
 **A6 — `atexog` accepts dict-or-DataFrame in docs, only dict in
-implementation**
+implementation** *(FIXED)*
 `pymargins/margins.py:302`, `pymargins/_scenarios.py:94-106`
 Margins.predict puts atexog into `scenario["atexog"]`. `expand_scenario`
 checks `scenario["data"]` for the DataFrame path. The DataFrame override
@@ -103,7 +108,7 @@ or update the docstring.
 
 ## Design issues / latent fragility
 
-- **A1 — Session weakref leaks into result reporting.**
+- **A1 — Session weakref leaks into result reporting.** *(FIXED)*
   `MarginsResult.summary()`, `to_frame()`, and `test()` all call
   `self._session_obj()` to get `phi`/`phi_inv`. If the session is GC'd,
   results become partially unusable. Capture `phi`, `phi_inv`, scale label
@@ -165,21 +170,22 @@ exercising end-to-end:
 
 ## Needs work before dependent code stabilizes
 
-1. **`_estimands.py`** — B1 blocks `dydx`; B2/B3 silently drop weights. Fix
-   both before any AME testing.
+1. **`_estimands.py`** — ~~B1 blocks `dydx`; B2/B3 silently drop weights. Fix
+   both before any AME testing.~~ Both fixed.
 
-2. **`_inference.py`** — Functional but inefficient (B6, A8). Bootstrap path
+2. **`_inference.py`** — ~~Functional but inefficient (B6, A8).~~ B6 fixed.
+   A8 (kappa fallback throws away gradient) remains open. Bootstrap path
    now exists with `h_factory` (per inner IMPLEMENTATION_GUIDE), which is
    good — but Margins should pass it conditionally.
 
-3. **`_result.py`** — Composition arithmetic is correct on identity scale;
+3. **`_result.py`** — ~~Composition arithmetic is correct on identity scale;
    broken on non-identity (B10). Capture `phi`/`phi_inv` on the result
-   instead of dereferencing the session.
+   instead of dereferencing the session.~~ Both fixed.
 
-4. **`margins.py`** — Eager Σ̂ (B15), `rng_seed` plumbing (B14), DataFrame
-   atexog routing (A6), pandas-coupling for `over=` (B17). The class is
-   doing a lot; consider extracting `_build_*_estimand` into a separate
-   "session compiler" once the bugs are out.
+4. **`margins.py`** — ~~Eager Σ̂ (B15), `rng_seed` plumbing (B14), DataFrame
+   atexog routing (A6)~~ — fixed. pandas-coupling for `over=` (B17) remains
+   open. The class is doing a lot; consider extracting `_build_*_estimand`
+   into a separate "session compiler" once the bugs are out.
 
 5. **`StatsmodelsGLMAdapter`** — Skeleton works for formula-fit logit.
    `column_index_of_variable`'s factor heuristic is fragile (acknowledged
@@ -188,18 +194,23 @@ exercising end-to-end:
 
 ## Recommended order of operations
 
-1. Fix B1 (10-second fix; otherwise dydx fails on first call).
-2. Fix B4 (Cholesky NaN check on JAX) — same scale of fix.
+*Completed:* B1, B2/B3, B4, B6, B10, B14, B15, A1, A6, B27.
+
+*Remaining open items:* B16, B17, A4, A5, A8, A11, B12, B13, B18.
+
+1. ~~Fix B1 (10-second fix; otherwise dydx fails on first call).~~ Done.
+2. ~~Fix B4 (Cholesky NaN check on JAX) — same scale of fix.~~ Done.
 3. Write tests for `_gradients` and `_delta` against analytical truth and
    statsmodels (IMPLEMENTATION_GUIDE 0.1, 0.2). These will surface anything
    else broken in the kernels.
-4. Fix B6 (vmap simulation) — needed before κ-fallback exercises anything
-   bigger than toy examples.
-5. Decide and document weights semantics (B2/B3).
-6. Fix B10 + capture `phi`/`phi_inv` on results (A1) — these together fix
-   the scale-handling fragility in `_result.py`.
-7. Fix B14, B15 (rng seed, eager cov).
-8. End-to-end smoke test (IMPLEMENTATION_GUIDE 0.5).
+4. ~~Fix B6 (vmap simulation) — needed before κ-fallback exercises anything
+   bigger than toy examples.~~ Done.
+5. ~~Decide and document weights semantics (B2/B3).~~ Done: "overall" now
+   uses weights when provided.
+6. ~~Fix B10 + capture `phi`/`phi_inv` on results (A1) — these together fix
+   the scale-handling fragility in `_result.py`.~~ Done.
+7. ~~Fix B14, B15 (rng seed, eager cov).~~ Done.
+8. ~~End-to-end smoke test (IMPLEMENTATION_GUIDE 0.5).~~ Done.
 
 The first four items unblock the kernel layer and the simulation hot path.
 After that, `_result.py` and the user-facing layer can be tightened against

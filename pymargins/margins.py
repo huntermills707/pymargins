@@ -175,6 +175,7 @@ class Margins:
         level: float = _NOT_GIVEN,
         method: InferenceMethod = _NOT_GIVEN,
         kappa_threshold: float = _NOT_GIVEN,
+        rng_seed: Optional[int] = _NOT_GIVEN,
         n_sim: int = _NOT_GIVEN,
         n_boot: int = _NOT_GIVEN,
         gradient_backend: GradientBackend = _NOT_GIVEN,
@@ -189,7 +190,7 @@ class Margins:
                 ("phi", phi), ("phi_inv", phi_inv), ("vcov", vcov),
                 ("weights", weights), ("at", at), ("level", level),
                 ("method", method), ("kappa_threshold", kappa_threshold),
-                ("n_sim", n_sim), ("n_boot", n_boot),
+                ("rng_seed", rng_seed), ("n_sim", n_sim), ("n_boot", n_boot),
                 ("gradient_backend", gradient_backend), ("fd_step", fd_step),
                 ("diagnostics", diagnostics),
             ]:
@@ -207,6 +208,7 @@ class Margins:
         level = 0.95 if level is _NOT_GIVEN else level
         method = "delta" if method is _NOT_GIVEN else method
         kappa_threshold = 0.3 if kappa_threshold is _NOT_GIVEN else kappa_threshold
+        rng_seed = None if rng_seed is _NOT_GIVEN else rng_seed
         n_sim = 4000 if n_sim is _NOT_GIVEN else n_sim
         n_boot = 1000 if n_boot is _NOT_GIVEN else n_boot
         gradient_backend = "auto" if gradient_backend is _NOT_GIVEN else gradient_backend
@@ -228,6 +230,7 @@ class Margins:
         self.level = level
         self.method = method
         self.kappa_threshold = kappa_threshold
+        self.rng_seed = rng_seed
         self.n_sim = n_sim
         self.n_boot = n_boot
         self.fd_step = fd_step
@@ -237,6 +240,10 @@ class Margins:
         # Adapter setup
         self.adapter = adapter if adapter is not None else auto_detect_adapter(model)
         self.adapter.attach(self)
+
+        # Eagerly freeze Σ̂ at construction so mutations between now and the
+        # first method call cannot change the session's analytical posture.
+        _ = self._frozen_cov()
 
         # Gradient backend resolution
         if strict and gradient_backend == "auto":
@@ -350,7 +357,10 @@ class Margins:
             ``over=`` variables, a vector over the Cartesian product of
             observed level combinations.
         """
-        scenario = {"atexog": atexog, "over": over}
+        if atexog is not None and hasattr(atexog, "iloc"):
+            scenario = {"data": atexog, "over": over}
+        else:
+            scenario = {"atexog": atexog, "over": over}
         h, labels = self._build_prediction_estimand(scenario, transform)
         config = self._inference_config()
         meta = {"kind": "prediction"}
@@ -404,7 +414,10 @@ class Margins:
                     "for discrete contrasts."
                 )
 
-        scenario = {"atexog": atexog, "over": over}
+        if atexog is not None and hasattr(atexog, "iloc"):
+            scenario = {"data": atexog, "over": over}
+        else:
+            scenario = {"atexog": atexog, "over": over}
         h, labels = self._build_slope_estimand(scenario, var_list, transform)
         config = self._inference_config()
         meta = {"kind": "slope", "variables": var_list}
@@ -720,7 +733,7 @@ class Margins:
             fd_step=self.fd_step,
             n_sim=self.n_sim,
             n_boot=self.n_boot,
-            rng_seed=None,
+            rng_seed=self.rng_seed,
             diagnostics=self.diagnostics,
             cov_params=self._frozen_cov(),
         )
@@ -759,6 +772,8 @@ class Margins:
             gradient=result_data.get("gradient"),
             draws=result_data.get("draws"),
             cov_params=np.asarray(self._frozen_cov()),
+            phi=self.phi,
+            phi_inv=self.phi_inv,
             session=weakref.ref(self),
         )
 

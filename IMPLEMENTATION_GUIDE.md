@@ -24,7 +24,7 @@ What works (or should work) end-to-end as written:
 - `_estimands.make_prediction_estimand`, `make_slope_estimand`,
   `make_linear_combination_estimand`, `make_evaluate_estimand`,
   `is_jax_differentiable`
-- `_inference._run_delta` and `_run_simulation` (modulo the issues below)
+- `_inference._run_delta` and `_run_simulation`
 - `_result.MarginsResult.summary`, `to_frame`, `conf_int`, `test`,
   `joint_test`, `scaled`, `materialize`
 
@@ -32,9 +32,10 @@ What's a known stub or has known issues:
 - The dispatch in `_adapter.auto_detect_adapter` is intentionally
   delegated to `_adapters/__init__.py:_detect_adapter_class` (one
   framework currently registered).
-- `_inference._run_bootstrap` is a placeholder. Bootstrap is the most
-  complex inference path and needs scenario-aware reconstruction logic
-  that wasn't worth specifying ahead of implementation.
+- `_inference._run_bootstrap` is implemented for i.i.d. nonparametric
+  bootstrap. It uses `h_factory` callbacks so that estimands are rebuilt
+  against each resampled adapter. Cluster and block bootstrap are not yet
+  implemented.
 - `Margins._base_data` requires adapter cooperation — adapters must
   expose `training_data` for diagnose() and scenario expansion to work.
 - `MarginsResult.__sub__` and `__add__` only work for delta-method
@@ -42,6 +43,20 @@ What's a known stub or has known issues:
   implemented; would need matched draws.
 - `StatsmodelsGLMAdapter` has a working skeleton but several methods
   need real implementation (see below).
+
+Resolved since initial review:
+- `_inference._run_simulation` now uses `jax.vmap` for the JAX path
+  instead of a Python for-loop (B6).
+- `MarginsResult.__mul__` and `scaled()` correctly apply
+  `phi(scalar * phi_inv(estimate))` on non-identity scales (B10).
+- `MarginsResult` captures `phi` and `phi_inv` at construction so
+  reporting no longer depends on the session weakref (A1).
+- `rng_seed` is accepted as a session-level argument and plumbed through
+  `_inference_config()` (B14).
+- `Σ̂` is frozen eagerly at session construction (B15).
+- DataFrame `atexog` is routed through `scenario["data"]` (A6).
+- The delta path skips the `is_jax_differentiable` probe for adapters
+  that declare `supports_jax_autodiff=True` (B27).
 
 ---
 
@@ -111,15 +126,8 @@ this, so this should work, but verify.
 
 Also in `margins.py`: `_build_prediction_estimand` and
 `_build_slope_estimand` reference `adapter.design_matrix_from_df` and
-`adapter.column_index_of_variable`. These methods are not declared in
-the abstract `ModelAdapter` interface (only `design()` is). Either:
-- Add `design_matrix_from_df` and `column_index_of_variable` to
-  `ModelAdapter` as abstract methods (preferred — documents the
-  contract), or
-- Replace calls to them with `design()` (would require reshaping
-  `design()`'s contract).
-
-Recommend the first.
+`adapter.column_index_of_variable`. Both are declared as abstract
+methods in `ModelAdapter` (along with `training_data`).
 
 ### 0.5 Smoke test: relative risk via log_scale
 
@@ -147,39 +155,23 @@ inherited (just `Xβ`); only `coefficients`, `covariance`,
 
 Register `StatsmodelsOLS` in `_adapters/__init__.py:_detect_adapter_class`.
 
-### 1.3 Decide the `design()` vs `design_matrix_from_df` API
+### 1.3 Adapter interface is settled
 
-Currently the abstract interface declares `design(scenario)` but the
-implementation actually uses `design_matrix_from_df(df)`. Pick one.
-
-Recommendation: rename `design()` to `design_matrix_from_df()` in the
-abstract interface and remove the scenario-aware version. Scenario
-expansion happens in `_scenarios.expand_scenario` which produces a
-DataFrame; the adapter just needs to turn that into a JAX array.
-Cleaner separation of responsibilities.
+The abstract `ModelAdapter` interface declares `design_matrix_from_df(df)`,
+`column_index_of_variable(v)`, and `training_data`. Scenario expansion
+happens in `_scenarios.expand_scenario` which produces a DataFrame; the
+adapter turns that into a JAX array. This separation is clean and should
+not be changed.
 
 ---
 
 ## Priority 2 — strict mode and robustness
 
-### 2.1 Implement strict mode
+### 2.1 Strict mode (implemented)
 
-In `Margins.__init__`, when `strict=True`, raise on any config argument
-that wasn't explicitly provided (i.e., is at its default). The
-implementation pattern:
-
-```python
-def __init__(self, model, *, phi=_NOT_GIVEN, ..., strict=False):
-    if strict:
-        for name, value in [...]:
-            if value is _NOT_GIVEN:
-                raise ValueError(
-                    f"strict=True: argument {name!r} must be explicitly given"
-                )
-```
-
-This requires using a sentinel for "not given" rather than concrete
-defaults.
+`Margins.__init__` uses a `_NOT_GIVEN` sentinel. When `strict=True`, any
+config argument still set to `_NOT_GIVEN` raises `ValueError`. Defaults
+are applied only after the strict check passes.
 
 ### 2.2 Better error messages
 
@@ -187,8 +179,8 @@ When user passes a model that doesn't have a registered adapter, the
 `auto_detect_adapter` error should suggest the closest registered
 adapter and link to docs on writing custom adapters.
 
-When user mixes scenarios with conflicting `at`/`atexog`, the error
-should print exactly which variables conflicted.
+When a user passes an unknown variable in `atexog=`, the error should
+print exactly which variables are unrecognized.
 
 When κ is high and auto-fallback fires, the fallback should be visible
 in the result (already wired via `fallback_triggered` and
@@ -197,63 +189,44 @@ clearly.
 
 ### 2.3 Validate session-adapter compatibility
 
-`adapter.attach(session)` is called from `Margins.__init__` but the
-default implementation does nothing. Concrete adapters should override
-to validate session compatibility — for example:
+`adapter.attach(session)` is called from `Margins.__init__`. The base
+`ModelAdapter.attach` is a no-op, but `GLMAdapter.attach` now validates
+that `phi` and `phi_inv` are approximate inverses at a test point.
+Concrete adapters should extend this pattern:
 - A survival adapter that doesn't support log scale should error if
   `phi=jnp.exp` is supplied.
 - An adapter that doesn't support a requested vcov flavor should error
   here, not on first computation.
+- Any adapter with link/scale constraints should validate them at
+  attach time so misconfigurations surface immediately.
 
 ---
 
-## Priority 3 — bootstrap path
+## Priority 3 — bootstrap improvements
 
-`_inference._run_bootstrap` is a placeholder. To complete it, we need:
+i.i.d. nonparametric bootstrap is implemented. Remaining work:
 
-### 3.1 Resampling strategies
+### 3.1 Additional resampling strategies
 
-At minimum:
-- i.i.d. resampling (sample rows with replacement from training data)
-- Cluster bootstrap (sample clusters, take all rows from chosen
-  clusters)
+- Cluster bootstrap (sample clusters, take all rows from chosen clusters)
 - Block bootstrap (for time series)
 
 Each strategy is parameterized — cluster needs cluster IDs, block needs
 block size, etc. Add a `bootstrap_config=` argument to `Margins.__init__`
 or `InferenceConfig` to specify.
 
-### 3.2 Refit-and-recompute loop
-
-For each bootstrap replicate:
-1. Resample data per the strategy.
-2. Call `adapter.refit(resampled_data)` to get a new adapter.
-3. Reconstruct the estimand `h` against the new adapter (this is the
-   tricky part — the original `h` closes over the original adapter).
-4. Evaluate `h(new_adapter.coefficients())` to get a draw of the
-   estimand.
-
-Step 3 requires the inference engine to know how to rebuild the
-estimand. The cleanest way is to push estimand-building into a closure
-or factory that the engine can call with a different adapter. This is
-not yet specified; needs design work.
-
-### 3.3 Parallelization
+### 3.2 Parallelization
 
 Refit is the bottleneck. Use `joblib.Parallel` or `concurrent.futures`
 to parallelize across replicates. Add a `n_jobs` parameter.
 
-### 3.4 Bootstrap CI methods
+### 3.3 Alternative bootstrap CI methods
 
 Currently the engine takes percentile CIs. Other options worth
 supporting:
-- BCa (bias-corrected and accelerated) — the standard recommendation
-  for general-purpose bootstrap.
-- Basic bootstrap.
-- Studentized bootstrap (when SE estimates are available per
-  replicate).
-
-Choose default carefully; BCa is the typical recommendation.
+- BCa (bias-corrected and accelerated)
+- Basic bootstrap
+- Studentized bootstrap (when SE estimates are available per replicate)
 
 ---
 

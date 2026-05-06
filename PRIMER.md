@@ -74,18 +74,17 @@ each documenting its own posture.
 ### What this means for implementers
 
 - Resist the temptation to add per-call overrides for session-level
-  commitments unless there is a strong reason. The current API permits
-  per-call `method` and `level` overrides as a pragmatic concession;
-  per-call scale, vcov, or `at` overrides should not be added.
+  commitments unless there is a strong reason. The current API does not
+  permit per-call overrides for method, level, scale, vcov, or `at`;
+  switching any of them requires constructing a new `Margins` instance.
 
 - The session's `summary()` method is the methods-section paragraph for
   the analysis. Take it seriously — make sure new session-level
   commitments show up there.
 
-- A `strict=True` mode is reserved for users who want to disable all
-  defaults. Implementation-wise this means: in strict mode, raise on any
-  unspecified config argument. Currently this is just a flag stored on
-  the session; the strictness checks need to be added at construction.
+- A `strict=True` mode disables all defaults — any unspecified config
+  argument raises `ValueError` at construction. Implemented via a
+  `_NOT_GIVEN` sentinel.
 
 ---
 
@@ -101,8 +100,8 @@ decomposition. Hold it in your head:
 2. **Aggregation**: where in the design space is it evaluated?
    Empirical (per-row, then averaged → AME/AAP), at-typical (single
    representative point → MEM/APM), or at-representative (user-supplied
-   grid via `at=` → MER/APR). Session-level default; per-call override
-   via `at=`.
+   grid via `atexog=` → MER/APR). Session-level default controlled by
+   the session's `at` argument; per-scenario values via `atexog=`.
 
 3. **Inference**: how is uncertainty quantified?
    Delta method, parametric simulation, or bootstrap. Session-level
@@ -157,15 +156,24 @@ critical — without it, κ is parameterization-dependent and meaningless.
 The thresholds (0.1 / 0.3) are calibrated from the nonlinear-regression
 literature; expose them as configurable but keep these as defaults.
 
-### 5.2 atexog as a separate argument from at
+### 5.2 `atexog` as the scenario specification key
 
-`at=` is for variables of analytical interest (the counterfactual being
-varied). `atexog=` is for control variables held at specific values.
-The split is conceptual, not just cosmetic — it separates "what scenario
-am I asking about" from "what world am I asking about it in."
+Scenario dicts passed to `predict()`, `dydx()`, `contrasts()`, and
+`evaluate()` use a single key `atexog` to specify counterfactual values:
 
-Variables that appear in both raise ValueError. Variables in neither are
-filled per the session's `at` setting.
+```python
+m.predict(atexog={"treatment": [0, 1]})
+m.dydx("age", atexog={"treatment": 1})
+```
+
+`atexog` accepts per-variable values or lists of values (which produce a
+grid via Cartesian product). Variables not mentioned in `atexog` are filled
+per the session's `at` setting ("overall" uses observed values, "typical"
+uses type-aware representative values, etc.).
+
+`at` is a **session-level** setting, not a per-scenario key. It controls
+the default evaluation rule; `atexog` overrides specific variables within
+that rule.
 
 ### 5.3 The `phi` is session-level, not per-call
 
@@ -256,6 +264,12 @@ are nonlinear and require autodiff through the composition. Users who
 want product or ratio of two results should use `m.evaluate(...)` with
 a custom `compose=` function.
 
+Scalar multiplication (`result * k` or `result.scaled(k)`) is supported
+and scale-aware: on non-identity scales the operation applies
+`phi(k * phi_inv(estimate))` to the point estimate and CI bounds, while
+the SE and gradient (which live on the inference scale) are multiplied
+by `k` directly.
+
 ---
 
 ## 8. The architectural layers
@@ -264,7 +278,13 @@ a custom `compose=` function.
 ┌─────────────────────────────────────────────────────────────┐
 │ User-facing                                                  │
 │   margins.py   — Margins class (session)                     │
-│   _result.py   — MarginsResult, TestResult, DiagnosticResult │
+└──────────────────────┬───────────────────────────────────────┘
+                       │
+┌──────────────────────▼───────────────────────────────────────┐
+│ User-facing + orchestration                                   │
+│   _result.py   — MarginsResult straddles both layers         │
+│                  (test() calls _inference, composition calls │
+│                  _delta; imports are top-level, not lazy)    │
 └──────────────────────┬───────────────────────────────────────┘
                        │
 ┌──────────────────────▼───────────────────────────────────────┐
@@ -288,9 +308,15 @@ a custom `compose=` function.
 └──────────────────────────────────────────────────────────────┘
 ```
 
-Dependencies flow downward only. The numerical kernels know nothing
-about adapters or sessions; orchestration knows about kernels but not
-adapters; adapters bridge orchestration and frameworks.
+Dependencies flow downward only, with the exception of `_result.py`,
+which imports `_inference` and `_delta` at the top of the module so
+that `MarginsResult.test()` and the composition operators can call
+into the orchestration and kernel layers without late-import hacks.
+This makes `_result.py` a straddling layer: user-facing for reporting,
+but dependent on orchestration/kernels for computable operations.
+The numerical kernels know nothing about adapters or sessions;
+orchestration knows about kernels but not adapters; adapters bridge
+orchestration and frameworks.
 
 ---
 
@@ -330,8 +356,8 @@ These have come up and been deferred:
   configuration and per-call arguments. The plumbing layer between
   user inputs and the gradient/inference machinery.
 
-- `_scenarios.py`: Turns user-facing `at=`/`atexog=`/`over=` into
-  concrete DataFrames of evaluation rows. Handles type-aware
+- `_scenarios.py`: Turns user-facing `atexog=`/`over=` into concrete
+  DataFrames of evaluation rows. Handles type-aware
   aggregation rules (typical, mean, etc.).
 
 - `_adapter.py`: Abstract interface that adapters implement. Defines
@@ -384,9 +410,9 @@ Suggested reading order:
 4. `_estimands.py` — see how the kernels get composed.
 5. `_adapter.py` — the abstract interface.
 6. `_adapters/statsmodels_glm.py` — a concrete implementation (skeleton).
-7. `_inference.py` — orchestration above kernels.
-8. `_scenarios.py` — counterfactual construction.
-9. `_result.py` — output types.
+7. `_scenarios.py` — counterfactual construction.
+8. `_result.py` — output types.
+9. `_inference.py` — orchestration above kernels.
 10. `margins.py` — user-facing wrapper that ties everything together.
 
 After reading these, look at `IMPLEMENTATION_GUIDE.md` for the

@@ -148,9 +148,8 @@ def run_inference(
         )
 
     if method == "delta":
-        # Check differentiability before attempting
         beta = adapter.coefficients()
-        if not is_jax_differentiable(h, beta):
+        if not adapter.supports_jax_autodiff and not is_jax_differentiable(h, beta):
             if "simulation" in supported:
                 # Auto-route to simulation with a warning marker in the result
                 warnings.warn(
@@ -280,7 +279,10 @@ def _run_simulation(h, adapter, config, estimand_metadata, *, fallback_reason=No
     draws_beta = rng.multivariate_normal(beta_np, Sigma_np, size=config.n_sim)
 
     estimate = h(beta)
-    h_draws_inf = np.array([np.asarray(h(jnp.asarray(b))) for b in draws_beta])
+    try:
+        h_draws_inf = np.asarray(jax.vmap(h)(jnp.asarray(draws_beta)))
+    except Exception:
+        h_draws_inf = np.array([np.asarray(h(jnp.asarray(b))) for b in draws_beta])
     se = np.std(h_draws_inf, axis=0, ddof=1)
 
     # Apply phi to draws and estimate for reporting
