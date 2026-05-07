@@ -370,8 +370,7 @@ def joint_wald_test(
     df = int(diff.shape[0])
     p = float(1.0 - stats.chi2.cdf(chi2, df))
 
-    # Return JAX scalars for API consistency.
-    return jnp.asarray(chi2), jnp.asarray(p), jnp.asarray(df)
+    return float(chi2), float(p), int(df)
 
 
 # ---------------------------------------------------------------------------

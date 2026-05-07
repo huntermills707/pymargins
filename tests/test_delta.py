@@ -577,6 +577,30 @@ def test_joint_wald_test_singular_covariance():
     assert df == 2
 
 
+def test_joint_wald_test_regularization_produces_finite_statistic():
+    """Near-singular Sigma_g should trigger regularization and yield finite values."""
+    rng = np.random.default_rng(42)
+    p = 3
+    beta = jnp.asarray(rng.standard_normal(p))
+    # Nearly singular covariance: tiny epsilon on diagonal
+    Sigma = jnp.eye(p) * 1e-12
+
+    # Perfectly collinear estimands -> singular Sigma_g
+    def h(b):
+        return jnp.array([b[0], b[0]])
+
+    grad = gradient(h, beta, backend="autodiff")
+    estimate = h(beta)
+
+    with pytest.warns(RuntimeWarning, match="regularized"):
+        chi2, p, df = joint_wald_test(estimate, grad, Sigma)
+
+    assert np.isfinite(chi2)
+    assert np.isfinite(p)
+    assert df == 2
+    assert chi2 >= 0.0
+
+
 def test_delta_variance_bad_ndim():
     """delta_variance must raise for gradients with ndim > 2."""
     grad = jnp.ones((2, 3, 4))

@@ -16,6 +16,7 @@ from typing import Callable, Optional, Literal, Any
 from dataclasses import dataclass
 import warnings
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 
@@ -230,9 +231,10 @@ def _run_delta(h, adapter, config, estimand_metadata):
     )
     se = delta_se(grad, Sigma)
 
-    # Optional comparison against simulation
+    # Optional comparison against simulation. Works for scalar and vector
+    # estimands; for vectors it returns the max per-component disagreement.
     delta_sim_disagreement = None
-    if config.diagnostics and jnp.ndim(estimate) == 0:
+    if config.diagnostics:
         try:
             delta_sim_disagreement = delta_simulation_disagreement(
                 estimate, grad, Sigma, h, beta,
@@ -281,9 +283,34 @@ def _run_simulation(h, adapter, config, estimand_metadata, *, fallback_reason=No
     estimate = h(beta)
     try:
         h_draws_inf = np.asarray(jax.vmap(h)(jnp.asarray(draws_beta)))
-    except Exception:
+    except (
+        jax.errors.TracerArrayConversionError,
+        jax.errors.ConcretizationTypeError,
+        jax.errors.TracerBoolConversionError,
+        jax.errors.TracerIntegerConversionError,
+        jax.errors.UnexpectedTracerError,
+    ):
+        # vmap couldn't trace h; fall back to a Python loop. Genuine
+        # shape/type bugs in h (TypeError/ValueError) are intentionally not
+        # caught — they surface immediately with their original traceback.
         h_draws_inf = np.array([np.asarray(h(jnp.asarray(b))) for b in draws_beta])
+
     se = np.std(h_draws_inf, axis=0, ddof=1)
+
+    # Curvature diagnostic (compute for consistency with delta fallback path).
+    # Gated on JAX-differentiability because explicit method="simulation" is
+    # how non-differentiable estimands reach the engine.
+    k = None
+    if config.diagnostics and is_jax_differentiable(h, beta):
+        try:
+            if jnp.ndim(estimate) == 0:
+                k = kappa(h, beta, Sigma,
+                          backend=config.gradient_backend, fd_step=config.fd_step)
+            else:
+                k = kappa_vector(h, beta, Sigma,
+                                 backend=config.gradient_backend, fd_step=config.fd_step)
+        except Exception:
+            pass  # Best-effort diagnostic
 
     # Apply phi to draws and estimate for reporting
     if config.phi is not None:
@@ -304,7 +331,7 @@ def _run_simulation(h, adapter, config, estimand_metadata, *, fallback_reason=No
         "conf_int_upper": upper,
         "method": "simulation",
         "level": config.level,
-        "kappa": None,
+        "kappa": np.asarray(k) if k is not None else None,
         "delta_sim_disagreement": None,
         "fallback_triggered": fallback_reason is not None,
         "fallback_reason": fallback_reason,
@@ -380,6 +407,23 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
 
     se = np.std(h_draws_inf, axis=0, ddof=1)
 
+    # κ at β̂ when h is JAX-differentiable (PRIMER §5.1: κ is the universal
+    # delta-validity diagnostic; bootstrap reports it for cross-comparison
+    # with delta inference at the same point).
+    k = None
+    beta_hat = adapter.coefficients()
+    Sigma_hat = config.cov_params if config.cov_params is not None else adapter.covariance()
+    if config.diagnostics and is_jax_differentiable(h, beta_hat):
+        try:
+            if jnp.ndim(estimate) == 0:
+                k = kappa(h, beta_hat, Sigma_hat,
+                          backend=config.gradient_backend, fd_step=config.fd_step)
+            else:
+                k = kappa_vector(h, beta_hat, Sigma_hat,
+                                 backend=config.gradient_backend, fd_step=config.fd_step)
+        except Exception:
+            pass  # Best-effort diagnostic
+
     return {
         "estimate": estimate_report,
         "std_error": se,
@@ -387,7 +431,7 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
         "conf_int_upper": upper,
         "method": "bootstrap",
         "level": config.level,
-        "kappa": None,
+        "kappa": np.asarray(k) if k is not None else None,
         "delta_sim_disagreement": None,
         "fallback_triggered": fallback_reason is not None,
         "fallback_reason": fallback_reason,

@@ -41,6 +41,11 @@ def _detect_adapter_class(model):
         from .statsmodels_glm import StatsmodelsGLMAdapter
         return StatsmodelsGLMAdapter
 
+    # statsmodels OLS / WLS / GLS
+    if module.startswith("statsmodels.") and cls_name == "RegressionResultsWrapper":
+        from .statsmodels_ols import StatsmodelsOLSAdapter
+        return StatsmodelsOLSAdapter
+
     # Fall through with a clear error
     raise NotImplementedError(
         f"No adapter registered for {module}.{cls_name}. "

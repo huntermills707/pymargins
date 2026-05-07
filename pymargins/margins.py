@@ -923,7 +923,13 @@ class Margins:
         resolver = make_aggregation_resolver(self.at, self.weights)
         groups, over_keys = self._enumerate_groups(scenario, base_data, var_meta)
 
-        var_indices = [adapter.column_index_of_variable(v) for v in var_list]
+        # Type-check each variable up front. column_index_of_variable raises
+        # for categorical/binary/discrete, which is the contract we want for
+        # dydx(). The returned index is unused — slopes are now data-side
+        # central differences (R/Stata-style total derivatives).
+        for v in var_list:
+            adapter.column_index_of_variable(v)
+
         sub_scenario = {k: v for k, v in scenario.items() if k != "over"}
         atoms: list[tuple[Optional[str], Callable]] = []
 
@@ -931,20 +937,18 @@ class Margins:
             df, _ = expand_scenario(
                 sub_scenario, group_df, resolver, var_meta,
             )
-            X = adapter.design_matrix_from_df(df)
             if self.at == "overall":
                 agg_kind = "overall"
             else:
-                agg_kind = "none" if X.shape[0] == 1 else "overall"
+                agg_kind = "none" if len(df) == 1 else "overall"
 
-            for var_name, var_idx in zip(var_list, var_indices):
+            for var_name in var_list:
                 h_atom = make_slope_estimand(
-                    adapter, X, var_index=var_idx,
+                    adapter, df, var_name,
                     aggregate=agg_kind,
                     weights=jnp.asarray(self.weights) if self.weights is not None else None,
                     phi_inv=self.phi_inv,
                     transform=transform,
-                    backend=self.gradient_backend,
                     fd_step=self.fd_step,
                 )
                 var_suffix = var_name if len(var_list) > 1 else None

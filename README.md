@@ -5,10 +5,10 @@ pre-commitment, JAX-native autodiff, κ-driven simulation fallback.
 
 ## Status
 
-Pre-alpha. The library is currently a complete API specification with
-implementation stubs and a working numerical core. Not yet usable
-end-to-end without the implementation work outlined in
-`IMPLEMENTATION_GUIDE.md`.
+Alpha. End-to-end usable with statsmodels GLM and OLS/WLS/GLS through
+auto-detection. Additional adapters (sklearn, linearmodels, mixed
+models), cluster/block bootstrap, and reporting polish remain on the
+roadmap — see `IMPLEMENTATION_GUIDE.md`.
 
 ## Quick orientation
 
@@ -21,7 +21,7 @@ For implementers and contributors:
 3. **`pymargins/`** — the package itself. Read in the order listed at
    the end of `PRIMER.md`.
 
-## Quick example (once implemented)
+## Quick example
 
 ```python
 import statsmodels.formula.api as smf

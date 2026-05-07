@@ -8,45 +8,87 @@ architectural philosophy.
 
 ## State of the scaffold
 
-The library is currently a complete API specification with implementation
-stubs. Every public interface is defined with type hints and docstrings.
-Numerical kernels (`_gradients.py`, `_delta.py`, `_kappa.py`) are mostly
-implemented and should work as-is. The orchestration and adapter layers
-are partially implemented; concrete framework adapters are skeletons.
+The library is end-to-end usable with statsmodels GLM and OLS/WLS/GLS.
+Numerical kernels (`_gradients.py`, `_delta.py`, `_kappa.py`),
+orchestration (`_inference.py`, `margins.py`), and the two registered
+adapters all work; the architecture is no longer scaffolding.
 
-What works (or should work) end-to-end as written:
-- `_gradients.gradient`, `_gradients.hessian`, `_gradients.directional_derivative`
+What works:
+- `_gradients.gradient`, `_gradients.hessian`, `_gradients.directional_derivative`,
+  `_gradients.hessian_vector_product`
 - `_gradients.make_predict_with_fd_jvp`, `_gradients.make_glm_jvp_wrapper`
+  (covers Logit, Probit, CLogLog, LogLog, LogC, Log, Identity, Power
+  including Power(0)→log, InversePower, InverseSquared, Sqrt, Cauchy,
+  NegativeBinomial)
 - `_delta.delta_se`, `_delta.delta_confint`, `_delta.delta_wald_test`,
-  `_delta.joint_wald_test`
-- `_kappa.kappa`, `_kappa.kappa_vector`, `_kappa.classify_kappa`
-- `_kappa.session_kappa`, `_kappa.delta_simulation_disagreement`
-- `_estimands.make_prediction_estimand`, `make_slope_estimand`,
-  `make_linear_combination_estimand`, `make_evaluate_estimand`,
-  `is_jax_differentiable`
-- `_inference._run_delta` and `_run_simulation`
+  `_delta.joint_wald_test`, `combined_gradient`, `joint_covariance_of_results`
+- `_kappa.kappa`, `_kappa.kappa_vector`, `_kappa.classify_kappa`,
+  `_kappa.session_kappa`, `_kappa.delta_simulation_disagreement`
+  (vector-estimand-aware)
+- `_estimands.make_prediction_estimand`, `make_slope_estimand`
+  (data-side total derivative; matches Stata/R semantics — see Resolved
+  list below), `make_linear_combination_estimand`,
+  `make_evaluate_estimand`, `is_jax_differentiable` (probes vmap +
+  hessian to mirror engine trace patterns)
+- `_inference._run_delta`, `_run_simulation`, `_run_bootstrap`
+  (i.i.d. nonparametric; computes κ at β̂ when h is differentiable)
 - `_result.MarginsResult.summary`, `to_frame`, `conf_int`, `test`,
-  `joint_test`, `scaled`, `materialize`
+  `joint_test`, `scaled`, `materialize`, composition via `__add__` /
+  `__sub__` / `__mul__` with `phi`/`phi_inv` propagation
+- `StatsmodelsGLMAdapter` and `StatsmodelsOLSAdapter` (formula and
+  array fits, HC0–HC3 vcov, cluster vcov via refit, formula and
+  array-fit refit for bootstrap)
+- `_adapters._detect_adapter_class` registers GLM and OLS/WLS/GLS
 
 What's a known stub or has known issues:
-- The dispatch in `_adapter.auto_detect_adapter` is intentionally
-  delegated to `_adapters/__init__.py:_detect_adapter_class` (one
-  framework currently registered).
-- `_inference._run_bootstrap` is implemented for i.i.d. nonparametric
-  bootstrap. It uses `h_factory` callbacks so that estimands are rebuilt
-  against each resampled adapter. Cluster and block bootstrap are not yet
-  implemented.
+- `_inference._run_bootstrap` implements i.i.d. nonparametric
+  bootstrap only. Cluster and block bootstrap (Priority 3.1) are not
+  yet implemented.
 - `Margins._base_data` requires adapter cooperation — adapters must
   expose `training_data` for diagnose() and scenario expansion to work.
 - `MarginsResult.__sub__` and `__add__` only work for delta-method
   results (with gradients). Simulation/bootstrap composition isn't yet
   implemented; would need matched draws.
-- `StatsmodelsGLMAdapter` has a working skeleton but several methods
-  need real implementation (see below).
+- `over=` is pandas-coupled (uses `DataFrame.groupby`); not in the
+  adapter contract (B17).
 
 Resolved since initial review:
-- `_inference._run_simulation` now uses `jax.vmap` for the JAX path
-  instead of a Python for-loop (B6).
+- `_inference._run_simulation` now actually uses `jax.vmap` for the
+  JAX path (the original B6 fix was incomplete due to a missing
+  `import jax` in `_inference.py`; the vmap call silently fell back
+  to a Python loop until that was added).
+- `make_slope_estimand` rewritten as a **data-side** central
+  difference: perturbs the source DataFrame's column ±ε and rebuilds
+  the design through `adapter.design_matrix_from_df`, so patsy
+  regenerates every interaction, polynomial, spline, and `I(...)`
+  transform. `dydx(v)` now returns the *total* derivative ∂μ/∂v,
+  matching Stata's `margins, dydx()` and R's
+  `marginaleffects::slopes()`. The previous column-wise partial was
+  silently wrong for any model with interactions or transforms.
+  `column_index_of_variable` is now a type guard for `dydx()` only;
+  the index it returns is unused.
+- `_jax_link_inverse` corrected for `LogC` (was using the CLogLog
+  formula); `Power(0)` mapped to `jnp.exp` (statsmodels' log-link
+  equivalence); `NegativeBinomial.alpha` read directly without a
+  defensive `getattr` default.
+- `is_jax_differentiable` strengthened to probe `jax.vmap` and
+  `jax.hessian` — matches the trace patterns the engine actually
+  uses, including κ. Previous probe via `jax.grad(h)(beta)` traced
+  with concrete inputs and missed `TracerBoolConversionError` cases.
+- `_run_simulation` and `_run_bootstrap` compute κ at β̂ when h is
+  JAX-differentiable; PRIMER §5.1 frames κ as the universal delta
+  validity diagnostic, so it's now reported uniformly across the
+  three inference paths.
+- `delta_simulation_disagreement` works for vector estimands (returns
+  the maximum per-component relative disagreement); previously
+  hardcoded to scalar.
+- `_infer_variable_type` no longer emits `"discrete"`; integer
+  columns with few unique values are classified `"continuous"` (or
+  `"binary"` when there are exactly 2 unique values), so `dydx()`
+  works on integer-coded continuous covariates.
+- Auto-fallback from delta to simulation when κ exceeds threshold;
+  fallback is visible on the result via `fallback_triggered` /
+  `fallback_reason`, propagates through composition.
 - `MarginsResult.__mul__` and `scaled()` correctly apply
   `phi(scalar * phi_inv(estimate))` on non-identity scales (B10).
 - `MarginsResult` captures `phi` and `phi_inv` at construction so
@@ -60,13 +102,16 @@ Resolved since initial review:
 
 ---
 
-## Priority 0 — make one end-to-end path work
+## Priority 0 — make one end-to-end path work *(complete)*
 
 Goal: be able to fit a logit model with statsmodels, wrap it in
 `Margins.log_scale(...)`, compute a relative-risk contrast, and get a
 sensible CI. This is the minimum viable proof-of-architecture.
 
-Tasks in order:
+All sub-tasks are done; tests live in `tests/test_gradients.py`,
+`tests/test_delta.py`, `tests/test_adapter_statsmodels_glm.py`, and
+`tests/test_end_to_end.py`. Sub-task descriptions retained below for
+reference on resolved decisions.
 
 ### 0.1 Verify the gradient module against analytical truth
 
@@ -93,69 +138,53 @@ Write tests for `_delta`:
 
 Tests live in `tests/test_delta.py`.
 
-### 0.3 Complete `StatsmodelsGLMAdapter`
+### 0.3 Complete `StatsmodelsGLMAdapter` *(complete)*
 
-The skeleton in `_adapters/statsmodels_glm.py` needs:
+Resolutions:
 
-- **`design_matrix_from_df`**: handle non-formula fits. Currently only
-  formula-fit models work (uses patsy.dmatrix with the cached
-  design_info). For direct-array fits, a fallback that just returns
-  the columns by name in exog_names order. Decide: refuse non-formula
-  fits, or implement the fallback?
+- **`design_matrix_from_df`**: formula-fit uses cached `design_info`
+  via patsy; array-fit falls back to `df[exog_names].values`. Shared
+  helper in `_adapters/_common.py`.
+- **`column_index_of_variable`**: raises `ValueError` for binary or
+  categorical variables. The function is now a type guard for
+  `dydx()` only — its return value is unused since `dydx()` is
+  computed via data-side FD through `design_matrix_from_df`, which
+  handles patsy's interactions, polynomials, splines, and `I(...)`
+  transforms automatically.
+- **`covariance`**: HC0–HC3 supported (refit if not the original
+  `cov_type`); cluster-robust supported via refit with
+  `cov_kwds={"groups": ...}`; ndarray pass-through for advanced use.
+- **`refit`**: handles both formula-fit and array-fit models.
 
-- **`column_index_of_variable`**: handle factor expansions. Currently
-  has a heuristic (prefix match); needs proper handling of patsy's
-  expansion of categorical variables. For categorical variables this
-  should arguably raise rather than return — `dydx()` doesn't apply
-  to categoricals anyway, and the index is used only by `dydx()`.
+### 0.4 Wire up Margins to the adapter *(complete)*
 
-- **`covariance` for cluster-robust**: currently raises for cluster
-  specifications. Decide whether to support (requires refit) or to
-  document it as out-of-scope and require user to pass an explicit
-  ndarray.
+`_build_prediction_estimand` uses `adapter.design_matrix_from_df`;
+`_build_slope_estimand` uses both that and `column_index_of_variable`
+(as a type guard only — slopes are now data-side FD through the
+formula).
 
-- **`refit`**: the current implementation only handles formula-fit
-  models. Decide whether to support array-fit refit or document it as
-  unsupported.
+### 0.5 Smoke test: relative risk via log_scale *(complete)*
 
-### 0.4 Wire up Margins to the adapter
-
-In `margins.py`, `Margins._base_data` currently requires the adapter
-to expose `training_data`. The `StatsmodelsGLMAdapter` already does
-this, so this should work, but verify.
-
-Also in `margins.py`: `_build_prediction_estimand` and
-`_build_slope_estimand` reference `adapter.design_matrix_from_df` and
-`adapter.column_index_of_variable`. Both are declared as abstract
-methods in `ModelAdapter` (along with `training_data`).
-
-### 0.5 Smoke test: relative risk via log_scale
-
-Write a test that:
-- Fits a logit model on synthetic data via statsmodels.formula.api.
-- Wraps with `Margins.log_scale(fit, vcov=None)`.
-- Computes a relative risk contrast.
-- Verifies the result has reasonable structure (estimate close to
-  expected, CI exists, κ is computed, etc.).
-
-Don't worry about exact numerical agreement with another tool yet —
-just that the pipeline runs end-to-end without errors.
+See `tests/test_end_to_end.py::test_relative_risk_contrast` and
+adjacent end-to-end tests.
 
 ---
 
-## Priority 1 — fill out the adapter family
+## Priority 1 — fill out the adapter family *(complete for statsmodels)*
 
-### 1.1 `StatsmodelsOLSAdapter` (LinearPredictionAdapter)
+### 1.1 `StatsmodelsOLSAdapter` (LinearPredictionAdapter) *(complete)*
 
-Should be much simpler than the GLM version. The `predict` method is
-inherited (just `Xβ`); only `coefficients`, `covariance`,
-`design_matrix_from_df`, and `variable_metadata` need implementing.
+`pymargins/_adapters/statsmodels_ols.py`. Inherits the linear-predict
+path; implements `coefficients`, `covariance` (HC0–HC3 directly,
+cluster via refit), `design_matrix_from_df`, `variable_metadata`, and
+`refit` (formula and array fits).
 
-### 1.2 Auto-detection for the new adapter
+### 1.2 Auto-detection for the new adapter *(complete)*
 
-Register `StatsmodelsOLS` in `_adapters/__init__.py:_detect_adapter_class`.
+`_detect_adapter_class` matches `RegressionResultsWrapper` for
+OLS/WLS/GLS.
 
-### 1.3 Adapter interface is settled
+### 1.3 Adapter interface is settled *(no work — design statement)*
 
 The abstract `ModelAdapter` interface declares `design_matrix_from_df(df)`,
 `column_index_of_variable(v)`, and `training_data`. Scenario expansion
@@ -387,26 +416,22 @@ scenario tuple would help. Not critical but easy win.
 
 ---
 
-## A reasonable first sprint
+## What's next
 
-Given all the above, a one-week implementer sprint to get to a
-demonstrable working version:
+Priorities 0 and 1 are done. The natural next steps, in rough order of
+user-visible payoff:
 
-- **Day 1**: Read `PRIMER.md`, run through the existing modules to
-  understand the structure. Set up tests/ directory and CI.
-- **Day 2**: Implement priorities 0.1 and 0.2 — gradient and delta
-  module tests against statsmodels. Fix any kernel bugs surfaced.
-- **Day 3**: Complete `StatsmodelsGLMAdapter` (priority 0.3) including
-  `design_matrix_from_df`, `column_index_of_variable`, vcov flavors.
-- **Day 4**: Wire end-to-end (priority 0.4 + 0.5). Smoke test with a
-  real fit. Cross-check outputs against `marginaleffects` in R for
-  one or two cases.
-- **Day 5**: Implement `StatsmodelsOLSAdapter` (priority 1.1). Document
-  what works and ship a 0.0.1 alpha.
-
-After that, prioritize based on whose feedback is most valuable —
-adding more model coverage (priority 4) versus polishing reporting
-(priority 5) versus filling in bootstrap (priority 3).
+1. **Priority 2** — strict mode, better error messages, attach-time
+   adapter validation. Tightens the user-facing surface against the
+   adapters that are now shipping.
+2. **Priority 3** — cluster and block bootstrap (3.1), parallelization
+   (3.2), BCa / basic / studentized CIs (3.3). The current i.i.d. path
+   covers the common case but cluster bootstrap is the natural next
+   need for any panel-data user.
+3. **Priority 4** — additional adapters (sklearn, linearmodels, mixed
+   models). Each new adapter exercises the existing interface; if the
+   four-shape factoring is right, none should require core changes.
+4. **Priority 5** — reporting polish, plotting, LaTeX/HTML output.
 
 Don't worry about getting the API perfect on the first iteration. The
 architecture is the asset; the API is replaceable. As long as the

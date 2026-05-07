@@ -429,10 +429,12 @@ def delta_simulation_disagreement(
     """
     from ._delta import delta_confint
 
-    # Delta CI
+    # Delta CI (handles both scalar and vector estimands)
     d_lower, d_upper = delta_confint(
         estimate, grad, cov_params, level=level, phi=phi,
     )
+    d_lower = np.asarray(d_lower)
+    d_upper = np.asarray(d_upper)
 
     # Simulation CI
     rng = np.random.default_rng(rng_seed)
@@ -442,30 +444,25 @@ def delta_simulation_disagreement(
     try:
         h_draws = np.asarray(jax.vmap(h)(jnp.asarray(draws)))
     except (jax.errors.TracerArrayConversionError, TypeError, ValueError):
-        h_draws = np.array([float(h(jnp.asarray(b))) for b in draws])
+        h_draws = np.array([np.asarray(h(jnp.asarray(b))) for b in draws])
 
     if phi is not None:
         h_draws = np.asarray(phi(jnp.asarray(h_draws)))
 
     alpha = (1.0 - level) / 2.0
-    s_lower = float(np.quantile(h_draws, alpha))
-    s_upper = float(np.quantile(h_draws, 1.0 - alpha))
+    s_lower = np.quantile(h_draws, alpha, axis=0)
+    s_upper = np.quantile(h_draws, 1.0 - alpha, axis=0)
 
     # Normalize by the absolute estimate (on the reporting scale if phi is
-    # provided)
-    if phi is not None:
-        ref = abs(float(phi(estimate)))
-    else:
-        ref = abs(float(estimate))
+    # provided). Vector estimands return the maximum per-component
+    # disagreement so a single scalar still summarizes the diagnostic.
+    est_report = np.asarray(phi(estimate)) if phi is not None else np.asarray(estimate)
+    ref = np.abs(est_report)
 
-    if ref == 0.0:
-        return float("inf")
-
-    diff = max(
-        abs(float(d_lower) - s_lower),
-        abs(float(d_upper) - s_upper),
-    )
-    return diff / ref
+    diff = np.maximum(np.abs(d_lower - s_lower), np.abs(d_upper - s_upper))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        rel = np.where(ref > 0, diff / np.where(ref > 0, ref, 1.0), np.inf)
+    return float(np.max(rel))
 
 
 # ---------------------------------------------------------------------------

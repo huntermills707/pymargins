@@ -20,6 +20,8 @@ from pymargins._gradients import (
     hessian_vector_product,
     make_predict_with_fd_jvp,
     make_glm_jvp_wrapper,
+    _jax_link_inverse,
+    _jax_link_inverse_deriv,
 )
 
 
@@ -179,6 +181,28 @@ def test_glm_jvp_wrapper_log_link_poisson():
     np.testing.assert_allclose(gX_native, gX_wrapped, rtol=1e-8)
 
 
+def test_glm_jvp_wrapper_logc_link():
+    """LogC link inverse and derivative must match analytical formulas."""
+    rng = np.random.default_rng(42)
+    z = jnp.asarray(rng.standard_normal(10))
+
+    link = sm.families.links.LogC()
+    inv = _jax_link_inverse(link)
+    deriv = _jax_link_inverse_deriv(link)
+
+    # g⁻¹(z) = 1 - exp(z)
+    expected_inv = 1.0 - jnp.exp(z)
+    np.testing.assert_allclose(inv(z), expected_inv, rtol=1e-10)
+
+    # dg⁻¹/dz = -exp(z)
+    expected_deriv = -jnp.exp(z)
+    np.testing.assert_allclose(deriv(z), expected_deriv, rtol=1e-10)
+
+    # Derivative via autodiff should match analytical derivative
+    g_autodiff = jax.grad(lambda zz: inv(zz).sum())(z)
+    np.testing.assert_allclose(g_autodiff, deriv(z), rtol=1e-8)
+
+
 # ---------------------------------------------------------------------------
 # 3. FD vs autodiff agreement
 # ---------------------------------------------------------------------------
@@ -281,6 +305,22 @@ def test_fd_jvp_wrapper_X_gradients():
     gX_wrapped = jax.grad(lambda X_: wrapped(beta, X_).sum())(X)
     expected = jnp.tile(beta, (n, 1))
     np.testing.assert_allclose(gX_wrapped, expected, rtol=1e-6)
+
+
+def test_fd_jvp_wrapper_rejects_non_2d_X():
+    """FD-JVP X-tangent path must coerce X and reject non-2D inputs."""
+    rng = np.random.default_rng(505)
+    beta = jnp.asarray(rng.standard_normal(3))
+
+    def native_predict(beta_np, X):
+        return np.asarray(X) @ np.asarray(beta_np)
+
+    wrapped = make_predict_with_fd_jvp(native_predict, fd_step=1e-6)
+
+    # 1D X should raise
+    X_1d = jnp.asarray(rng.standard_normal(3))
+    with pytest.raises(ValueError, match="2D array"):
+        jax.grad(lambda X_: wrapped(beta, X_).sum())(X_1d)
 
 
 # ---------------------------------------------------------------------------
@@ -386,4 +426,17 @@ def test_hessian_fd_warns_for_large_n():
         return (b ** 2).sum()
 
     with pytest.warns(RuntimeWarning, match="O\\(n²\\) and explicitly slow"):
+        hessian(h, beta, backend="fd", fd_step=1e-5)
+
+
+def test_hessian_fd_vector_estimand_raises():
+    """_hessian_fd should raise a clear error for vector-valued h."""
+    rng = np.random.default_rng(111)
+    beta = jnp.asarray(rng.standard_normal(3))
+    X = jnp.asarray(rng.standard_normal((2, 3)))
+
+    def h(b):
+        return X @ b  # vector-valued
+
+    with pytest.raises(ValueError, match="scalar-valued"):
         hessian(h, beta, backend="fd", fd_step=1e-5)

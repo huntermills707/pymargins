@@ -609,7 +609,11 @@ class MarginsResult:
             conf_int_upper=new_hi,
             method=self.method,
             level=self.level,
+            n_obs=self.n_obs,
             kappa=self.kappa,
+            delta_sim_disagreement=self.delta_sim_disagreement,
+            fallback_triggered=self.fallback_triggered,
+            fallback_reason=self.fallback_reason,
             estimand_metadata={**self.estimand_metadata,
                                "labels": [f"({l})*{scalar}"
                                           for l in self.estimand_metadata.get("labels", [])]},
@@ -762,11 +766,17 @@ def _combine_results(
         conf_int_upper=np.asarray(upper_report),
         method=a.method,
         level=a.level,
+        n_obs=max(a.n_obs, b.n_obs),
         kappa=None,  # not recomputed for combined results
+        delta_sim_disagreement=None,
+        fallback_triggered=a.fallback_triggered or b.fallback_triggered,
+        fallback_reason=(a.fallback_reason or b.fallback_reason),
         estimand_metadata={"labels": [label_combine(a_label, b_label)]},
         gradient=new_grad,
         draws=None,
         cov_params=a.cov_params,
+        phi=a.phi,
+        phi_inv=a.phi_inv,
         session=a.session,
     )
 

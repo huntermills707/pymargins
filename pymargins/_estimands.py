@@ -27,6 +27,7 @@ from __future__ import annotations
 from typing import Callable, Optional, Union, Any
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 
 # ---------------------------------------------------------------------------
@@ -131,72 +132,89 @@ def make_prediction_estimand(
 
 def make_slope_estimand(
     adapter,
-    X: jnp.ndarray,
-    var_index: int,
+    df,
+    var_name: str,
     *,
     aggregate: str = "overall",
     weights: Optional[jnp.ndarray] = None,
     phi_inv: Optional[Callable] = None,
     offset: Optional[jnp.ndarray] = None,
     transform: Optional[Callable] = None,
-    backend: str = "autodiff",
     fd_step: float = 1e-6,
 ) -> Callable[[jnp.ndarray], jnp.ndarray]:
-    """Construct h(β) for a slope (marginal effect of a continuous variable).
+    """Construct h(β) for the *total* marginal effect ∂μ/∂v.
 
-    Computes ∂μ/∂x_j per row via autodiff (or FD) over the design matrix
-    direction, aggregates per rule, applies phi_inv. The double-derivative
-    structure (inner ∂/∂x for the slope, outer ∂/∂β for inference) is
-    handled cleanly by JAX's nested differentiation.
+    Computes the slope as a data-side central-difference: the source
+    DataFrame's column ``var_name`` is perturbed by ±ε, the design matrix
+    is rebuilt through ``adapter.design_matrix_from_df`` (so patsy
+    regenerates every interaction, polynomial, spline, and ``I(...)``
+    transform that depends on ``var_name``), and the prediction is
+    central-differenced. This matches the semantics of R's
+    ``marginaleffects::slopes()`` and Stata's ``margins, dydx()``: a
+    request for the marginal effect of ``v`` returns the *total*
+    derivative ∂μ/∂v including chain-rule contributions from every
+    derived design column, not just the partial w.r.t. one column.
+
+    The two perturbed design matrices are computed once at construction
+    and captured by the closure; ``h(β)`` then only re-evaluates predict.
+    β-gradients flow through predict via JAX as usual.
 
     Parameters
     ----------
     adapter : ModelAdapter
-        Provides predict, must support differentiation w.r.t. its X argument.
-        For LinearPredictionAdapter and GLMAdapter the slope is exact via
-        autodiff. For WrappedFDAdapter the slope uses the same FD mechanism
-        as gradients.
+        Provides ``predict`` and ``design_matrix_from_df``.
 
-    X : jax array of shape (n_rows, n_features)
-        Evaluation points.
+    df : pd.DataFrame
+        Evaluation data. One row → slope at that row; multiple rows →
+        per-row slopes aggregated per ``aggregate``. Must contain
+        ``var_name`` as a column.
 
-    var_index : int
-        Column index of the slope variable in X. The adapter's
-        variable_metadata() can map a variable name to its index in X.
+    var_name : str
+        Source variable to perturb. Should be continuous; categorical or
+        binary variables must be filtered out upstream (use ``contrasts()``
+        instead). Patsy/formulaic re-evaluates every term that depends on
+        this column.
 
-    aggregate : str, default "overall"
-        See make_prediction_estimand.
-
-    weights, phi_inv, offset : as in make_prediction_estimand.
-
-    transform : callable, optional
-        Per-row mapping applied to slopes before averaging.
-
-    backend : str, default "autodiff"
-        Gradient backend for the inner ∂/∂x derivative. Passed to
-        directional_derivative. Should match the session's gradient_backend.
+    aggregate, weights, phi_inv, offset, transform : as in make_prediction_estimand.
 
     fd_step : float, default 1e-6
-        FD step for the inner derivative when backend is "fd" or "wrapped_fd".
+        Relative FD step. The actual perturbation per row is
+        ``fd_step * max(1, |v_i|)`` so it stays well-conditioned for both
+        small (e.g., probabilities) and large (e.g., income) magnitudes.
 
     Returns
     -------
     h : callable (beta) -> scalar or vector
     """
-    from ._gradients import directional_derivative
+    import pandas as pd  # local to keep the module's hard deps minimal
 
-    def slope_at_row(beta, x_row):
-        # Directional derivative of prediction at this row along x[var_index]
-        def predict_at_x(x):
-            return adapter.predict(beta, x[None, :], offset=offset)[0]
-        direction = jnp.zeros_like(x_row).at[var_index].set(1.0)
-        return directional_derivative(
-            predict_at_x, x_row, direction,
-            backend=backend, fd_step=fd_step,
+    if var_name not in df.columns:
+        raise ValueError(
+            f"Variable {var_name!r} not in df.columns: {list(df.columns)}"
         )
 
+    v = pd.to_numeric(df[var_name], errors="coerce").to_numpy()
+    if not np.all(np.isfinite(v)):
+        raise ValueError(
+            f"Variable {var_name!r} has non-numeric or NaN values; "
+            "dydx() is only defined for finite numeric columns."
+        )
+
+    eps = fd_step * np.maximum(1.0, np.abs(v))  # shape (n_rows,)
+
+    df_plus = df.copy()
+    df_minus = df.copy()
+    df_plus[var_name] = v + eps
+    df_minus[var_name] = v - eps
+
+    Xp = adapter.design_matrix_from_df(df_plus)
+    Xm = adapter.design_matrix_from_df(df_minus)
+    eps_jax = jnp.asarray(eps)
+
     def h(beta):
-        slopes = jax.vmap(slope_at_row, in_axes=(None, 0))(beta, X)
+        mu_p = adapter.predict(beta, Xp, offset=offset)
+        mu_m = adapter.predict(beta, Xm, offset=offset)
+        slopes = (mu_p - mu_m) / (2.0 * eps_jax)
         if transform is not None:
             slopes = transform(slopes)
         if aggregate == "overall":
@@ -210,7 +228,7 @@ def make_slope_estimand(
                 else:
                     value = jnp.sum(weights * slopes) / jnp.sum(weights)
         elif aggregate == "none":
-            value = slopes
+            value = slopes[0] if slopes.shape[0] == 1 else slopes
         else:
             raise ValueError(f"Unknown aggregate rule: {aggregate!r}")
         if phi_inv is not None:
@@ -283,11 +301,7 @@ def make_linear_combination_estimand(
 
     def per_scenario_value(beta, X, offset, w):
         mu = adapter.predict(beta, X, offset=offset)
-        if scenario_aggregate == "overall":
-            if w is None:
-                return jnp.mean(mu)
-            return jnp.sum(w * mu) / jnp.sum(w)
-        elif scenario_aggregate == "weighted":
+        if scenario_aggregate in ("overall", "weighted"):
             if w is None:
                 return jnp.mean(mu)
             return jnp.sum(w * mu) / jnp.sum(w)
@@ -380,9 +394,7 @@ def make_evaluate_estimand(
 
     def per_scenario_value(beta, X, offset, w):
         mu = adapter.predict(beta, X, offset=offset)
-        if scenario_aggregate == "overall":
-            return jnp.mean(mu)
-        elif scenario_aggregate == "weighted":
+        if scenario_aggregate in ("overall", "weighted"):
             if w is None:
                 return jnp.mean(mu)
             return jnp.sum(w * mu) / jnp.sum(w)
@@ -416,6 +428,13 @@ def is_jax_differentiable(h: Callable, beta: jnp.ndarray) -> bool:
     conditionals on values, NumPy ops without conversion, etc.), this
     returns False and the engine falls back to simulation or bootstrap.
 
+    The probe mirrors the trace patterns the engine actually uses:
+    ``jax.vmap`` (for simulation draws) and ``jax.hessian`` (for the κ
+    diagnostic). A function may pass single-point ``jax.grad`` while still
+    failing under vmap-batched tracing — for example a Python ``if`` on a
+    component of ``b`` evaluates to a concrete boolean at scalar inputs but
+    raises ``TracerBoolConversionError`` under vmap.
+
     Parameters
     ----------
     h : callable
@@ -427,20 +446,21 @@ def is_jax_differentiable(h: Callable, beta: jnp.ndarray) -> bool:
     Returns
     -------
     differentiable : bool
-        True if jax.grad(h)(beta) succeeds.
+        True if both ``jax.vmap(h)`` and ``jax.hessian(h)`` (or
+        ``jax.jacobian`` for vector estimands) succeed at ``beta``.
     """
     import jax
     out = h(beta)
-    # Narrow to JAX tracer/concretization errors and TypeError.
-    # Avoid catching bare Exception so genuine programming errors in
-    # estimand factories propagate rather than being silently treated as
-    # non-differentiable.
+    # Narrow to JAX tracer/concretization errors. Avoid catching bare
+    # Exception so genuine programming errors in estimand factories
+    # propagate rather than being silently treated as non-differentiable.
     jax_tracer_errors: tuple = (TypeError,)
     if hasattr(jax, "errors"):
         tracer_errs = []
         for name in (
             "TracerIntegerConversionError",
             "TracerArrayConversionError",
+            "TracerBoolConversionError",
             "TracerTupleConversionError",
             "ConcretizationTypeError",
             "UnexpectedTracerError",
@@ -450,8 +470,11 @@ def is_jax_differentiable(h: Callable, beta: jnp.ndarray) -> bool:
         if tracer_errs:
             jax_tracer_errors = tuple(tracer_errs)
     try:
+        # Probe vmap (used by _run_simulation and delta_simulation_disagreement).
+        jax.vmap(h)(jnp.stack([beta, beta]))
+        # Probe second-order (used by κ via _kappa.kappa → jax.hessian).
         if jnp.ndim(out) == 0:
-            jax.grad(h)(beta)
+            jax.hessian(h)(beta)
         else:
             jax.jacobian(h)(beta)
         return True

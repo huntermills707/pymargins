@@ -29,9 +29,16 @@ from typing import Optional, Any
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
+import statsmodels.api as sm
 
 from .._adapter import GLMAdapter, VariableInfo
 from .._gradients import make_glm_jvp_wrapper
+from ._common import (
+    extract_training_data,
+    design_matrix_from_df,
+    column_index_of_variable,
+    build_variable_metadata,
+)
 
 
 class StatsmodelsGLMAdapter(GLMAdapter):
@@ -55,19 +62,12 @@ class StatsmodelsGLMAdapter(GLMAdapter):
         # Build the JAX-compatible predict using analytical link derivative
         self._predict_jax = make_glm_jvp_wrapper(self.family)
 
-        # Training data: prefer explicit, fall back to model attribute
-        if training_data is not None:
-            self.training_data = training_data
-        elif hasattr(results.model, "data") and hasattr(results.model.data, "frame"):
-            self.training_data = results.model.data.frame
-        else:
-            raise ValueError(
-                "training_data must be provided when the model wasn't fit "
-                "via the formula API (no results.model.data.frame available)."
-            )
-
-        # Cache exog column names for variable lookup
+        self._training_data = extract_training_data(results, training_data)
         self._exog_names = list(results.model.exog_names)
+
+    @property
+    def training_data(self):
+        return self._training_data
 
     # -----------------------------------------------------------------------
     # Core data access
@@ -101,25 +101,27 @@ class StatsmodelsGLMAdapter(GLMAdapter):
 
         if isinstance(vcov_spec, str):
             spec_lower = vcov_spec.lower()
+            spec_upper = vcov_spec.upper()
             if spec_lower in ("hc0", "hc1", "hc2", "hc3"):
-                attr = f"cov_{vcov_spec.upper()}"
-                if hasattr(self.results, attr):
-                    return jnp.asarray(getattr(self.results, attr))
-                raise ValueError(
-                    f"{vcov_spec} not available on this fit. Refit the model "
-                    f"with cov_type={vcov_spec.lower()!r}."
-                )
+                # GLM stores the robust cov in cov_params() when fit with that
+                # cov_type; unlike OLS it does not expose cov_HC3 as a separate
+                # attribute. Check whether the fit already used this flavor.
+                if getattr(self.results, "cov_type", "").upper() == spec_upper:
+                    return jnp.asarray(self.results.cov_params())
+                # Otherwise refit with the requested cov_type
+                return self._refit_and_extract_cov(cov_type=spec_lower)
             raise ValueError(f"Unsupported vcov string: {vcov_spec!r}")
 
         if isinstance(vcov_spec, dict):
             kind = vcov_spec.get("type")
             if kind == "cluster":
-                # Requires refit; not currently implemented
-                raise NotImplementedError(
-                    "Cluster-robust vcov via this adapter requires the model "
-                    "to be refit with cov_type='cluster' and cov_kwds. Either "
-                    "refit the model that way and pass vcov=None, or "
-                    "supply the cluster-robust matrix directly as an ndarray."
+                groups = vcov_spec.get("groups")
+                if groups is None:
+                    raise ValueError(
+                        "cluster vcov requires 'groups' in the spec dict."
+                    )
+                return self._refit_and_extract_cov(
+                    cov_type="cluster", cov_kwds={"groups": groups},
                 )
             raise ValueError(f"Unsupported vcov dict type: {kind!r}")
 
@@ -142,133 +144,102 @@ class StatsmodelsGLMAdapter(GLMAdapter):
     # -----------------------------------------------------------------------
 
     def design_matrix_from_df(self, df: pd.DataFrame) -> jnp.ndarray:
-        """Build a design matrix from a DataFrame using the model's formula.
-
-        Implementers: this needs to reproduce the formula expansion that
-        was used at fit time — factor encoding, interactions, splines,
-        polynomial terms. The cleanest approach for formula-fit models is
-        to reuse statsmodels' design_info:
-
-            from patsy import dmatrix
-            design_info = self.results.model.data.design_info
-            X = dmatrix(design_info, df, return_type='matrix')
-
-        For direct-array fits (no formula), df should already match the
-        column order of results.model.exog; this method just returns
-        df[exog_names].values.
-
-        Returns
-        -------
-        X : jax array of shape (n_rows, n_features)
-        """
-        # Try formula-based construction first
-        if hasattr(self.results.model.data, "design_info"):
-            from patsy import dmatrix
-            design_info = self.results.model.data.design_info
-            X_np = np.asarray(dmatrix(design_info, df, return_type="matrix"))
-            return jnp.asarray(X_np)
-        # Fall back: direct column lookup
-        return jnp.asarray(df[self._exog_names].values)
+        return design_matrix_from_df(self.results, self._exog_names, df)
 
     def column_index_of_variable(self, variable_name: str) -> int:
-        """Return the index of `variable_name` in the design matrix.
-
-        For variables that map to a single column (continuous, binary in
-        treatment coding), this is straightforward. For categorical
-        variables expanded into multiple columns, this returns the index
-        of the first non-reference level — though dydx() should refuse
-        these (categorical → use contrasts).
-
-        Implementers: needs to handle factor expansions correctly. For a
-        first cut, raise NotImplementedError when variable_name doesn't
-        appear in exog_names directly.
-        """
-        if variable_name in self._exog_names:
-            return self._exog_names.index(variable_name)
-        # Heuristic: look for a patsy-expanded column like "var[level]" or "var.level"
-        # Avoid matching "x_squared" when looking for "x".
-        for sep in ("[", ".", ":"):
-            prefixed = f"{variable_name}{sep}"
-            for i, name in enumerate(self._exog_names):
-                if name.startswith(prefixed):
-                    return i
-        raise ValueError(
-            f"Cannot locate variable {variable_name!r} in design matrix. "
-            f"exog_names: {self._exog_names}"
+        return column_index_of_variable(
+            self._exog_names, self.variable_metadata(), variable_name,
         )
 
-    # -----------------------------------------------------------------------
-    # Variable metadata
-    # -----------------------------------------------------------------------
-
     def variable_metadata(self) -> dict[str, VariableInfo]:
-        """Extract per-variable metadata from the training data.
-
-        Implementers: variable types are inferred heuristically from the
-        column dtypes and unique-value counts:
-          - bool, or 2 unique values: binary
-          - object/category dtype: categorical
-          - integer with few unique values: discrete
-          - float or integer with many unique values: continuous
-
-        For better metadata, consult the formula's term info if available;
-        statsmodels exposes some of this via results.model.data.design_info.
-        """
-        metadata = {}
-        for col in self.training_data.columns:
-            series = self.training_data[col]
-            metadata[col] = VariableInfo(
-                name=col,
-                var_type=self._infer_type(series),
-                levels=(list(series.unique())
-                        if self._infer_type(series) in ("binary", "categorical")
-                        else None),
-                support=((float(series.min()), float(series.max()))
-                         if pd.api.types.is_numeric_dtype(series)
-                         else None),
-            )
-        return metadata
-
-    @staticmethod
-    def _infer_type(series: pd.Series) -> str:
-        if series.dtype == bool:
-            return "binary"
-        if not pd.api.types.is_numeric_dtype(series):
-            return "categorical"
-        unique = series.dropna().unique()
-        if len(unique) == 2:
-            return "binary"
-        if pd.api.types.is_integer_dtype(series) and len(unique) < 20:
-            return "discrete"
-        return "continuous"
+        if not hasattr(self, "_variable_metadata"):
+            self._variable_metadata = build_variable_metadata(self.training_data)
+        return self._variable_metadata
 
     # -----------------------------------------------------------------------
     # Bootstrap support
     # -----------------------------------------------------------------------
+
+    def _refit_and_extract_cov(self, cov_type: str, cov_kwds=None) -> jnp.ndarray:
+        """Refit the model with a specific cov_type and return its covariance.
+
+        Used when the user requests a vcov flavor that the original fit did
+        not compute. For formula-fit models this is straightforward; for
+        array-fit models we reconstruct exog/endog and refit.
+        """
+        from statsmodels.formula.api import glm as smf_glm
+
+        formula = getattr(self.results.model, "formula", None)
+        if formula is not None:
+            if cov_kwds and "groups" in cov_kwds:
+                groups = cov_kwds["groups"]
+                if hasattr(groups, "__len__") and len(groups) != len(self._training_data):
+                    raise ValueError(
+                        f"groups length ({len(groups)}) must match training_data "
+                        f"length ({len(self._training_data)})."
+                    )
+            new_results = smf_glm(
+                formula, data=self._training_data, family=self.family,
+            ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {})
+            return jnp.asarray(new_results.cov_params())
+
+        # Array-fit refit
+        endog = self.results.model.endog
+        exog = self.results.model.exog
+        new_results = sm.GLM(
+            endog, exog, family=self.family,
+        ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {})
+        return jnp.asarray(new_results.cov_params())
 
     def refit(self, resampled_data: pd.DataFrame) -> "StatsmodelsGLMAdapter":
         """Refit the model on resampled data.
 
         Reconstructs the formula and family from the original results and
         fits a new GLM on the resampled data, returning a new adapter.
-
-        Implementers: be careful about the formula API. If the original
-        was fit via formula, results.model.formula and results.model.data.frame
-        are typically available; reuse them. If it was fit via direct arrays,
-        you need to reconstruct exog and endog from resampled_data.
         """
         from statsmodels.formula.api import glm as smf_glm
 
         formula = getattr(self.results.model, "formula", None)
-        if formula is None:
-            raise NotImplementedError(
-                "Refit only supported for formula-fit models currently. "
-                "For array-fit models, the formula reconstruction would need "
-                "explicit handling."
+        if formula is not None:
+            new_results = smf_glm(
+                formula, data=resampled_data, family=self.family,
+            ).fit()
+            return StatsmodelsGLMAdapter(new_results, training_data=resampled_data)
+
+        # Array-fit refit: reconstruct exog and endog from resampled_data.
+        # We assume the training_data columns match the model's exog_names
+        # (plus the endog variable, which we need to identify).
+        endog_name = getattr(self.results.model, "endog_names", None)
+        if endog_name is None:
+            # Fallback: try to find the response variable by excluding exog columns
+            exog_cols = set(self._exog_names)
+            # Remove intercept-like column names if they were inserted
+            exog_cols.discard("const")
+            exog_cols.discard("Intercept")
+            possible_endog = [c for c in resampled_data.columns if c not in exog_cols]
+            if len(possible_endog) == 1:
+                endog_name = possible_endog[0]
+            else:
+                raise NotImplementedError(
+                    "Array-fit refit requires the response variable name. "
+                    "Pass training_data with a clear response column, or use "
+                    "formula-fit models."
+                )
+        exog_cols = [c for c in self._exog_names if c in resampled_data.columns]
+        if not exog_cols:
+            raise ValueError(
+                f"None of the model's exog_names {self._exog_names} are present "
+                f"in resampled_data columns {list(resampled_data.columns)}. "
+                "Pass training_data whose columns match the fitted exog_names."
             )
-        new_results = smf_glm(
-            formula, data=resampled_data, family=self.family,
-        ).fit()
+        endog = resampled_data[endog_name].values
+        exog_df = resampled_data[exog_cols]
+        # Add intercept if the original model had one
+        if "const" in self._exog_names or "Intercept" in self._exog_names:
+            if "const" not in exog_df.columns and "Intercept" not in exog_df.columns:
+                exog_df = exog_df.copy()
+                exog_df.insert(0, "const", 1.0)
+        new_results = sm.GLM(endog, exog_df, family=self.family).fit()
         return StatsmodelsGLMAdapter(new_results, training_data=resampled_data)
 
 

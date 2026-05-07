@@ -14,10 +14,41 @@ That said, the API has bugs, mostly in the user-facing layer where
 scale-handling crosses module boundaries. Find them now, before downstream
 tests hide them as test-level workarounds.
 
-> **Post-fix changelog** — The definite bugs B1, B2/B3, B4, B6, B10, B14, B15,
-> B27 and the design issues A1, A6 identified in this review have been resolved
-> in the implementation. See the individual items below for details.
-> Remaining open items: B16, B17, A4, A5, A8, A11, B12, B13, B18.
+> **Post-fix changelog** — The definite bugs B1, B2/B3, B4, B6, B10, B14,
+> B15, B27 and the design issues A1, A6 identified in this review have
+> been resolved. B13 ("dydx doesn't block discrete var_type") is moot:
+> `_infer_variable_type` no longer emits `"discrete"`, and `dydx()` now
+> uses data-side FD (see "Behavioral changes" below) so discrete-vs-
+> continuous classification at the design-matrix level no longer affects
+> slope semantics.
+>
+> Remaining open items: B16, B17, A4, A5, A8, A11, B12, B18.
+>
+> **Behavioral changes since this review:**
+> - `dydx(v)` now returns the **total** derivative ∂μ/∂v computed via a
+>   data-side central difference: the source DataFrame's column `v` is
+>   perturbed by ±ε, the design matrix is rebuilt through
+>   `adapter.design_matrix_from_df`, and patsy regenerates every
+>   interaction, polynomial, spline, and `I(...)` transform. Matches
+>   Stata's `margins, dydx()` and R's `marginaleffects::slopes()`.
+>   The previous column-wise partial silently underreported marginal
+>   effects for any model with interactions or transforms.
+> - `column_index_of_variable` is now a type guard for `dydx()` only;
+>   its return value is unused. Categorical/binary variables still raise
+>   here with a "use contrasts() instead" message.
+> - `is_jax_differentiable` strengthened to probe `jax.vmap` and
+>   `jax.hessian`, matching the trace patterns the engine actually uses
+>   (simulation draws and the κ diagnostic). The previous single-point
+>   `jax.grad` probe missed `TracerBoolConversionError` cases.
+> - κ computed at β̂ on all three inference paths (delta, simulation,
+>   bootstrap) when h is JAX-differentiable. Previously only delta
+>   reported it.
+> - `delta_simulation_disagreement` works for vector estimands.
+> - `LogC` link inverse and derivative corrected; `Power(0)` link maps
+>   to the log link as statsmodels does.
+> - Auto-fallback from delta to simulation surfaces on the result via
+>   `fallback_triggered` / `fallback_reason`, propagating through
+>   composition.
 
 
 ## Definite bugs
@@ -134,9 +165,13 @@ or update the docstring.
   implemented. Either drop the parameter or stub LR/score and raise
   NotImplementedError.
 
-- **B13 — `dydx` doesn't block "discrete" var_type.** Code blocks "binary"
-  and "categorical" only. Discrete (e.g., parity) silently autodiffs.
-  Probably fine but document the choice.
+- **B13 — `dydx` doesn't block "discrete" var_type.** *(MOOT)*
+  `_infer_variable_type` no longer emits `"discrete"`; integer columns
+  with few unique values are classified `"continuous"` (or `"binary"`
+  when there are exactly 2 uniques). `dydx()` uses a data-side central
+  difference through `design_matrix_from_df`, so the underlying
+  semantics work for any numeric continuous column regardless of
+  classification.
 
 - **B18 — Subtle semantic distinction between `contrasts` and `evaluate`.**
   `contrasts` does `Σ wᵢ φ⁻¹(pᵢ)`; `evaluate` does `φ⁻¹(compose(p))`. Both

@@ -1,0 +1,167 @@
+"""
+pymargins._adapters.statsmodels_ols
+
+Concrete adapter for statsmodels OLS, WLS, and GLS result objects.
+Inherits predict() from LinearPredictionAdapter (simple Xβ).
+"""
+
+from __future__ import annotations
+from typing import Optional, Any
+import jax.numpy as jnp
+import numpy as np
+import pandas as pd
+import statsmodels.api as sm
+
+from .._adapter import LinearPredictionAdapter, VariableInfo
+from ._common import (
+    extract_training_data,
+    design_matrix_from_df,
+    column_index_of_variable,
+    build_variable_metadata,
+)
+
+
+class StatsmodelsOLSAdapter(LinearPredictionAdapter):
+    """Adapter for statsmodels OLS/WLS/GLS result objects.
+
+    Parameters
+    ----------
+    results : RegressionResults
+        Fitted statsmodels OLS/WLS/GLS result object.
+
+    training_data : pd.DataFrame, optional
+        The data the model was fit on. statsmodels exposes this via
+        results.model.data.frame for formula-fit models.
+    """
+
+    def __init__(self, results, training_data: Optional[pd.DataFrame] = None):
+        self.results = results
+        self._training_data = extract_training_data(results, training_data)
+        self._exog_names = list(results.model.exog_names)
+
+    @property
+    def training_data(self):
+        return self._training_data
+
+    # -----------------------------------------------------------------------
+    # Core data access
+    # -----------------------------------------------------------------------
+
+    def coefficients(self) -> jnp.ndarray:
+        return jnp.asarray(self.results.params)
+
+    def covariance(self, vcov_spec: Optional[Any] = None) -> jnp.ndarray:
+        """Return Σ̂, dispatching to the requested flavor.
+
+        OLS results expose cov_HC0 / cov_HC1 / cov_HC2 / cov_HC3 as
+        attributes regardless of how the model was fit, so we can read
+        them directly. Cluster-robust requires refit.
+        """
+        if vcov_spec is None:
+            return jnp.asarray(self.results.cov_params())
+
+        if isinstance(vcov_spec, np.ndarray):
+            return jnp.asarray(vcov_spec)
+
+        if isinstance(vcov_spec, str):
+            spec_lower = vcov_spec.lower()
+            if spec_lower in ("hc0", "hc1", "hc2", "hc3"):
+                attr = f"cov_{vcov_spec.upper()}"
+                if hasattr(self.results, attr):
+                    return jnp.asarray(getattr(self.results, attr))
+                raise ValueError(
+                    f"{vcov_spec} not available on this fit."
+                )
+            raise ValueError(f"Unsupported vcov string: {vcov_spec!r}")
+
+        if isinstance(vcov_spec, dict):
+            kind = vcov_spec.get("type")
+            if kind == "cluster":
+                groups = vcov_spec.get("groups")
+                if groups is None:
+                    raise ValueError(
+                        "cluster vcov requires 'groups' in the spec dict."
+                    )
+                return self._refit_and_extract_cov(
+                    cov_type="cluster", cov_kwds={"groups": groups},
+                )
+            raise ValueError(f"Unsupported vcov dict type: {kind!r}")
+
+        raise ValueError(f"Unsupported vcov_spec: {vcov_spec!r}")
+
+    # -----------------------------------------------------------------------
+    # Design matrix construction
+    # -----------------------------------------------------------------------
+
+    def design_matrix_from_df(self, df: pd.DataFrame) -> jnp.ndarray:
+        return design_matrix_from_df(self.results, self._exog_names, df)
+
+    def column_index_of_variable(self, variable_name: str) -> int:
+        return column_index_of_variable(
+            self._exog_names, self.variable_metadata(), variable_name,
+        )
+
+    def variable_metadata(self) -> dict[str, VariableInfo]:
+        if not hasattr(self, "_variable_metadata"):
+            self._variable_metadata = build_variable_metadata(self.training_data)
+        return self._variable_metadata
+
+    # -----------------------------------------------------------------------
+    # Bootstrap support
+    # -----------------------------------------------------------------------
+
+    def _refit_and_extract_cov(self, cov_type: str, cov_kwds=None) -> jnp.ndarray:
+        """Refit the model with a specific cov_type and return its covariance."""
+        from statsmodels.formula.api import ols as smf_ols
+
+        formula = getattr(self.results.model, "formula", None)
+        if formula is not None:
+            new_results = smf_ols(
+                formula, data=self._training_data,
+            ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {})
+            return jnp.asarray(new_results.cov_params())
+
+        endog = self.results.model.endog
+        exog = self.results.model.exog
+        new_results = sm.OLS(endog, exog).fit(
+            cov_type=cov_type, cov_kwds=cov_kwds or {},
+        )
+        return jnp.asarray(new_results.cov_params())
+
+    def refit(self, resampled_data: pd.DataFrame) -> "StatsmodelsOLSAdapter":
+        """Refit the model on resampled data."""
+        from statsmodels.formula.api import ols as smf_ols
+
+        formula = getattr(self.results.model, "formula", None)
+        if formula is not None:
+            new_results = smf_ols(formula, data=resampled_data).fit()
+            return StatsmodelsOLSAdapter(new_results, training_data=resampled_data)
+
+        # Array-fit refit
+        endog_name = getattr(self.results.model, "endog_names", None)
+        if endog_name is None:
+            exog_cols = set(self._exog_names)
+            exog_cols.discard("const")
+            exog_cols.discard("Intercept")
+            possible_endog = [c for c in resampled_data.columns if c not in exog_cols]
+            if len(possible_endog) == 1:
+                endog_name = possible_endog[0]
+            else:
+                raise NotImplementedError(
+                    "Array-fit refit requires the response variable name."
+                )
+        exog_cols = [c for c in self._exog_names if c in resampled_data.columns]
+        if not exog_cols:
+            raise ValueError(
+                f"None of the model's exog_names {self._exog_names} are present "
+                f"in resampled_data columns {list(resampled_data.columns)}. "
+                "Pass training_data whose columns match the fitted exog_names."
+            )
+        endog = resampled_data[endog_name].values
+        exog_df = resampled_data[exog_cols]
+        if "const" in self._exog_names or "Intercept" in self._exog_names:
+            if "const" not in exog_df.columns and "Intercept" not in exog_df.columns:
+                exog_df = exog_df.copy()
+                exog_df.insert(0, "const", 1.0)
+        new_results = sm.OLS(endog, exog_df).fit()
+        return StatsmodelsOLSAdapter(new_results, training_data=resampled_data)

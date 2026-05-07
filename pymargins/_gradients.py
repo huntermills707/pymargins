@@ -354,6 +354,11 @@ def make_predict_with_fd_jvp(
             # WARNING: this path is O(n_obs · n_features) predict_native
             # calls. For a 1000×10 design that is 20_000 calls per HVP.
             # Fine as an adapter fallback, but avoid in large-batch loops.
+            X_np = np.asarray(X_np)
+            if X_np.ndim != 2:
+                raise ValueError(
+                    f"make_predict_with_fd_jvp expects a 2D array for X; got {X_np.ndim}D"
+                )
             n_obs, n_features = X_np.shape
             J_X = np.zeros((n_out, n_obs, n_features))
             for i in range(n_obs):
@@ -374,6 +379,87 @@ def make_predict_with_fd_jvp(
     return predict_wrapped
 
 
+def _jax_link_inverse(link):
+    """Return a JAX-native link inverse for common statsmodels links."""
+    name = type(link).__name__
+    if name == "Logit":
+        return lambda z: 1.0 / (1.0 + jnp.exp(-z))
+    if name == "Probit":
+        return jax.scipy.special.ndtr
+    if name == "CLogLog":
+        return lambda z: 1.0 - jnp.exp(-jnp.exp(z))
+    if name == "LogLog":
+        return lambda z: jnp.exp(-jnp.exp(-z))
+    if name == "LogC":
+        return lambda z: 1.0 - jnp.exp(z)
+    if name == "Log":
+        return jnp.exp
+    if name == "Identity":
+        return lambda z: z
+    if name == "Power":
+        p = float(getattr(link, "power", 1.0))
+        if p == 0.0:
+            # statsmodels treats Power(0) as the log link
+            return jnp.exp
+        return lambda z: jnp.power(z, 1.0 / p)
+    if name == "InversePower":
+        return lambda z: 1.0 / z
+    if name == "InverseSquared":
+        return lambda z: 1.0 / jnp.sqrt(z)
+    if name == "Sqrt":
+        return lambda z: z ** 2
+    if name == "Cauchy":
+        return lambda z: 0.5 + (1.0 / jnp.pi) * jnp.arctan(z)
+    if name == "NegativeBinomial":
+        alpha = float(link.alpha)
+        return lambda z: jnp.exp(z) / (alpha * (jnp.exp(z) - 1.0) + 1.0)
+    raise NotImplementedError(f"No JAX mapping for link {name!r}")
+
+
+def _jax_link_inverse_deriv(link):
+    """Return a JAX-native link inverse derivative for common statsmodels links."""
+    name = type(link).__name__
+    if name == "Logit":
+        def deriv(z):
+            t = jnp.exp(-z)
+            return t / (1.0 + t) ** 2
+        return deriv
+    if name == "Probit":
+        c = 1.0 / jnp.sqrt(2.0 * jnp.pi)
+        return lambda z: c * jnp.exp(-0.5 * z ** 2)
+    if name == "CLogLog":
+        return lambda z: jnp.exp(z - jnp.exp(z))
+    if name == "LogLog":
+        return lambda z: jnp.exp(-z - jnp.exp(-z))
+    if name == "LogC":
+        return lambda z: -jnp.exp(z)
+    if name == "Log":
+        return jnp.exp
+    if name == "Identity":
+        return lambda z: jnp.ones_like(z)
+    if name == "Power":
+        p = float(getattr(link, "power", 1.0))
+        if p == 0.0:
+            # statsmodels treats Power(0) as log link → derivative is exp
+            return jnp.exp
+        return lambda z: jnp.power(z, 1.0 / p - 1.0) / p
+    if name == "InversePower":
+        return lambda z: -1.0 / (z ** 2)
+    if name == "InverseSquared":
+        return lambda z: -0.5 / (z ** 1.5)
+    if name == "Sqrt":
+        return lambda z: 2.0 * z
+    if name == "Cauchy":
+        return lambda z: 1.0 / (jnp.pi * (1.0 + z ** 2))
+    if name == "NegativeBinomial":
+        alpha = float(link.alpha)
+        def deriv(z):
+            ez = jnp.exp(z)
+            return ez / (alpha * (ez - 1.0) + 1.0) ** 2
+        return deriv
+    raise NotImplementedError(f"No JAX mapping for link derivative {name!r}")
+
+
 def make_glm_jvp_wrapper(
     family,
 ) -> Callable:
@@ -381,67 +467,59 @@ def make_glm_jvp_wrapper(
     derivative.
 
     For any GLM with mean function μ = g⁻¹(η) where η = Xβ, the gradient
-    w.r.t. β is (dg⁻¹/dη at η) · X. statsmodels' Family objects expose
-    this via `family.link.inverse_deriv(eta)`, so one wrapper handles all
-    standard GLM families and links uniformly.
-
-    Compared to a JAX reimplementation of the prediction (Path A), this
-    wrapper has the advantage of using statsmodels' canonical link
-    implementations — useful when statsmodels' predict has nontrivial
-    edge-case logic (offsets, exposure, weights handled in nonstandard
-    ways) that you don't want to re-implement.
+    w.r.t. β is (dg⁻¹/dη at η) · X. This wrapper implements both the
+    forward evaluation and the tangent using JAX-native operations for
+    common links, making it fully compatible with jax.grad, jax.hessian,
+    jax.jvp, and jax.vmap.
 
     Parameters
     ----------
     family : statsmodels.genmod.families.Family
-        The fitted model's family object. Must expose .link.inverse and
-        .link.inverse_deriv.
+        The fitted model's family object. Must use a link supported by
+        _jax_link_inverse and _jax_link_inverse_deriv.
 
     Returns
     -------
     predict_wrapped : callable (beta, X, offset=None) -> array
         JAX-compatible prediction. Supports an optional offset added to
         the linear predictor before applying the link inverse.
+        Note: offset is passed as a keyword-default arg; while this works
+        with jax.grad/jvp/hessian today, jax.jit or nondiff_argnums may
+        require baking offset usage into the factory call site.
     """
     link = family.link
+    link_inv = _jax_link_inverse(link)
+    link_inv_deriv = _jax_link_inverse_deriv(link)
 
     @jax.custom_jvp
     def predict_wrapped(beta, X, offset=None):
-        beta_np = np.asarray(beta)
-        X_np = np.asarray(X)
-        eta = X_np @ beta_np
+        eta = jnp.asarray(X) @ jnp.asarray(beta)
         if offset is not None:
-            eta = eta + np.asarray(offset)
-        return jnp.asarray(link.inverse(eta))
+            eta = eta + jnp.asarray(offset)
+        return link_inv(eta)
 
     @predict_wrapped.defjvp
     def predict_wrapped_jvp(primals, tangents):
         beta, X, offset = primals
         beta_dot, X_dot, offset_dot = tangents
-        # During forward-mode (jax.jvp, jax.hessian) primals may be JVPTracers.
-        beta_np = np.asarray(_concrete_primal(beta))
-        X_np = np.asarray(_concrete_primal(X))
-        offset_np = np.asarray(_concrete_primal(offset)) if offset is not None else None
 
-        eta = X_np @ beta_np
-        if offset_np is not None:
-            eta = eta + offset_np
+        eta = jnp.asarray(X) @ jnp.asarray(beta)
+        if offset is not None:
+            eta = eta + jnp.asarray(offset)
 
-        # Forward (concrete, for statsmodels link functions)
-        mu = link.inverse(eta)
+        mu = link_inv(eta)
 
         # Tangent: dμ/dt = (dg⁻¹/dη) · (dη/dt)
-        # dη/dt = X · β̇ + Ẋ · β + offseṫ  (handles all differentiating directions)
-        # We keep the tangent computation in JAX space so it works with tracers.
-        eta_dot = X_np @ beta_dot
+        # dη/dt = X · β̇ + Ẋ · β + offseṫ
+        eta_dot = jnp.asarray(X) @ beta_dot
         if X_dot is not None:
-            eta_dot = eta_dot + X_dot @ beta_np
+            eta_dot = eta_dot + X_dot @ jnp.asarray(beta)
         if offset_dot is not None:
             eta_dot = eta_dot + offset_dot
 
-        mu_dot = link.inverse_deriv(eta) * eta_dot
+        mu_dot = link_inv_deriv(eta) * eta_dot
 
-        return jnp.asarray(mu), jnp.asarray(mu_dot)
+        return mu, mu_dot
 
     return predict_wrapped
 
@@ -496,6 +574,12 @@ def _hessian_fd(h, beta, eps):
     """
     beta = jnp.asarray(beta)
     n = beta.shape[0]
+    f0 = h(beta)
+    if jnp.ndim(f0) != 0:
+        raise ValueError(
+            "_hessian_fd only supports scalar-valued estimands. "
+            "For vector estimands, compute per-component Hessians or use autodiff."
+        )
     if n > 50:
         warnings.warn(
             f"_hessian_fd is O(n²) and explicitly slow (n_params={n}). "
