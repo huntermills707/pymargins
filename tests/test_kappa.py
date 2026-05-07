@@ -174,6 +174,53 @@ def test_session_kappa_basic():
     assert diag["verdict"] in ("delta_reliable", "delta_borderline", "delta_unreliable")
 
 
+def test_session_kappa_verdict_borderline():
+    """Force a borderline verdict with a highly curved estimand."""
+    rng = np.random.default_rng(42)
+    p = 3
+    beta = jnp.asarray(rng.standard_normal(p)) * 2.0  # larger magnitude
+    # Large covariance amplifies curvature in whitened coordinates
+    Sigma = jnp.eye(p) * 0.5
+
+    design = [jnp.asarray(rng.standard_normal(p)) for _ in range(5)]
+
+    def h_factory(x):
+        return lambda b: jax.scipy.special.expit(x @ b)
+
+    diag = session_kappa(
+        h_factory, beta, Sigma, design,
+        backend="autodiff",
+        reliable_threshold=0.01,
+        borderline_threshold=0.05,
+    )
+    # With very strict thresholds, logit should be at least borderline
+    assert diag["verdict"] in ("delta_borderline", "delta_unreliable")
+    assert "simulation" in diag["recommendation"].lower()
+
+
+def test_session_kappa_verdict_unreliable():
+    """Force an unreliable verdict with extreme curvature."""
+    rng = np.random.default_rng(42)
+    p = 2
+    beta = jnp.array([2.0, -2.0])
+    Sigma = jnp.eye(p) * 1.0  # large variance
+
+    design = [jnp.array([1.0, 0.5])]
+
+    def h_factory(x):
+        # Quadratic estimand has constant Hessian -> higher κ with larger Sigma
+        return lambda b: (b ** 2).sum()
+
+    diag = session_kappa(
+        h_factory, beta, Sigma, design,
+        backend="autodiff",
+        reliable_threshold=0.01,
+        borderline_threshold=0.05,
+    )
+    assert diag["verdict"] == "delta_unreliable"
+    assert "unreliable" in diag["recommendation"].lower()
+
+
 # ---------------------------------------------------------------------------
 # 6. delta_simulation_disagreement
 # ---------------------------------------------------------------------------
@@ -252,6 +299,47 @@ def test_delta_sim_disagreement_with_phi():
     assert disagreement >= 0.0
 
 
+def test_delta_sim_disagreement_zero_estimate_returns_inf():
+    """When estimate is exactly zero, disagreement should return +inf."""
+    rng = np.random.default_rng(42)
+    p = 3
+    beta = jnp.zeros(p)
+    Sigma = jnp.eye(p) * 0.01
+    x = jnp.asarray(rng.standard_normal(p))
+
+    def h(b):
+        return x @ b
+
+    from pymargins._gradients import gradient
+    grad = gradient(h, beta, backend="autodiff")
+    estimate = h(beta)
+
+    disagreement = delta_simulation_disagreement(
+        estimate, grad, Sigma, h, beta,
+        level=0.95, n_sim=1000, rng_seed=42,
+    )
+    assert disagreement == float("inf")
+
+
+def test_kappa_frobenius_norm():
+    """kappa with norm='frobenius' should return a positive finite value."""
+    rng = np.random.default_rng(42)
+    p = 3
+    beta = jnp.asarray(rng.standard_normal(p))
+    Sigma = jnp.eye(p) * 0.01
+    x = jnp.asarray(rng.standard_normal(p))
+
+    def h(b):
+        return jax.scipy.special.expit(x @ b)
+
+    k_spec = kappa(h, beta, Sigma, backend="autodiff", norm="spectral")
+    k_frob = kappa(h, beta, Sigma, backend="autodiff", norm="frobenius")
+    assert np.isfinite(k_frob)
+    assert k_frob > 0.0
+    # Frobenius >= spectral for any matrix
+    assert k_frob >= k_spec
+
+
 # ---------------------------------------------------------------------------
 # 7. Edge cases
 # ---------------------------------------------------------------------------
@@ -270,16 +358,17 @@ def test_kappa_zero_gradient_returns_inf():
 
 
 def test_kappa_non_psd_covariance():
-    """Non-PSD covariance should be handled gracefully (ridge or inf)."""
+    """Near-PSD covariance should be handled gracefully via ridge fallback."""
     p = 2
     beta = jnp.array([0.5, -0.3])
-    # Non-PSD matrix
-    Sigma = jnp.array([[1.0, 2.0], [2.0, 1.0]])
+    # Build a PSD matrix, then make it barely non-PSD with a tiny negative eigenvalue
+    base = jnp.array([[1.0, 0.3], [0.3, 1.0]])
+    Sigma = base - 1e-10 * jnp.eye(p)
 
     def h(b):
         return b.sum()
 
     k = kappa(h, beta, Sigma, backend="autodiff")
-    # Linear estimand => even with bad cov, after ridge it should be near 0
-    # or inf if ridge also fails. Accept either finite small or inf.
-    assert np.isfinite(k) or k == float("inf")
+    # Linear estimand => after ridge regularization κ should be near 0
+    assert np.isfinite(k), f"Expected finite κ after ridge, got {k}"
+    assert k < 1e-6, f"Expected κ ≈ 0 for linear estimand, got {k}"

@@ -30,6 +30,8 @@ which estimand, which scenario, which session scale — are resolved upstream.
 
 from __future__ import annotations
 from typing import Callable, Literal
+import warnings
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -125,10 +127,11 @@ def hessian(
     hessian_vector_product for the more common case where you need only
     H @ v for some direction v.
 
-    Hessian computations through wrapped_fd are FD-quality on the wrapped
-    primitive (still ~10 digits) but exact on the surrounding structure.
-    Full FD Hessians (backend="fd") compound numerical error and should be
-    avoided when any JAX path exists.
+    Note: ``wrapped_fd`` works for gradients but may not support Hessians
+    through ``jax.hessian`` because custom JVPs do not automatically expose
+    second-order derivatives. For Hessians of wrapped functions, use
+    ``backend="fd"`` (which applies FD to the entire estimand, including the
+    wrapped primitive).
 
     Parameters
     ----------
@@ -229,6 +232,12 @@ def hessian_vector_product(
     -------
     hvp : jax array of shape (n_params,)
         H_h(β) @ v.
+
+    Notes
+    -----
+    ``wrapped_fd`` works for gradients but may not support HVPs through nested
+    ``jax.grad`` because custom JVPs do not automatically expose second-order
+    derivatives. For HVPs of wrapped functions, use ``backend="fd"``.
     """
     if backend in ("autodiff", "wrapped_fd"):
         return jax.grad(lambda b: jnp.dot(jax.grad(h)(b), direction))(beta)
@@ -242,12 +251,20 @@ def hessian_vector_product(
 
 
 def _concrete_primal(x):
-    """Extract the concrete primal value from a JAX array or JVPTracer."""
+    """Extract the concrete primal value from a JAX array or JVPTracer.
+
+    Uses a try/except around np.asarray as a fallback because the
+    ``.primal`` attribute name is not part of JAX's public API and
+    may change across versions.
+    """
     if x is None:
         return None
     if hasattr(x, "primal"):
         return x.primal
-    return x
+    try:
+        return np.asarray(x)
+    except Exception:
+        return x
 
 
 def make_predict_with_fd_jvp(
@@ -334,6 +351,9 @@ def make_predict_with_fd_jvp(
         # ------------------------------------------------------------------
         deriv_X = 0.0
         if X_dot is not None:
+            # WARNING: this path is O(n_obs · n_features) predict_native
+            # calls. For a 1000×10 design that is 20_000 calls per HVP.
+            # Fine as an adapter fallback, but avoid in large-batch loops.
             n_obs, n_features = X_np.shape
             J_X = np.zeros((n_out, n_obs, n_features))
             for i in range(n_obs):
@@ -414,9 +434,9 @@ def make_glm_jvp_wrapper(
         # dη/dt = X · β̇ + Ẋ · β + offseṫ  (handles all differentiating directions)
         # We keep the tangent computation in JAX space so it works with tracers.
         eta_dot = X_np @ beta_dot
-        if X_dot is not None and not isinstance(X_dot, type(None)):
+        if X_dot is not None:
             eta_dot = eta_dot + X_dot @ beta_np
-        if offset_dot is not None and not isinstance(offset_dot, type(None)):
+        if offset_dot is not None:
             eta_dot = eta_dot + offset_dot
 
         mu_dot = link.inverse_deriv(eta) * eta_dot
@@ -476,6 +496,13 @@ def _hessian_fd(h, beta, eps):
     """
     beta = jnp.asarray(beta)
     n = beta.shape[0]
+    if n > 50:
+        warnings.warn(
+            f"_hessian_fd is O(n²) and explicitly slow (n_params={n}). "
+            "Prefer autodiff or wrapped_fd backends.",
+            RuntimeWarning,
+            stacklevel=3,
+        )
     H = np.zeros((n, n))
     for i in range(n):
         for j in range(i, n):

@@ -269,6 +269,18 @@ def test_delta_variance_vector():
     np.testing.assert_allclose(var, expected, rtol=1e-10)
 
 
+def test_delta_variance_vector_is_symmetric():
+    """delta_variance for vector g must return a symmetric matrix."""
+    rng = np.random.default_rng(42)
+    p = 4
+    k = 3
+    Sigma = jnp.asarray(rng.standard_normal((p, p)))
+    Sigma = Sigma @ Sigma.T
+    grad = jnp.asarray(rng.standard_normal((k, p)))
+    var = delta_variance(grad, Sigma)
+    np.testing.assert_allclose(var, var.T, rtol=1e-10)
+
+
 def test_combined_gradient():
     """combined_gradient must return the gradient of the weighted sum."""
     g1 = jnp.array([1.0, 2.0, 3.0])
@@ -277,6 +289,18 @@ def test_combined_gradient():
 
     combined = combined_gradient([g1, g2], weights)
     expected = 2.0 * g1 - 1.0 * g2
+    np.testing.assert_allclose(combined, expected, rtol=1e-10)
+
+
+def test_combined_gradient_stacked_scenarios():
+    """combined_gradient with more than two gradients (stacking scenario)."""
+    rng = np.random.default_rng(42)
+    p = 4
+    n = 5
+    grads = [jnp.asarray(rng.standard_normal(p)) for _ in range(n)]
+    weights = jnp.asarray(rng.standard_normal(n))
+    combined = combined_gradient(grads, weights)
+    expected = sum(float(w) * g for w, g in zip(weights, grads))
     np.testing.assert_allclose(combined, expected, rtol=1e-10)
 
 
@@ -371,6 +395,25 @@ def test_delta_confint_with_phi():
     # Asymmetry: distance from estimate to bounds should differ
     est_rep = float(jnp.exp(estimate))
     assert not np.isclose(float(hi) - est_rep, est_rep - float(lo), rtol=1e-6)
+
+
+def test_delta_confint_vector_estimand():
+    """delta_confint must work with a vector estimand (returns per-component CIs)."""
+    rng = np.random.default_rng(42)
+    p = 3
+    Sigma = jnp.eye(p) * 0.01
+    beta = jnp.asarray(rng.standard_normal(p))
+
+    def h(b):
+        return jnp.array([b[0], b[1] + b[2]])
+
+    grad = gradient(h, beta, backend="autodiff")
+    estimate = h(beta)
+
+    lo, hi = delta_confint(estimate, grad, Sigma, level=0.95)
+    assert lo.shape == (2,)
+    assert hi.shape == (2,)
+    assert jnp.all(hi > lo)
 
 
 def test_delta_confint_from_se_with_phi():

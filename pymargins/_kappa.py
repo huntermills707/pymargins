@@ -43,6 +43,7 @@ or running a full bootstrap is more informative.
 
 from __future__ import annotations
 from typing import Callable, Literal, Optional
+import jax
 import jax.numpy as jnp
 import numpy as np
 
@@ -60,6 +61,57 @@ KappaVerdict = Literal["delta_reliable", "delta_borderline", "delta_unreliable"]
 # ---------------------------------------------------------------------------
 # Single-estimand κ
 # ---------------------------------------------------------------------------
+
+def _kappa_core(
+    h: Callable[[jnp.ndarray], jnp.ndarray],
+    beta: jnp.ndarray,
+    cov_params: jnp.ndarray,
+    L: Optional[jnp.ndarray],
+    *,
+    backend: GradientBackend = "autodiff",
+    fd_step: float = 1e-6,
+    norm: KappaNorm = "spectral",
+) -> float:
+    """Core κ computation with optional precomputed Cholesky factor."""
+    grad = gradient(h, beta, backend=backend, fd_step=fd_step)
+    H = hessian(h, beta, backend=backend, fd_step=fd_step)
+
+    if L is None:
+        L = jnp.linalg.cholesky(cov_params)
+
+    # Whitening: Σ̂ = L L^T; for β = L u the Hessian in u-coordinates is
+    # L^T H L and the gradient is L^T ∇g. Both forms L^T H L and L H L^T
+    # have the same spectral norm (similar matrices), but L^T H L is the
+    # correct transformed Hessian.
+    if jnp.isnan(L).any():
+        # Ridge-regularize for rank-deficient Σ̂ (common with HC/cluster estimators)
+        diag_mean = jnp.mean(jnp.diag(cov_params))
+        ridge = 1e-8 * diag_mean
+        reg_cov = cov_params + ridge * jnp.eye(cov_params.shape[0])
+        L = jnp.linalg.cholesky(reg_cov)
+        if jnp.isnan(L).any():
+            return float("inf")
+
+    H_white = L.T @ H @ L
+    grad_white = L.T @ grad
+
+    if norm == "spectral":
+        # Spectral norm = largest singular value
+        num = float(jnp.linalg.norm(H_white, ord=2))
+    elif norm == "frobenius":
+        num = float(jnp.linalg.norm(H_white, ord="fro"))
+    else:
+        raise ValueError(f"Unknown norm: {norm!r}")
+
+    den = float(jnp.linalg.norm(grad_white))
+
+    if den == 0.0:
+        # Gradient is zero (e.g., at a critical point of h). κ is
+        # undefined; return inf to signal that delta is not applicable.
+        return float("inf")
+
+    return num / den
+
 
 def kappa(
     h: Callable[[jnp.ndarray], jnp.ndarray],
@@ -114,41 +166,7 @@ def kappa(
     handle this via a small ridge term added to cov_params, or by routing
     to a different inference method.
     """
-    grad = gradient(h, beta, backend=backend, fd_step=fd_step)
-    H = hessian(h, beta, backend=backend, fd_step=fd_step)
-
-    # Whitening: L L^T = Σ̂; transform to standardize units
-    # We compute L^T H L (not L H L^T) because the quadratic form is
-    # already symmetric and we want eigenvalues of the whitened Hessian.
-    L = jnp.linalg.cholesky(cov_params)
-    if jnp.isnan(L).any():
-        # Ridge-regularize for rank-deficient Σ̂ (common with HC/cluster estimators)
-        diag_mean = jnp.mean(jnp.diag(cov_params))
-        ridge = 1e-8 * diag_mean
-        reg_cov = cov_params + ridge * jnp.eye(cov_params.shape[0])
-        L = jnp.linalg.cholesky(reg_cov)
-        if jnp.isnan(L).any():
-            return float("inf")
-
-    H_white = L.T @ H @ L
-    grad_white = L.T @ grad
-
-    if norm == "spectral":
-        # Spectral norm = largest singular value
-        num = float(jnp.linalg.norm(H_white, ord=2))
-    elif norm == "frobenius":
-        num = float(jnp.linalg.norm(H_white, ord="fro"))
-    else:
-        raise ValueError(f"Unknown norm: {norm!r}")
-
-    den = float(jnp.linalg.norm(grad_white))
-
-    if den == 0.0:
-        # Gradient is zero (e.g., at a critical point of h). κ is
-        # undefined; return inf to signal that delta is not applicable.
-        return float("inf")
-
-    return num / den
+    return _kappa_core(h, beta, cov_params, L=None, backend=backend, fd_step=fd_step, norm=norm)
 
 
 def kappa_vector(
@@ -291,11 +309,17 @@ def session_kappa(
         'n_samples'       : number of design points sampled
         'recommendation'  : human-readable suggestion based on verdict
     """
+    # Pre-compute Cholesky of cov_params once; it is constant across
+    # design points and is the most expensive part of kappa().
+    L = jnp.linalg.cholesky(cov_params)
+    if jnp.isnan(L).any():
+        L = None
+
     kappas = []
     for X in representative_design:
         h_X = h_factory(X)
-        kappas.append(kappa(
-            h_X, beta, cov_params,
+        kappas.append(_kappa_core(
+            h_X, beta, cov_params, L=L,
             backend=backend, fd_step=fd_step, norm=norm,
         ))
 
@@ -417,7 +441,7 @@ def delta_simulation_disagreement(
     draws = rng.multivariate_normal(beta_np, Sigma_np, size=n_sim)
     try:
         h_draws = np.asarray(jax.vmap(h)(jnp.asarray(draws)))
-    except Exception:
+    except (jax.errors.TracerArrayConversionError, TypeError, ValueError):
         h_draws = np.array([float(h(jnp.asarray(b))) for b in draws])
 
     if phi is not None:

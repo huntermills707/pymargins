@@ -29,6 +29,7 @@ from typing import Callable, Optional, Literal
 import jax.numpy as jnp
 import numpy as np
 from scipy import stats
+import warnings
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +173,11 @@ def delta_confint(
     (lower, upper) : tuple of jax arrays
         CI bounds on the reporting scale (or inference scale if phi is None).
         Shapes match `estimate`.
+
+    Notes
+    -----
+    Uses ``scipy.stats.norm.ppf``, so this function is not jittable/vmappable.
+    If pure-JAX composition is needed, pass precomputed z quantiles.
     """
     se = delta_se(grad, cov_params)
     z = stats.norm.ppf(0.5 + level / 2.0)
@@ -270,6 +276,11 @@ def delta_wald_test(
     -------
     (z, p) : tuple of jax arrays
         z-statistic(s) and p-value(s).
+
+    Notes
+    -----
+    Mixes JAX and NumPy/SciPy stats, so not jittable/vmappable.
+    This is intentional — p-values are reporting-layer quantities.
     """
     se = delta_se(grad, cov_params)
     # Guard against division by zero: if SE is exactly 0, the estimand is
@@ -343,15 +354,24 @@ def joint_wald_test(
     # add a tiny ridge and retry once.
     solved = jnp.linalg.solve(Sigma_g, diff)
     chi2 = float(diff @ solved)
+    regularized = False
     if not np.isfinite(chi2):
         ridge = 1e-12 * float(jnp.trace(Sigma_g)) / Sigma_g.shape[0]
         Sigma_g_reg = Sigma_g + ridge * jnp.eye(Sigma_g.shape[0])
         chi2 = float(diff @ jnp.linalg.solve(Sigma_g_reg, diff))
+        regularized = True
+        warnings.warn(
+            f"joint_wald_test: Σ_g was singular; added ridge={ridge:.3e} "
+            "to compute the test statistic. Result is regularized.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 
     df = int(diff.shape[0])
     p = float(1.0 - stats.chi2.cdf(chi2, df))
 
-    return chi2, p, df
+    # Return JAX scalars for API consistency.
+    return jnp.asarray(chi2), jnp.asarray(p), jnp.asarray(df)
 
 
 # ---------------------------------------------------------------------------

@@ -144,6 +144,41 @@ def test_glm_jvp_identity_link():
     np.testing.assert_allclose(g_wrapped, g_linear, rtol=1e-10)
 
 
+def test_glm_jvp_wrapper_log_link_poisson():
+    """Custom-JVP GLM wrapper with log-link (Poisson) vs pure-JAX."""
+    rng = np.random.default_rng(42)
+    n, p = 20, 3
+    X_np = rng.standard_normal((n, p))
+    beta = jnp.asarray(rng.standard_normal(p))
+    offset = jnp.asarray(rng.standard_normal(n))
+
+    # Pure JAX log-link prediction
+    def native_predict(b, X, off=None):
+        eta = X @ b
+        if off is not None:
+            eta = eta + off
+        return jnp.exp(eta)
+
+    family = sm.families.Poisson()
+    wrapped = make_glm_jvp_wrapper(family)
+    X = jnp.asarray(X_np)
+
+    # Forward values match
+    y_native = native_predict(beta, X, offset)
+    y_wrapped = wrapped(beta, X, offset)
+    np.testing.assert_allclose(y_native, y_wrapped, rtol=1e-10)
+
+    # Gradients w.r.t. beta match
+    g_native = jax.grad(lambda b: native_predict(b, X, offset).sum())(beta)
+    g_wrapped = jax.grad(lambda b: wrapped(b, X, offset).sum())(beta)
+    np.testing.assert_allclose(g_native, g_wrapped, rtol=1e-8)
+
+    # Gradients w.r.t. X match
+    gX_native = jax.grad(lambda X_: native_predict(beta, X_, offset).sum())(X)
+    gX_wrapped = jax.grad(lambda X_: wrapped(beta, X_, offset).sum())(X)
+    np.testing.assert_allclose(gX_native, gX_wrapped, rtol=1e-8)
+
+
 # ---------------------------------------------------------------------------
 # 3. FD vs autodiff agreement
 # ---------------------------------------------------------------------------
@@ -229,6 +264,25 @@ def test_fd_jvp_wrapper_nonlinear():
     np.testing.assert_allclose(g_wrapped, g_pure, rtol=1e-5)
 
 
+def test_fd_jvp_wrapper_X_gradients():
+    """FD-JVP must produce correct gradients w.r.t. X (not just beta)."""
+    rng = np.random.default_rng(404)
+    n, p = 6, 3
+    X_np = rng.standard_normal((n, p))
+    beta = jnp.asarray(rng.standard_normal(p))
+
+    def native_predict(beta_np, X):
+        return np.asarray(X) @ np.asarray(beta_np)
+
+    wrapped = make_predict_with_fd_jvp(native_predict, fd_step=1e-6)
+    X = jnp.asarray(X_np)
+
+    # Gradient w.r.t. X for linear predict is just beta broadcasted
+    gX_wrapped = jax.grad(lambda X_: wrapped(beta, X_).sum())(X)
+    expected = jnp.tile(beta, (n, 1))
+    np.testing.assert_allclose(gX_wrapped, expected, rtol=1e-6)
+
+
 # ---------------------------------------------------------------------------
 # 5. directional_derivative and hessian_vector_product
 # ---------------------------------------------------------------------------
@@ -291,3 +345,45 @@ def test_hessian_vector_product_fd():
     hvp_auto = hessian_vector_product(h, beta, v, backend="autodiff")
     hvp_fd = hessian_vector_product(h, beta, v, backend="fd", fd_step=1e-5)
     np.testing.assert_allclose(hvp_auto, hvp_fd, rtol=1e-5, atol=1e-5)
+
+
+def test_hessian_of_wrapped_function_via_fd():
+    """hessian with backend='fd' on a wrapped function should match pure JAX."""
+    rng = np.random.default_rng(808)
+    n, p = 8, 3
+    X_np = rng.standard_normal((n, p))
+    beta = jnp.asarray(rng.standard_normal(p))
+
+    def native_predict(beta_np, X):
+        eta = np.asarray(X) @ np.asarray(beta_np)
+        return 1.0 / (1.0 + np.exp(-eta))
+
+    wrapped = make_predict_with_fd_jvp(native_predict, fd_step=1e-6)
+    X = jnp.asarray(X_np)
+
+    def h(b):
+        return wrapped(b, X).sum()
+
+    # backend='fd' computes Hessian via finite differences on the entire
+    # estimand, including the wrapped primitive.
+    H_fd = hessian(h, beta, backend="fd", fd_step=1e-5)
+    assert H_fd.shape == (p, p)
+
+    # Compare to pure-JAX hessian
+    def pure(b):
+        return jax.scipy.special.expit(X @ b).sum()
+
+    H_pure = hessian(pure, beta, backend="autodiff")
+    np.testing.assert_allclose(H_fd, H_pure, rtol=1e-4, atol=1e-4)
+
+
+def test_hessian_fd_warns_for_large_n():
+    """_hessian_fd should emit a warning when n_params > 50."""
+    rng = np.random.default_rng(909)
+    beta = jnp.asarray(rng.standard_normal(60))
+
+    def h(b):
+        return (b ** 2).sum()
+
+    with pytest.warns(RuntimeWarning, match="O\\(n²\\) and explicitly slow"):
+        hessian(h, beta, backend="fd", fd_step=1e-5)
