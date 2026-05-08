@@ -50,6 +50,7 @@ how to build a design matrix from formulae or feature lists.
 from __future__ import annotations
 from typing import Callable, Optional, Set, Literal, Any
 from dataclasses import dataclass, field
+import abc
 import jax.numpy as jnp
 import numpy as np
 
@@ -61,7 +62,7 @@ from ._gradients import GradientBackend
 # ---------------------------------------------------------------------------
 
 InferenceMethod = Literal["delta", "simulation", "bootstrap"]
-VariableType = Literal["continuous", "discrete", "binary", "categorical"]
+VariableType = Literal["continuous", "binary", "categorical"]
 
 
 @dataclass
@@ -74,7 +75,7 @@ class VariableInfo:
     name : str
         Variable name as used in the model's formula or feature list.
     var_type : str
-        One of "continuous", "discrete", "binary", "categorical".
+        One of "continuous", "binary", "categorical".
     levels : list, optional
         For categorical/binary variables, the set of valid level values.
         For ordered factors, the order is meaningful.
@@ -98,7 +99,7 @@ class VariableInfo:
 # Base adapter interface
 # ---------------------------------------------------------------------------
 
-class ModelAdapter:
+class ModelAdapter(abc.ABC):
     """Abstract base class for model adapters.
 
     Concrete subclasses target specific frameworks (statsmodels,
@@ -129,6 +130,7 @@ class ModelAdapter:
     # -----------------------------------------------------------------------
 
     @property
+    @abc.abstractmethod
     def supports_jax_autodiff(self) -> bool:
         """True if predict() uses jax.numpy throughout, producing exact
         autodiff gradients. False if predict() wraps non-JAX code via a
@@ -138,9 +140,10 @@ class ModelAdapter:
         jax.grad works through both — the distinction is informational,
         used in result metadata and diagnostic messages.
         """
-        raise NotImplementedError
+        ...
 
     @property
+    @abc.abstractmethod
     def supported_inference_methods(self) -> Set[InferenceMethod]:
         """Which inference methods this adapter supports.
 
@@ -151,15 +154,16 @@ class ModelAdapter:
           {"simulation", "bootstrap"}            — no analytical gradients
           {"bootstrap"}                          — algorithmic models
         """
-        raise NotImplementedError
+        ...
 
     @property
+    @abc.abstractmethod
     def gradient_backend_recommendation(self) -> GradientBackend:
         """The gradient backend the engine should use by default with this
         adapter. Subclasses override to indicate "autodiff" (clean JAX
         path) or "wrapped_fd" (wrapped predict). The engine respects user
         overrides via the session's gradient_backend argument."""
-        raise NotImplementedError
+        ...
 
     # -----------------------------------------------------------------------
     # Session integration
@@ -175,19 +179,37 @@ class ModelAdapter:
         For example, a survival adapter that doesn't support log scale
         would refuse a session with phi=exp.
 
-        Default implementation is a no-op; override to add validation.
+        Base implementation validates that ``phi`` and ``phi_inv`` are
+        approximate inverses when both are provided. Subclasses that
+        override this method should call ``super().attach(session)`` to
+        preserve this check.
 
         Parameters
         ----------
         session : Margins
             The session attaching this adapter.
         """
-        pass
+        phi = getattr(session, "phi", None)
+        phi_inv = getattr(session, "phi_inv", None)
+        if phi is not None and phi_inv is not None:
+            test_val = jnp.array(0.5)
+            try:
+                recon = float(phi(phi_inv(test_val)))
+            except Exception as exc:
+                raise ValueError(
+                    f"phi/phi_inv validation failed at test point {float(test_val)}: {exc}"
+                ) from exc
+            if not np.isclose(recon, float(test_val), rtol=1e-4):
+                raise ValueError(
+                    f"phi and phi_inv do not appear to be inverses: "
+                    f"phi(phi_inv({float(test_val)})) = {recon}"
+                )
 
     # -----------------------------------------------------------------------
     # Core data access
     # -----------------------------------------------------------------------
 
+    @abc.abstractmethod
     def coefficients(self) -> jnp.ndarray:
         """Return β̂ as a 1D JAX array.
 
@@ -199,8 +221,9 @@ class ModelAdapter:
         -------
         beta_hat : jax array of shape (n_params,)
         """
-        raise NotImplementedError
+        ...
 
+    @abc.abstractmethod
     def covariance(
         self,
         vcov_spec: Optional[Any] = None,
@@ -214,8 +237,6 @@ class ModelAdapter:
             the framework:
               - None: framework default (typically OIM or expected info)
               - "HC0", "HC1", "HC2", "HC3": robust to heteroskedasticity
-              - "HAC": Newey–West heteroskedasticity- and autocorrelation-
-                       consistent
               - dict like {"type": "cluster", "groups": cluster_ids}: cluster-
                 robust
               - 2D array: user-supplied Σ̂ (overrides any framework default)
@@ -227,12 +248,13 @@ class ModelAdapter:
         -------
         Sigma_hat : jax array of shape (n_params, n_params)
         """
-        raise NotImplementedError
+        ...
 
     # -----------------------------------------------------------------------
     # Prediction
     # -----------------------------------------------------------------------
 
+    @abc.abstractmethod
     def predict(
         self,
         beta: jnp.ndarray,
@@ -272,12 +294,13 @@ class ModelAdapter:
         mu : jax array of shape (n_obs,)
             Predicted values on the response scale.
         """
-        raise NotImplementedError
+        ...
 
     # -----------------------------------------------------------------------
     # Design and metadata
     # -----------------------------------------------------------------------
 
+    @abc.abstractmethod
     def design_matrix_from_df(self, df: "pd.DataFrame") -> jnp.ndarray:
         """Build a design matrix from a concrete DataFrame of evaluation rows.
 
@@ -296,7 +319,7 @@ class ModelAdapter:
         X : jax array of shape (n_rows, n_features)
             Design matrix for the scenario.
         """
-        raise NotImplementedError
+        ...
 
     @property
     def training_data(self):
@@ -317,6 +340,7 @@ class ModelAdapter:
             "Margins._base_data."
         )
 
+    @abc.abstractmethod
     def column_index_of_variable(self, name: str) -> int:
         """Return the design-matrix column index corresponding to a variable.
 
@@ -338,8 +362,9 @@ class ModelAdapter:
             Zero-based column index in the design matrix produced by
             ``design_matrix_from_df``.
         """
-        raise NotImplementedError
+        ...
 
+    @abc.abstractmethod
     def variable_metadata(self) -> dict[str, VariableInfo]:
         """Return per-variable metadata used by averaging and validation.
 
@@ -349,7 +374,7 @@ class ModelAdapter:
             Mapping from variable name (as used in scenarios) to VariableInfo.
             Should include all variables in the model's design.
         """
-        raise NotImplementedError
+        ...
 
     # -----------------------------------------------------------------------
     # Bootstrap support (optional)
@@ -405,24 +430,6 @@ class GLMAdapter(ModelAdapter):
     """
 
     def attach(self, session: "Margins") -> None:
-        # Validate that phi and phi_inv are approximate inverses.
-        # This catches the most common session-configuration error
-        # (mismatched scale transforms) early, before any inference runs.
-        phi = getattr(session, "phi", None)
-        phi_inv = getattr(session, "phi_inv", None)
-        if phi is not None and phi_inv is not None:
-            test_val = jnp.array(0.5)
-            try:
-                recon = float(phi(phi_inv(test_val)))
-                if not np.isclose(recon, float(test_val), rtol=1e-4):
-                    raise ValueError(
-                        f"phi and phi_inv do not appear to be inverses: "
-                        f"phi(phi_inv({float(test_val)})) = {recon}"
-                    )
-            except Exception as exc:
-                raise ValueError(
-                    f"phi/phi_inv validation failed at test point {float(test_val)}: {exc}"
-                ) from exc
         super().attach(session)
 
     @property
@@ -510,6 +517,12 @@ class WrappedFDAdapter(ModelAdapter):
         X: jnp.ndarray,
         offset: Optional[jnp.ndarray] = None,
     ) -> jnp.ndarray:
+        if offset is not None:
+            raise NotImplementedError(
+                "WrappedFDAdapter does not support offset in the base "
+                "implementation. Subclasses should override predict() to "
+                "handle offset."
+            )
         # Lazily build the wrapped predict on first call
         if not hasattr(self, "_predict_wrapped"):
             from ._gradients import make_predict_with_fd_jvp
@@ -517,8 +530,6 @@ class WrappedFDAdapter(ModelAdapter):
             self._predict_wrapped = make_predict_with_fd_jvp(
                 self.native_predict, fd_step=fd_step,
             )
-        # Note: offset handling for FD-wrapped adapters is framework-specific;
-        # subclasses should override predict() if offset support is needed.
         return self._predict_wrapped(beta, X)
 
 
@@ -684,10 +695,4 @@ Example 3: A bootstrap-only adapter for sklearn random forest
             new_model = RandomForestRegressor(**self.model.get_params())
             new_model.fit(X_new, y_new)
             return SklearnTreeAdapter(new_model, X_new, y_new)
-
-        # predict uses the native sklearn predict, called inside the
-        # bootstrap loop rather than through the differentiable interface
-
-        def native_predict_for_bootstrap(self, X):
-            return self.model.predict(X)
 """

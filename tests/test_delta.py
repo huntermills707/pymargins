@@ -452,13 +452,13 @@ def test_delta_se_zero_gradient():
 
 def test_delta_se_negative_variance_clipped():
     """Tiny negative diagonal variance from numerical noise should clip to 0."""
-    grad = jnp.array([1.0, 0.0, 0.0])
+    grad = jnp.array([1.0, 1.0, 1.0])
     # Manually construct a covariance with a tiny negative on the diagonal
     # after the quadratic form (simulating numerical noise)
     Sigma = jnp.array([[1.0, 0.0, 0.0],
                        [0.0, -1e-15, 0.0],
                        [0.0, 0.0, -1e-15]])
-    # For this gradient, variance = 1.0 * 1.0 * 1.0 = 1.0 (positive)
+    # For this gradient, variance = 1.0 - 1e-15 - 1e-15 ≈ 1.0 (positive after clip)
     se = delta_se(grad, Sigma)
     assert np.isfinite(float(se))
 
@@ -607,3 +607,83 @@ def test_delta_variance_bad_ndim():
     Sigma = jnp.eye(4)
     with pytest.raises(ValueError, match="gradient must be 1D or 2D"):
         delta_variance(grad, Sigma)
+
+
+
+def test_delta_confint_level_validation():
+    """delta_confint must reject level outside (0,1)."""
+    grad = jnp.array([1.0, 0.0, 0.0])
+    Sigma = jnp.eye(3) * 0.01
+    estimate = jnp.array(1.0)
+    with pytest.raises(ValueError, match="level must be in"):
+        delta_confint(estimate, grad, Sigma, level=0.0)
+    with pytest.raises(ValueError, match="level must be in"):
+        delta_confint(estimate, grad, Sigma, level=1.0)
+    with pytest.raises(ValueError, match="level must be in"):
+        delta_confint(estimate, grad, Sigma, level=-0.5)
+    with pytest.raises(ValueError, match="level must be in"):
+        delta_confint(estimate, grad, Sigma, level=1.5)
+
+
+def test_delta_confint_from_se_level_validation():
+    """delta_confint_from_se must reject level outside (0,1)."""
+    estimate = jnp.array(1.0)
+    se = jnp.array(0.1)
+    with pytest.raises(ValueError, match="level must be in"):
+        delta_confint_from_se(estimate, se, level=0.0)
+    with pytest.raises(ValueError, match="level must be in"):
+        delta_confint_from_se(estimate, se, level=1.0)
+
+
+def test_delta_wald_test_near_zero_se():
+    """Wald test should treat very small SE as effectively zero."""
+    grad = jnp.array([1e-20, 0.0, 0.0])
+    Sigma = jnp.eye(3) * 0.01
+    z, p = delta_wald_test(
+        jnp.array(1.0), grad, Sigma,
+        null_value=0.0, alternative="two-sided",
+    )
+    assert float(z) == float("inf")
+    assert float(p) == 0.0
+
+
+def test_joint_wald_test_zero_matrix_ridge():
+    """joint_wald_test must handle Sigma_g being exactly the zero matrix."""
+    grad = jnp.zeros((2, 3))
+    Sigma = jnp.eye(3) * 0.01
+    estimate = jnp.array([1.0, 2.0])
+    with pytest.warns(RuntimeWarning, match="regularized"):
+        chi2, p, df = joint_wald_test(estimate, grad, Sigma)
+    assert np.isfinite(chi2)
+    assert np.isfinite(p)
+    assert df == 2
+
+
+def test_combined_gradient_empty_list():
+    """combined_gradient must raise for an empty list."""
+    with pytest.raises(ValueError, match="non-empty"):
+        combined_gradient([], jnp.array([]))
+
+
+def test_combined_gradient_shape_mismatch():
+    """combined_gradient must raise when gradients have different shapes."""
+    g1 = jnp.array([1.0, 2.0])
+    g2 = jnp.array([3.0, 4.0, 5.0])
+    with pytest.raises(ValueError, match="same shape"):
+        combined_gradient([g1, g2], jnp.array([1.0, 1.0]))
+
+
+def test_joint_covariance_empty_list():
+    """joint_covariance_of_results must raise for an empty list."""
+    Sigma = jnp.eye(3)
+    with pytest.raises(ValueError, match="non-empty"):
+        joint_covariance_of_results([], Sigma)
+
+
+def test_joint_covariance_shape_mismatch():
+    """joint_covariance_of_results must raise when gradients have different shapes."""
+    g1 = jnp.array([1.0, 2.0])
+    g2 = jnp.array([3.0, 4.0, 5.0])
+    Sigma = jnp.eye(3)
+    with pytest.raises(ValueError, match="same shape"):
+        joint_covariance_of_results([g1, g2], Sigma)

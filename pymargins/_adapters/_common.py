@@ -19,7 +19,9 @@ def extract_training_data(results, training_data: Optional[pd.DataFrame]) -> pd.
     if training_data is not None:
         return training_data
     if hasattr(results.model, "data") and hasattr(results.model.data, "frame"):
-        return results.model.data.frame
+        frame = results.model.data.frame
+        if frame is not None:
+            return frame
     raise ValueError(
         "training_data must be provided when the model wasn't fit "
         "via the formula API (no results.model.data.frame available)."
@@ -35,6 +37,13 @@ def design_matrix_from_df(results, exog_names: list[str], df: pd.DataFrame) -> j
         return jnp.asarray(X_np)
     # Array-fit fallback: align columns and auto-inject intercept if needed
     aligned = df.reindex(columns=exog_names)
+    # Detect missing columns that became NaN after reindexing
+    missing_cols = [col for col in exog_names if col not in df.columns and col not in ("const", "Intercept")]
+    if missing_cols:
+        raise ValueError(
+            f"Missing columns required by the model's exog_names: {missing_cols}. "
+            f"Available columns: {list(df.columns)}."
+        )
     if "const" in exog_names or "Intercept" in exog_names:
         intercept_name = "const" if "const" in exog_names else "Intercept"
         if intercept_name not in df.columns:
@@ -52,11 +61,11 @@ def column_index_of_variable(
 ) -> int:
     """Return the index of ``variable_name`` in the design matrix.
 
-    For categorical or discrete variables this raises ``ValueError``
+    For categorical or binary variables this raises ``ValueError``
     because ``dydx()`` is undefined for them.
     """
     meta = variable_metadata.get(variable_name)
-    if meta is not None and meta.var_type in ("categorical", "binary", "discrete"):
+    if meta is not None and meta.var_type in ("categorical", "binary"):
         raise ValueError(
             f"Variable {variable_name!r} is {meta.var_type}; "
             f"use contrasts() for discrete contrasts, not dydx()."
@@ -117,3 +126,50 @@ def _infer_variable_type(series: pd.Series) -> str:
     if len(unique) == 2:
         return "binary"
     return "continuous"
+
+
+def validate_vcov_spec(vcov_spec, adapter_name: str = "Adapter") -> None:
+    """Validate that a vcov specification is supported at attach time.
+
+    Note: this function does not know the parameter count, so it cannot
+    validate that a user-supplied ndarray is square or matches the model
+    dimensions. Adapters should perform shape checks separately if needed.
+
+    Raises ValueError with a clear message if the spec is not supported.
+    """
+    if vcov_spec is None:
+        return
+
+    if isinstance(vcov_spec, (np.ndarray, jnp.ndarray)):
+        return
+
+    if isinstance(vcov_spec, str):
+        spec_lower = vcov_spec.lower()
+        if spec_lower in ("hc0", "hc1", "hc2", "hc3"):
+            return
+        raise ValueError(
+            f"{adapter_name} does not support vcov={vcov_spec!r}. "
+            f"Supported strings: 'HC0', 'HC1', 'HC2', 'HC3'."
+        )
+
+    if isinstance(vcov_spec, dict):
+        kind = vcov_spec.get("type")
+        if kind == "cluster":
+            groups = vcov_spec.get("groups")
+            if groups is None:
+                raise ValueError(
+                    f"{adapter_name}: cluster vcov requires 'groups' in the spec dict."
+                )
+            if hasattr(groups, "__len__") and len(groups) == 0:
+                raise ValueError(
+                    f"{adapter_name}: cluster vcov 'groups' must not be empty."
+                )
+            return
+        raise ValueError(
+            f"{adapter_name} does not support vcov dict with type={kind!r}. "
+            f"Supported dict: {{'type': 'cluster', 'groups': ...}}."
+        )
+
+    raise ValueError(
+        f"{adapter_name} does not support vcov spec of type {type(vcov_spec).__name__}."
+    )

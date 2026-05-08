@@ -179,6 +179,8 @@ def delta_confint(
     Uses ``scipy.stats.norm.ppf``, so this function is not jittable/vmappable.
     If pure-JAX composition is needed, pass precomputed z quantiles.
     """
+    if not (0 < level < 1):
+        raise ValueError(f"level must be in (0,1), got {level}")
     se = delta_se(grad, cov_params)
     z = stats.norm.ppf(0.5 + level / 2.0)
 
@@ -222,6 +224,8 @@ def delta_confint_from_se(
     -------
     (lower, upper) : tuple of jax arrays
     """
+    if not (0 < level < 1):
+        raise ValueError(f"level must be in (0,1), got {level}")
     z = stats.norm.ppf(0.5 + level / 2.0)
     lower_inf = estimate - z * se
     upper_inf = estimate + z * se
@@ -283,12 +287,12 @@ def delta_wald_test(
     This is intentional — p-values are reporting-layer quantities.
     """
     se = delta_se(grad, cov_params)
-    # Guard against division by zero: if SE is exactly 0, the estimand is
+    # Guard against division by zero: if SE is effectively 0, the estimand is
     # a deterministic function of beta at this point (e.g., a prediction at
     # the exact fitted value). The z-statistic is +inf if estimate > null,
     # -inf if estimate < null, and 0 if they are equal.
     z = jnp.where(
-        se == 0.0,
+        se < 1e-15,
         jnp.where(estimate == null_value, 0.0, jnp.sign(estimate - null_value) * jnp.inf),
         (estimate - null_value) / se,
     )
@@ -357,6 +361,7 @@ def joint_wald_test(
     regularized = False
     if not np.isfinite(chi2):
         ridge = 1e-12 * float(jnp.trace(Sigma_g)) / Sigma_g.shape[0]
+        ridge = max(ridge, float(jnp.finfo(Sigma_g.dtype).eps))
         Sigma_g_reg = Sigma_g + ridge * jnp.eye(Sigma_g.shape[0])
         chi2 = float(diff @ jnp.linalg.solve(Sigma_g_reg, diff))
         regularized = True
@@ -404,6 +409,15 @@ def combined_gradient(
     grad_combined : jax array of shape (n_params,)
         ∇(Σᵢ wᵢ gᵢ).
     """
+    if not grads:
+        raise ValueError("grads must be a non-empty list")
+    expected_shape = grads[0].shape
+    for i, g in enumerate(grads):
+        if g.shape != expected_shape:
+            raise ValueError(
+                f"All gradients must have the same shape; got {g.shape} at index {i}, "
+                f"expected {expected_shape}"
+            )
     grad_stack = jnp.stack(grads, axis=0)
     return weights @ grad_stack
 
@@ -437,6 +451,15 @@ def joint_covariance_of_results(
         Joint covariance of the estimands. Diagonal entries are individual
         delta variances; off-diagonal entries are cross-covariances.
     """
+    if not grads:
+        raise ValueError("grads must be a non-empty list")
+    expected_shape = grads[0].shape
+    for i, g in enumerate(grads):
+        if g.shape != expected_shape:
+            raise ValueError(
+                f"All gradients must have the same shape; got {g.shape} at index {i}, "
+                f"expected {expected_shape}"
+            )
     G = jnp.stack(grads, axis=0)  # shape (n, n_params)
     return G @ cov_params @ G.T
 

@@ -15,6 +15,7 @@ jax.config.update("jax_enable_x64", True)
 
 from pymargins._adapters.statsmodels_glm import StatsmodelsGLMAdapter
 from pymargins._adapter import auto_detect_adapter
+from pymargins import Margins
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +186,15 @@ def test_covariance_cluster_groups_length_mismatch(fit_logit_formula, df_binary)
         adapter.covariance({"type": "cluster", "groups": groups})
 
 
+def test_covariance_cluster_array_fit(fit_logit_array, df_binary):
+    """Array-fit GLM can request cluster-robust vcov via refit."""
+    adapter = StatsmodelsGLMAdapter(fit_logit_array, training_data=df_binary)
+    groups = np.arange(len(df_binary)) % 10
+    Sigma = adapter.covariance({"type": "cluster", "groups": groups})
+    assert Sigma.ndim == 2
+    assert Sigma.shape[0] == len(fit_logit_array.params)
+
+
 # ---------------------------------------------------------------------------
 # 3. Prediction
 # ---------------------------------------------------------------------------
@@ -300,6 +310,79 @@ def test_refit_formula(fit_logit_formula, df_binary):
 def test_refit_array(fit_logit_array, df_binary):
     adapter = StatsmodelsGLMAdapter(fit_logit_array, training_data=df_binary)
     resampled = df_binary.sample(frac=1.0, replace=True, random_state=42)
+    new_adapter = adapter.refit(resampled)
+    assert isinstance(new_adapter, StatsmodelsGLMAdapter)
+    # Coefficients should change (different data)
+    assert not np.allclose(
+        np.asarray(adapter.coefficients()),
+        np.asarray(new_adapter.coefficients()),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Attach-time validation (IMPLEMENTATION_GUIDE.md §2.3)
+# ---------------------------------------------------------------------------
+
+def test_attach_rejects_unsupported_vcov_string(fit_logit_formula):
+    adapter = StatsmodelsGLMAdapter(fit_logit_formula)
+    with pytest.raises(ValueError, match="StatsmodelsGLMAdapter does not support vcov='HAC'"):
+        Margins(fit_logit_formula, adapter=adapter, vcov="HAC")
+
+
+def test_attach_rejects_unsupported_vcov_dict(fit_logit_formula):
+    adapter = StatsmodelsGLMAdapter(fit_logit_formula)
+    with pytest.raises(ValueError, match="StatsmodelsGLMAdapter does not support vcov dict with type='hac'"):
+        Margins(fit_logit_formula, adapter=adapter, vcov={"type": "hac"})
+
+
+def test_attach_rejects_cluster_without_groups(fit_logit_formula):
+    adapter = StatsmodelsGLMAdapter(fit_logit_formula)
+    with pytest.raises(ValueError, match="cluster vcov requires 'groups'"):
+        Margins(fit_logit_formula, adapter=adapter, vcov={"type": "cluster"})
+
+
+def test_attach_accepts_supported_vcov(fit_logit_formula):
+    adapter = StatsmodelsGLMAdapter(fit_logit_formula)
+    # HC0 string
+    m = Margins(fit_logit_formula, adapter=adapter, vcov="HC0")
+    assert m.vcov_spec == "HC0"
+    # cluster dict
+    df = adapter.training_data
+    cluster_spec = {"type": "cluster", "groups": df["treatment"]}
+    m2 = Margins(fit_logit_formula, adapter=adapter, vcov=cluster_spec)
+    assert m2.vcov_spec["type"] == "cluster"
+    assert m2.vcov_spec["groups"].equals(df["treatment"])
+    # ndarray
+    cov = np.eye(len(fit_logit_formula.params))
+    m3 = Margins(fit_logit_formula, adapter=adapter, vcov=cov)
+    assert m3.vcov_spec is cov
+
+
+def test_attach_validates_phi_phi_inv(fit_logit_formula):
+    """GLMAdapter.attach (via super) validates phi and phi_inv are inverses."""
+    adapter = StatsmodelsGLMAdapter(fit_logit_formula)
+    with pytest.raises(ValueError, match="phi and phi_inv do not appear to be inverses"):
+        Margins(fit_logit_formula, adapter=adapter, phi=jnp.exp, phi_inv=jnp.exp)
+
+
+# ---------------------------------------------------------------------------
+# Refit preserves model-specific args
+# ---------------------------------------------------------------------------
+
+def test_refit_preserves_offset_and_exposure(df_count):
+    """Refit should preserve offset, exposure, freq_weights, var_weights."""
+    rng = np.random.default_rng(44)
+    df_count["offset"] = rng.standard_normal(len(df_count))
+    df_count["exposure"] = rng.uniform(0.5, 2.0, size=len(df_count))
+    fit = smf.glm(
+        "y ~ x1 + x2",
+        data=df_count,
+        family=sm.families.Poisson(),
+        offset=df_count["offset"],
+        exposure=df_count["exposure"],
+    ).fit()
+    adapter = StatsmodelsGLMAdapter(fit, training_data=df_count)
+    resampled = df_count.sample(frac=1.0, replace=True, random_state=42)
     new_adapter = adapter.refit(resampled)
     assert isinstance(new_adapter, StatsmodelsGLMAdapter)
     # Coefficients should change (different data)

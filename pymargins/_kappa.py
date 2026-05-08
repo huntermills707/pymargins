@@ -74,6 +74,11 @@ def _kappa_core(
 ) -> float:
     """Core κ computation with optional precomputed Cholesky factor."""
     grad = gradient(h, beta, backend=backend, fd_step=fd_step)
+    if grad.ndim != 1:
+        raise ValueError(
+            f"_kappa_core only supports scalar estimands (grad.ndim==1); got grad.ndim={grad.ndim}. "
+            "Use kappa_vector for vector estimands."
+        )
     H = hessian(h, beta, backend=backend, fd_step=fd_step)
 
     if L is None:
@@ -86,7 +91,7 @@ def _kappa_core(
     if jnp.isnan(L).any():
         # Ridge-regularize for rank-deficient Σ̂ (common with HC/cluster estimators)
         diag_mean = jnp.mean(jnp.diag(cov_params))
-        ridge = 1e-8 * diag_mean
+        ridge = 1e-8 * abs(float(diag_mean))
         reg_cov = cov_params + ridge * jnp.eye(cov_params.shape[0])
         L = jnp.linalg.cholesky(reg_cov)
         if jnp.isnan(L).any():
@@ -198,6 +203,8 @@ def kappa_vector(
         Per-component κ values.
     """
     out = h(beta)
+    if jnp.ndim(out) == 0:
+        return jnp.array([kappa(h, beta, cov_params, **kwargs)])
     n_outputs = int(out.shape[0])
     kappas = []
     for i in range(n_outputs):
@@ -237,6 +244,8 @@ def classify_kappa(
     -------
     verdict : str
     """
+    if not np.isfinite(kappa_value):
+        return "delta_unreliable"
     if kappa_value < reliable_threshold:
         return "delta_reliable"
     elif kappa_value < borderline_threshold:
@@ -443,7 +452,13 @@ def delta_simulation_disagreement(
     draws = rng.multivariate_normal(beta_np, Sigma_np, size=n_sim)
     try:
         h_draws = np.asarray(jax.vmap(h)(jnp.asarray(draws)))
-    except (jax.errors.TracerArrayConversionError, TypeError, ValueError):
+    except (
+        jax.errors.TracerArrayConversionError,
+        jax.errors.ConcretizationTypeError,
+        jax.errors.TracerBoolConversionError,
+        jax.errors.TracerIntegerConversionError,
+        jax.errors.UnexpectedTracerError,
+    ):
         h_draws = np.array([np.asarray(h(jnp.asarray(b))) for b in draws])
 
     if phi is not None:

@@ -437,6 +437,13 @@ class MarginsResult:
         est_inf = self.phi_inv(self.estimate) if self.phi_inv is not None else self.estimate
         draws_inf = self.phi_inv(self.draws) if self.phi_inv is not None and self.draws is not None else self.draws
 
+        if self.gradient is not None and self.cov_params is None:
+            raise ValueError(
+                "Cannot run test: result has a gradient but no frozen cov_params. "
+                "This typically happens when the result was materialized without "
+                "covariance information."
+            )
+
         cov = self.cov_params if self.gradient is not None else None
 
         statistic, pvalue = run_test(
@@ -503,7 +510,10 @@ class MarginsResult:
         if value is None:
             # Default null = zero on the inference scale (the universal
             # "no effect" point regardless of phi).
-            value_inf = jnp.zeros_like(jnp.asarray(self.estimate))
+            if self.phi_inv is not None:
+                value_inf = self.phi_inv(jnp.zeros_like(jnp.asarray(self.estimate)))
+            else:
+                value_inf = jnp.zeros_like(jnp.asarray(self.estimate))
         elif null_scale == "inference" or self.phi_inv is None:
             value_inf = jnp.asarray(value)
         elif null_scale == "reporting":
@@ -579,7 +589,12 @@ class MarginsResult:
                 "Product of two MarginsResults is nonlinear; use evaluate() "
                 "with a custom compose function instead."
             )
-        scalar = float(other)
+        try:
+            scalar = float(other)
+        except (TypeError, ValueError) as exc:
+            raise TypeError(
+                f"MarginsResult multiplication requires a scalar, got {type(other).__name__}"
+            ) from exc
 
         # Scale-aware: SE/gradient/draws are on the inference scale;
         # estimate and CI bounds are on the reporting scale.
@@ -699,6 +714,17 @@ class MarginsResult:
 # Internal: result combination helper
 # ---------------------------------------------------------------------------
 
+def _join_fallback_reasons(a_reason, b_reason):
+    """Combine fallback reasons from two results."""
+    if not a_reason and not b_reason:
+        return None
+    if a_reason and not b_reason:
+        return a_reason
+    if b_reason and not a_reason:
+        return b_reason
+    return f"{a_reason}; {b_reason}"
+
+
 def _combine_results(
     a: MarginsResult,
     b: MarginsResult,
@@ -770,7 +796,7 @@ def _combine_results(
         kappa=None,  # not recomputed for combined results
         delta_sim_disagreement=None,
         fallback_triggered=a.fallback_triggered or b.fallback_triggered,
-        fallback_reason=(a.fallback_reason or b.fallback_reason),
+        fallback_reason=_join_fallback_reasons(a.fallback_reason, b.fallback_reason),
         estimand_metadata={"labels": [label_combine(a_label, b_label)]},
         gradient=new_grad,
         draws=None,

@@ -198,6 +198,11 @@ class Margins:
                     raise ValueError(
                         f"strict=True: argument {name!r} must be explicitly given"
                     )
+            if gradient_backend == "auto":
+                raise ValueError(
+                    "strict=True: gradient_backend='auto' is not allowed. "
+                    "Specify an explicit backend ('autodiff', 'fd', 'wrapped_fd')."
+                )
 
         # Apply defaults for anything not explicitly given
         phi = None if phi is _NOT_GIVEN else phi
@@ -246,12 +251,6 @@ class Margins:
         _ = self._frozen_cov()
 
         # Gradient backend resolution
-        if strict and gradient_backend == "auto":
-            raise ValueError(
-                "strict=True: gradient_backend='auto' is not allowed. "
-                "Specify an explicit backend ('autodiff', 'fd', 'wrapped_fd')."
-            )
-
         if gradient_backend == "auto":
             self.gradient_backend = self.adapter.gradient_backend_recommendation
         else:
@@ -368,12 +367,15 @@ class Margins:
             meta["labels"] = labels
         if over is not None:
             meta["over"] = [over] if isinstance(over, str) else list(over)
+        h_factory = None
+        if config.method == "bootstrap":
+            h_factory = lambda new_adapter: self._build_prediction_estimand(
+                scenario, transform, adapter=new_adapter
+            )[0]
         result_data = run_inference(
             h, self.adapter, config,
             estimand_metadata=meta,
-            h_factory=lambda new_adapter: self._build_prediction_estimand(
-                scenario, transform, adapter=new_adapter
-            )[0],
+            h_factory=h_factory,
         )
         return self._wrap_result(result_data)
 
@@ -425,12 +427,15 @@ class Margins:
             meta["labels"] = labels
         if over is not None:
             meta["over"] = [over] if isinstance(over, str) else list(over)
+        h_factory = None
+        if config.method == "bootstrap":
+            h_factory = lambda new_adapter: self._build_slope_estimand(
+                scenario, var_list, transform, adapter=new_adapter
+            )[0]
         result_data = run_inference(
             h, self.adapter, config,
             estimand_metadata=meta,
-            h_factory=lambda new_adapter: self._build_slope_estimand(
-                scenario, var_list, transform, adapter=new_adapter
-            )[0],
+            h_factory=h_factory,
         )
         return self._wrap_result(result_data)
 
@@ -490,10 +495,22 @@ class Margins:
         if isinstance(contrasts, dict):
             weights_arg = {name: jnp.asarray(w) for name, w in contrasts.items()}
             labels = list(contrasts.keys())
-        elif isinstance(contrasts, np.ndarray) and contrasts.ndim == 2:
+        elif isinstance(contrasts, (np.ndarray, jnp.ndarray)) and contrasts.ndim == 2:
             weights_arg = {
                 f"contrast[{i}]": jnp.asarray(contrasts[i])
                 for i in range(contrasts.shape[0])
+            }
+            labels = list(weights_arg.keys())
+        elif isinstance(contrasts, list) and contrasts and isinstance(contrasts[0], list):
+            # list-of-lists: validate and convert to jnp.ndarray
+            contrasts_arr = jnp.asarray(contrasts)
+            if contrasts_arr.ndim != 2:
+                raise ValueError(
+                    f"list-of-lists contrast must be 2D after conversion, got {contrasts_arr.ndim}D"
+                )
+            weights_arg = {
+                f"contrast[{i}]": contrasts_arr[i]
+                for i in range(contrasts_arr.shape[0])
             }
             labels = list(weights_arg.keys())
         else:
@@ -519,12 +536,15 @@ class Margins:
         h = self._build_contrast_estimand(scenarios, weights_arg)
         config = self._inference_config()
 
+        h_factory = None
+        if config.method == "bootstrap":
+            h_factory = lambda new_adapter: self._build_contrast_estimand(
+                scenarios, weights_arg, adapter=new_adapter
+            )
         result_data = run_inference(
             h, self.adapter, config,
             estimand_metadata={"kind": "contrasts", "labels": labels},
-            h_factory=lambda new_adapter: self._build_contrast_estimand(
-                scenarios, weights_arg, adapter=new_adapter
-            ),
+            h_factory=h_factory,
         )
         return self._wrap_result(result_data)
 
@@ -567,12 +587,15 @@ class Margins:
         config = self._inference_config()
 
         labels = [s.get("label", f"scenario[{i}]") for i, s in enumerate(scenarios)]
+        h_factory = None
+        if config.method == "bootstrap":
+            h_factory = lambda new_adapter: self._build_evaluate_estimand(
+                scenarios, compose, adapter=new_adapter
+            )
         result_data = run_inference(
             h, self.adapter, config,
             estimand_metadata={"kind": "evaluate", "labels": labels},
-            h_factory=lambda new_adapter: self._build_evaluate_estimand(
-                scenarios, compose, adapter=new_adapter
-            ),
+            h_factory=h_factory,
         )
         return self._wrap_result(result_data)
 
@@ -812,7 +835,15 @@ class Margins:
             rows_per = meta.get("rows_per_grid_point", len(df))
 
             for i in range(n_grid):
-                X_i = X[i * rows_per : (i + 1) * rows_per]
+                start = i * rows_per
+                end = (i + 1) * rows_per
+                if end > X.shape[0]:
+                    raise ValueError(
+                        f"Grid block {i} would exceed design matrix rows "
+                        f"({end} > {X.shape[0]}). The adapter's "
+                        "design_matrix_from_df may have dropped rows."
+                    )
+                X_i = X[start:end]
                 if self.at == "overall":
                     agg_kind = "overall"
                 else:
@@ -850,6 +881,10 @@ class Margins:
             raise ValueError(
                 f"Unknown over variable(s): {sorted(unknown)}. "
                 f"Known variables: {sorted(variable_metadata.keys())}."
+            )
+        if not hasattr(base_data, "groupby"):
+            raise TypeError(
+                f"over= requires base_data to support groupby, got {type(base_data).__name__}"
             )
         groups = [(g, gdf) for g, gdf in base_data.groupby(over_keys, sort=True)]
         if not groups:
@@ -897,12 +932,15 @@ class Margins:
         return h_vector, labels
 
     def _get_base_data(self, adapter: Optional[ModelAdapter] = None):
-        """Get base data from an adapter, falling back to the session's."""
+        """Get base data from an adapter."""
         adapter = adapter if adapter is not None else self.adapter
         try:
             return adapter.training_data
-        except NotImplementedError:
-            return self._base_data
+        except NotImplementedError as exc:
+            raise NotImplementedError(
+                f"Adapter {type(adapter).__name__} does not expose training_data. "
+                "Bootstrap inference and scenario expansion require it."
+            ) from exc
 
     def _build_slope_estimand(
         self,

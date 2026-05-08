@@ -440,3 +440,72 @@ def test_hessian_fd_vector_estimand_raises():
 
     with pytest.raises(ValueError, match="scalar-valued"):
         hessian(h, beta, backend="fd", fd_step=1e-5)
+
+
+
+def test_fd_jvp_wrapper_zero_tangents_scalar_output():
+    """make_predict_with_fd_jvp must handle zero tangents without shape crash."""
+    rng = np.random.default_rng(606)
+    p = 3
+    x_row = rng.standard_normal(p)
+    beta = jnp.asarray(rng.standard_normal(p))
+
+    def native_predict(beta_np, X):
+        # scalar output
+        return np.dot(np.asarray(x_row), np.asarray(beta_np))
+
+    wrapped = make_predict_with_fd_jvp(native_predict, fd_step=1e-6)
+    X = jnp.asarray(x_row.reshape(1, -1))
+
+    # jax.jvp with zero tangents must return a scalar-shaped derivative
+    _, deriv = jax.jvp(wrapped, (beta, X), (jnp.zeros_like(beta), jnp.zeros_like(X)))
+    assert deriv.shape == ()
+    assert float(deriv) == 0.0
+
+
+def test_jax_link_inverse_power_guard():
+    """Power link inverse should not produce NaN for negative inputs."""
+    import statsmodels.api as sm
+    link = sm.families.links.Power(2.0)
+    inv = _jax_link_inverse(link)
+    z = jnp.array([-2.0, -1.0, 0.0, 1.0, 4.0])
+    out = inv(z)
+    # Negative inputs should be guarded (return 0 instead of NaN)
+    assert jnp.all(jnp.isfinite(out))
+    assert float(out[2]) == 0.0  # 0^(1/2) = 0
+    assert float(out[4]) == 2.0  # 4^(1/2) = 2
+
+
+def test_jax_link_inverse_inv_power_guard():
+    """InversePower link inverse should not produce inf at zero."""
+    import statsmodels.api as sm
+    link = sm.families.links.InversePower()
+    inv = _jax_link_inverse(link)
+    z = jnp.array([-1e-15, 0.0, 1e-15, 1.0])
+    out = inv(z)
+    assert jnp.all(jnp.isfinite(out))
+
+
+def test_jax_link_inverse_inv_squared_guard():
+    """InverseSquared link inverse should not produce NaN for z <= 0."""
+    import statsmodels.api as sm
+    link = sm.families.links.InverseSquared()
+    inv = _jax_link_inverse(link)
+    z = jnp.array([-1.0, 0.0, 1.0, 4.0])
+    out = inv(z)
+    assert jnp.all(jnp.isfinite(out))
+    # For z <= 0, guarded to 0
+    assert float(out[0]) == 0.0
+    assert float(out[1]) == 0.0
+    # For z > 0, correct value
+    assert float(out[3]) == 0.5  # 1/sqrt(4) = 0.5
+
+
+def test_jax_link_inverse_negative_binomial_guard():
+    """NegativeBinomial link inverse should guard denominator near zero."""
+    import statsmodels.api as sm
+    link = sm.families.links.NegativeBinomial(alpha=1.0)
+    inv = _jax_link_inverse(link)
+    z = jnp.array([-100.0, 0.0, 1.0, 100.0])
+    out = inv(z)
+    assert jnp.all(jnp.isfinite(out))

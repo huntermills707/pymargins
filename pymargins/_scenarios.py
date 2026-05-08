@@ -138,59 +138,6 @@ def expand_scenario(
     return expanded, metadata
 
 
-def expand_with_over(
-    scenario: dict,
-    base_data: pd.DataFrame,
-    aggregation_resolver,
-    variable_metadata: dict,
-) -> tuple[list[tuple[Any, pd.DataFrame]], dict]:
-    """Expand a scenario with an `over` grouping into one DataFrame per group.
-
-    `over` partitions the data into subgroups and computes the estimand
-    independently within each. This differs from `atexog` (which substitutes
-    counterfactual values): `over` uses the observed grouping, so it
-    produces one estimate per observed group level.
-
-    Parameters
-    ----------
-    scenario : dict
-        Scenario spec, possibly with 'over' key.
-
-    base_data, aggregation_resolver, variable_metadata : as in expand_scenario.
-
-    Returns
-    -------
-    groups : list of (group_label, DataFrame) tuples
-        One entry per group level. group_label is the scalar (or tuple, for
-        multiple over variables) identifying the group.
-
-    metadata : dict
-        Includes 'over_keys' for output labeling.
-    """
-    over = scenario.get("over", None)
-    if over is None:
-        # No grouping: single "All" group
-        df, meta = expand_scenario(scenario, base_data, aggregation_resolver, variable_metadata)
-        return [(None, df)], {**meta, "over_keys": None}
-
-    over_keys = [over] if isinstance(over, str) else list(over)
-
-    # Validate
-    unknown = set(over_keys) - set(variable_metadata.keys())
-    if unknown:
-        raise ValueError(f"Unknown over variable(s): {sorted(unknown)}")
-
-    # Group base_data by over_keys, then expand within each group
-    groups = []
-    for group_label, group_df in base_data.groupby(over_keys, sort=True):
-        df, _ = expand_scenario(
-            scenario, group_df, aggregation_resolver, variable_metadata,
-        )
-        groups.append((group_label, df))
-
-    return groups, {"over_keys": over_keys, "n_groups": len(groups)}
-
-
 # ---------------------------------------------------------------------------
 # Aggregation resolver
 # ---------------------------------------------------------------------------
@@ -228,10 +175,14 @@ def make_aggregation_resolver(at, weights=None):
         return lambda data, meta: at(data)
 
     def resolver(data, meta):
+        missing = [var_name for var_name in meta.keys() if var_name not in data.columns]
+        if missing:
+            raise ValueError(
+                f"Missing column(s) in data: {sorted(missing)}. "
+                f"Available: {sorted(data.columns)}."
+            )
         result = {}
         for var_name, info in meta.items():
-            if var_name not in data.columns:
-                continue
             col = data[var_name]
             spec = _resolve_var_spec(at, var_name, info)
             result[var_name] = _summarize_column(col, spec, info, weights)
@@ -398,17 +349,4 @@ Example 4: At typical with discrete control variables
     # df has 1 row: treatment=1, other vars at their typical values
     # (median continuous, mode discrete/binary/categorical)
 
-
-Example 5: Subgroup analysis with over=
----------------------------------------
-
-    from pymargins._scenarios import expand_with_over
-
-    groups, meta = expand_with_over(
-        scenario={"atexog": {"treatment": 1}, "over": "region"},
-        base_data=training_data,
-        aggregation_resolver=resolver,
-        variable_metadata=...,
-    )
-    # groups is [(region_value, df_for_that_region), ...]
 """

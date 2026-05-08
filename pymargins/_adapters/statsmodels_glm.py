@@ -10,18 +10,6 @@ links (logit, probit, log, identity, power, inverse, cloglog). One adapter
 class for the entire GLM family because the chain-rule structure is uniform:
 the family's `link.inverse_deriv` provides the analytical derivative
 factor, and the rest of the gradient machinery is the same.
-
-Status
-------
-SKELETON — most methods need filling in. The shape is correct; the work
-left is framework-specific extraction:
-  - design_matrix_from_df via patsy/formulaic
-  - vcov flavor dispatch (HC0/HC3/cluster) against statsmodels' machinery
-  - variable_metadata extraction from results.model.exog_names and the
-    formula's term info
-  - column_index_of_variable mapping
-
-Implementers: see IMPLEMENTATION_GUIDE.md for prioritized tasks.
 """
 
 from __future__ import annotations
@@ -38,6 +26,7 @@ from ._common import (
     design_matrix_from_df,
     column_index_of_variable,
     build_variable_metadata,
+    validate_vcov_spec,
 )
 
 
@@ -69,6 +58,12 @@ class StatsmodelsGLMAdapter(GLMAdapter):
     def training_data(self):
         return self._training_data
 
+    def attach(self, session) -> None:
+        """Validate session configuration at attach time."""
+        vcov = getattr(session, "vcov_spec", None)
+        validate_vcov_spec(vcov, adapter_name="StatsmodelsGLMAdapter")
+        super().attach(session)
+
     # -----------------------------------------------------------------------
     # Core data access
     # -----------------------------------------------------------------------
@@ -96,7 +91,7 @@ class StatsmodelsGLMAdapter(GLMAdapter):
         if vcov_spec is None:
             return jnp.asarray(self.results.cov_params())
 
-        if isinstance(vcov_spec, np.ndarray):
+        if isinstance(vcov_spec, (np.ndarray, jnp.ndarray)):
             return jnp.asarray(vcov_spec)
 
         if isinstance(vcov_spec, str):
@@ -178,18 +173,30 @@ class StatsmodelsGLMAdapter(GLMAdapter):
                         f"groups length ({len(groups)}) must match training_data "
                         f"length ({len(self._training_data)})."
                     )
+            # Preserve model-specific args from the original fit where possible
+            fit_kwargs = self._collect_original_fit_kwargs()
             new_results = smf_glm(
                 formula, data=self._training_data, family=self.family,
-            ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {})
+            ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, **fit_kwargs)
             return jnp.asarray(new_results.cov_params())
 
         # Array-fit refit
         endog = self.results.model.endog
         exog = self.results.model.exog
+        fit_kwargs = self._collect_original_fit_kwargs()
         new_results = sm.GLM(
             endog, exog, family=self.family,
-        ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {})
+        ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, **fit_kwargs)
         return jnp.asarray(new_results.cov_params())
+
+    def _collect_original_fit_kwargs(self) -> dict:
+        """Capture model-specific kwargs from the original fit for refit."""
+        kwargs = {}
+        for attr in ("offset", "exposure", "freq_weights", "var_weights"):
+            val = getattr(self.results.model, attr, None)
+            if val is not None:
+                kwargs[attr] = val
+        return kwargs
 
     def refit(self, resampled_data: pd.DataFrame) -> "StatsmodelsGLMAdapter":
         """Refit the model on resampled data.
@@ -199,11 +206,12 @@ class StatsmodelsGLMAdapter(GLMAdapter):
         """
         from statsmodels.formula.api import glm as smf_glm
 
+        fit_kwargs = self._collect_original_fit_kwargs()
         formula = getattr(self.results.model, "formula", None)
         if formula is not None:
             new_results = smf_glm(
                 formula, data=resampled_data, family=self.family,
-            ).fit()
+            ).fit(**fit_kwargs)
             return StatsmodelsGLMAdapter(new_results, training_data=resampled_data)
 
         # Array-fit refit: reconstruct exog and endog from resampled_data.
@@ -239,7 +247,7 @@ class StatsmodelsGLMAdapter(GLMAdapter):
             if "const" not in exog_df.columns and "Intercept" not in exog_df.columns:
                 exog_df = exog_df.copy()
                 exog_df.insert(0, "const", 1.0)
-        new_results = sm.GLM(endog, exog_df, family=self.family).fit()
+        new_results = sm.GLM(endog, exog_df, family=self.family).fit(**fit_kwargs)
         return StatsmodelsGLMAdapter(new_results, training_data=resampled_data)
 
 

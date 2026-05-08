@@ -150,7 +150,7 @@ def run_inference(
 
     if method == "delta":
         beta = adapter.coefficients()
-        if not adapter.supports_jax_autodiff and not is_jax_differentiable(h, beta):
+        if not is_jax_differentiable(h, beta):
             if "simulation" in supported:
                 # Auto-route to simulation with a warning marker in the result
                 warnings.warn(
@@ -159,7 +159,7 @@ def run_inference(
                 )
                 return _run_simulation(h, adapter, config, estimand_metadata,
                                        fallback_reason="non_differentiable")
-            elif "bootstrap" in supported:
+            elif "bootstrap" in supported and h_factory is not None:
                 warnings.warn(
                     "Estimand is not JAX-differentiable; falling back to bootstrap.",
                     UserWarning, stacklevel=2,
@@ -208,7 +208,7 @@ def _run_delta(h, adapter, config, estimand_metadata):
             k = kappa_vector(h, beta, Sigma,
                              backend=config.gradient_backend, fd_step=config.fd_step)
 
-        max_k = float(k) if jnp.ndim(k) == 0 else float(jnp.max(jnp.asarray(k)))
+        max_k = float(k) if jnp.ndim(k) == 0 else float(jnp.nanmax(jnp.asarray(k)))
         if max_k > config.kappa_threshold:
             # Auto-fallback to simulation
             warnings.warn(
@@ -219,9 +219,9 @@ def _run_delta(h, adapter, config, estimand_metadata):
             sim_result = _run_simulation(
                 h, adapter, config, estimand_metadata,
                 fallback_reason=f"kappa={max_k:.3f}>threshold={config.kappa_threshold}",
+                skip_kappa=True,
             )
-            sim_result["kappa"] = k
-            sim_result["fallback_triggered"] = True
+            sim_result["kappa"] = np.asarray(k) if k is not None else None
             return sim_result
 
     # Construct CI on inference scale, then back-transform via phi
@@ -269,7 +269,7 @@ def _run_delta(h, adapter, config, estimand_metadata):
 # Simulation path
 # ---------------------------------------------------------------------------
 
-def _run_simulation(h, adapter, config, estimand_metadata, *, fallback_reason=None):
+def _run_simulation(h, adapter, config, estimand_metadata, *, fallback_reason=None, skip_kappa=False):
     """Krinsky–Robb simulation: sample β̃ ~ N(β̂, Σ̂), evaluate h, take
     quantiles for CIs."""
     beta = adapter.coefficients()
@@ -293,15 +293,16 @@ def _run_simulation(h, adapter, config, estimand_metadata, *, fallback_reason=No
         # vmap couldn't trace h; fall back to a Python loop. Genuine
         # shape/type bugs in h (TypeError/ValueError) are intentionally not
         # caught — they surface immediately with their original traceback.
-        h_draws_inf = np.array([np.asarray(h(jnp.asarray(b))) for b in draws_beta])
+        h_draws_inf = np.array([np.asarray(h(np.asarray(b))) for b in draws_beta])
 
     se = np.std(h_draws_inf, axis=0, ddof=1)
 
-    # Curvature diagnostic (compute for consistency with delta fallback path).
-    # Gated on JAX-differentiability because explicit method="simulation" is
-    # how non-differentiable estimands reach the engine.
+    # Curvature diagnostic. Gated on JAX-differentiability because explicit
+    # method="simulation" is how non-differentiable estimands reach the engine.
+    # skip_kappa=True avoids redundant recomputation when the delta path already
+    # computed κ and is falling back to simulation.
     k = None
-    if config.diagnostics and is_jax_differentiable(h, beta):
+    if not skip_kappa and config.diagnostics and is_jax_differentiable(h, beta):
         try:
             if jnp.ndim(estimate) == 0:
                 k = kappa(h, beta, Sigma,
@@ -314,8 +315,14 @@ def _run_simulation(h, adapter, config, estimand_metadata, *, fallback_reason=No
 
     # Apply phi to draws and estimate for reporting
     if config.phi is not None:
-        h_draws = np.asarray(config.phi(jnp.asarray(h_draws_inf)))
-        estimate_report = np.asarray(config.phi(estimate))
+        try:
+            h_draws = np.asarray(config.phi(jnp.asarray(h_draws_inf)))
+        except (TypeError, ValueError):
+            h_draws = np.asarray(config.phi(np.asarray(h_draws_inf)))
+        try:
+            estimate_report = np.asarray(config.phi(estimate))
+        except (TypeError, ValueError):
+            estimate_report = np.asarray(config.phi(np.asarray(estimate)))
     else:
         h_draws = h_draws_inf
         estimate_report = np.asarray(estimate)
@@ -378,6 +385,8 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
     rng = np.random.default_rng(config.rng_seed)
     h_draws_inf = []
 
+    n_failures = 0
+    max_failures = max(1, int(0.1 * config.n_boot))  # 10% tolerance
     for b in range(config.n_boot):
         idx = rng.integers(0, n_obs, size=n_obs)
         if hasattr(data, "iloc"):
@@ -385,9 +394,20 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
         else:
             resampled = data[idx]
 
-        new_adapter = adapter.refit(resampled)
-        h_b = h_factory(new_adapter)
-        h_draws_inf.append(np.asarray(h_b(new_adapter.coefficients())))
+        try:
+            new_adapter = adapter.refit(resampled)
+            h_b = h_factory(new_adapter)
+            h_draws_inf.append(np.asarray(h_b(new_adapter.coefficients())))
+        except Exception as exc:
+            n_failures += 1
+            if n_failures > max_failures:
+                raise RuntimeError(
+                    f"Bootstrap failed on {n_failures} replicates (>{max_failures} "
+                    f"threshold). Last error: {exc}"
+                ) from exc
+
+    if len(h_draws_inf) == 0:
+        raise RuntimeError("All bootstrap replicates failed.")
 
     h_draws_inf = np.stack(h_draws_inf, axis=0)  # shape (n_boot, ...)
 
@@ -395,8 +415,14 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
 
     # Apply phi to draws and estimate for reporting
     if config.phi is not None:
-        h_draws = np.asarray(config.phi(jnp.asarray(h_draws_inf)))
-        estimate_report = np.asarray(config.phi(estimate))
+        try:
+            h_draws = np.asarray(config.phi(jnp.asarray(h_draws_inf)))
+        except (TypeError, ValueError):
+            h_draws = np.asarray(config.phi(np.asarray(h_draws_inf)))
+        try:
+            estimate_report = np.asarray(config.phi(estimate))
+        except (TypeError, ValueError):
+            estimate_report = np.asarray(config.phi(np.asarray(estimate)))
     else:
         h_draws = h_draws_inf
         estimate_report = np.asarray(estimate)
@@ -488,6 +514,9 @@ def run_test(
     -------
     (statistic, p_value) : tuple of arrays
     """
+    if method != "wald":
+        raise NotImplementedError(f"Test method {method!r} is not implemented.")
+
     if grad is not None and cov_params is not None:
         return delta_wald_test(
             jnp.asarray(estimate),

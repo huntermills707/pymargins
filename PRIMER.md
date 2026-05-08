@@ -105,7 +105,7 @@ decomposition. Hold it in your head:
 
 3. **Inference**: how is uncertainty quantified?
    Delta method, parametric simulation, or bootstrap. Session-level
-   default; per-call override.
+   default; switching methods requires a new session.
 
 These are *orthogonal*. Any combination is meaningful: AME of a slope
 under bootstrap, APM of a prediction under simulation, etc. The code
@@ -409,7 +409,7 @@ Suggested reading order:
 3. `_delta.py` and `_kappa.py` — the numerical kernels above gradients.
 4. `_estimands.py` — see how the kernels get composed.
 5. `_adapter.py` — the abstract interface.
-6. `_adapters/statsmodels_glm.py` — a concrete implementation (skeleton).
+6. `_adapters/statsmodels_glm.py` — a concrete implementation (reference).
 7. `_scenarios.py` — counterfactual construction.
 8. `_result.py` — output types.
 9. `_inference.py` — orchestration above kernels.

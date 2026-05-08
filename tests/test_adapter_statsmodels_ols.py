@@ -83,6 +83,52 @@ def test_auto_detect_array_fit_ols(df_ols):
         auto_detect_adapter(fit)
 
 
+def test_auto_detect_wls_wrapper():
+    """WLSResultsWrapper should map to StatsmodelsOLSAdapter."""
+    from pymargins._adapters import _detect_adapter_class
+    class FakeWLSResult:
+        pass
+    FakeWLSResult.__module__ = "statsmodels.regression"
+    FakeWLSResult.__name__ = "WLSResultsWrapper"
+    cls = _detect_adapter_class(FakeWLSResult())
+    assert cls is StatsmodelsOLSAdapter
+
+
+def test_auto_detect_gls_wrapper():
+    """GLSResultsWrapper should map to StatsmodelsOLSAdapter."""
+    from pymargins._adapters import _detect_adapter_class
+    class FakeGLSResult:
+        pass
+    FakeGLSResult.__module__ = "statsmodels.regression"
+    FakeGLSResult.__name__ = "GLSResultsWrapper"
+    cls = _detect_adapter_class(FakeGLSResult())
+    assert cls is StatsmodelsOLSAdapter
+
+
+def test_auto_detect_logit_wrapper():
+    """LogitResultsWrapper should map to StatsmodelsGLMAdapter."""
+    from pymargins._adapters import _detect_adapter_class
+    class FakeLogitResult:
+        pass
+    FakeLogitResult.__module__ = "statsmodels.discrete"
+    FakeLogitResult.__name__ = "LogitResultsWrapper"
+    cls = _detect_adapter_class(FakeLogitResult())
+    from pymargins._adapters.statsmodels_glm import StatsmodelsGLMAdapter
+    assert cls is StatsmodelsGLMAdapter
+
+
+def test_auto_detect_probit_wrapper():
+    """ProbitResultsWrapper should map to StatsmodelsGLMAdapter."""
+    from pymargins._adapters import _detect_adapter_class
+    class FakeProbitResult:
+        pass
+    FakeProbitResult.__module__ = "statsmodels.discrete"
+    FakeProbitResult.__name__ = "ProbitResultsWrapper"
+    cls = _detect_adapter_class(FakeProbitResult())
+    from pymargins._adapters.statsmodels_glm import StatsmodelsGLMAdapter
+    assert cls is StatsmodelsGLMAdapter
+
+
 def test_adapter_coefficients(fit_ols_formula):
     adapter = StatsmodelsOLSAdapter(fit_ols_formula)
     beta = adapter.coefficients()
@@ -236,6 +282,19 @@ def test_refit_array(fit_ols_array, df_ols):
     )
 
 
+def test_refit_wls_preserves_weights(fit_wls_formula, df_ols):
+    """WLS refit should preserve the original weights."""
+    adapter = StatsmodelsOLSAdapter(fit_wls_formula)
+    resampled = df_ols.sample(frac=1.0, replace=True, random_state=42)
+    new_adapter = adapter.refit(resampled)
+    assert isinstance(new_adapter, StatsmodelsOLSAdapter)
+    # Coefficients should change (different data)
+    assert not np.allclose(
+        np.asarray(adapter.coefficients()),
+        np.asarray(new_adapter.coefficients()),
+    )
+
+
 # ---------------------------------------------------------------------------
 # 7. End-to-end bootstrap with array-fit adapter
 # ---------------------------------------------------------------------------
@@ -256,3 +315,54 @@ def test_bootstrap_end_to_end_array_fit(fit_ols_array, df_ols):
     assert np.isfinite(float(rd.estimate))
     assert float(rd.conf_int_lower) < float(rd.conf_int_upper)
     assert rd.draws is not None
+
+
+# ---------------------------------------------------------------------------
+# Attach-time validation (IMPLEMENTATION_GUIDE.md §2.3)
+# ---------------------------------------------------------------------------
+
+def test_attach_rejects_unsupported_vcov_string(fit_ols_formula):
+    adapter = StatsmodelsOLSAdapter(fit_ols_formula)
+    with pytest.raises(ValueError, match="StatsmodelsOLSAdapter does not support vcov='HAC'"):
+        Margins(fit_ols_formula, adapter=adapter, vcov="HAC")
+
+
+def test_attach_rejects_unsupported_vcov_dict(fit_ols_formula):
+    adapter = StatsmodelsOLSAdapter(fit_ols_formula)
+    with pytest.raises(ValueError, match="StatsmodelsOLSAdapter does not support vcov dict with type='hac'"):
+        Margins(fit_ols_formula, adapter=adapter, vcov={"type": "hac"})
+
+
+def test_attach_rejects_cluster_without_groups(fit_ols_formula):
+    adapter = StatsmodelsOLSAdapter(fit_ols_formula)
+    with pytest.raises(ValueError, match="cluster vcov requires 'groups'"):
+        Margins(fit_ols_formula, adapter=adapter, vcov={"type": "cluster"})
+
+
+def test_attach_accepts_supported_vcov(fit_ols_formula):
+    adapter = StatsmodelsOLSAdapter(fit_ols_formula)
+    # HC0 string
+    m = Margins(fit_ols_formula, adapter=adapter, vcov="HC0")
+    assert m.vcov_spec == "HC0"
+    # cluster dict
+    df = adapter.training_data
+    cluster_spec = {"type": "cluster", "groups": df["treatment"]}
+    m2 = Margins(fit_ols_formula, adapter=adapter, vcov=cluster_spec)
+    assert m2.vcov_spec["type"] == "cluster"
+    assert m2.vcov_spec["groups"].equals(df["treatment"])
+    # ndarray
+    cov = np.eye(len(fit_ols_formula.params))
+    m3 = Margins(fit_ols_formula, adapter=adapter, vcov=cov)
+    assert m3.vcov_spec is cov
+    # JAX array
+    import jax.numpy as jnp
+    cov_jax = jnp.eye(len(fit_ols_formula.params))
+    m4 = Margins(fit_ols_formula, adapter=adapter, vcov=cov_jax)
+    assert m4.vcov_spec is cov_jax
+
+
+def test_attach_validates_phi_phi_inv(fit_ols_formula):
+    """ModelAdapter.attach validates phi and phi_inv are inverses for OLS too."""
+    adapter = StatsmodelsOLSAdapter(fit_ols_formula)
+    with pytest.raises(ValueError, match="phi and phi_inv do not appear to be inverses"):
+        Margins(fit_ols_formula, adapter=adapter, phi=jnp.exp, phi_inv=jnp.exp)

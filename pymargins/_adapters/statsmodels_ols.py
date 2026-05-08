@@ -18,6 +18,7 @@ from ._common import (
     design_matrix_from_df,
     column_index_of_variable,
     build_variable_metadata,
+    validate_vcov_spec,
 )
 
 
@@ -43,6 +44,12 @@ class StatsmodelsOLSAdapter(LinearPredictionAdapter):
     def training_data(self):
         return self._training_data
 
+    def attach(self, session) -> None:
+        """Validate session configuration at attach time."""
+        vcov = getattr(session, "vcov_spec", None)
+        validate_vcov_spec(vcov, adapter_name="StatsmodelsOLSAdapter")
+        super().attach(session)
+
     # -----------------------------------------------------------------------
     # Core data access
     # -----------------------------------------------------------------------
@@ -60,7 +67,7 @@ class StatsmodelsOLSAdapter(LinearPredictionAdapter):
         if vcov_spec is None:
             return jnp.asarray(self.results.cov_params())
 
-        if isinstance(vcov_spec, np.ndarray):
+        if isinstance(vcov_spec, (np.ndarray, jnp.ndarray)):
             return jnp.asarray(vcov_spec)
 
         if isinstance(vcov_spec, str):
@@ -112,29 +119,70 @@ class StatsmodelsOLSAdapter(LinearPredictionAdapter):
 
     def _refit_and_extract_cov(self, cov_type: str, cov_kwds=None) -> jnp.ndarray:
         """Refit the model with a specific cov_type and return its covariance."""
-        from statsmodels.formula.api import ols as smf_ols
-
         formula = getattr(self.results.model, "formula", None)
         if formula is not None:
-            new_results = smf_ols(
-                formula, data=self._training_data,
-            ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {})
+            if cov_kwds and "groups" in cov_kwds:
+                groups = cov_kwds["groups"]
+                if hasattr(groups, "__len__") and len(groups) != len(self._training_data):
+                    raise ValueError(
+                        f"groups length ({len(groups)}) must match training_data "
+                        f"length ({len(self._training_data)})."
+                    )
+            model_cls_name = type(self.results.model).__name__
+            if model_cls_name == "WLS":
+                from statsmodels.formula.api import wls as smf_wls
+                weights = getattr(self.results.model, "weights", None)
+                new_results = smf_wls(
+                    formula, data=self._training_data, weights=weights,
+                ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {})
+            elif model_cls_name == "GLS":
+                from statsmodels.formula.api import gls as smf_gls
+                sigma = getattr(self.results.model, "sigma", None)
+                new_results = smf_gls(
+                    formula, data=self._training_data, sigma=sigma,
+                ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {})
+            else:
+                from statsmodels.formula.api import ols as smf_ols
+                new_results = smf_ols(
+                    formula, data=self._training_data,
+                ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {})
             return jnp.asarray(new_results.cov_params())
 
         endog = self.results.model.endog
         exog = self.results.model.exog
-        new_results = sm.OLS(endog, exog).fit(
-            cov_type=cov_type, cov_kwds=cov_kwds or {},
-        )
+        model_cls_name = type(self.results.model).__name__
+        if model_cls_name == "WLS":
+            weights = getattr(self.results.model, "weights", None)
+            new_results = sm.WLS(endog, exog, weights=weights).fit(
+                cov_type=cov_type, cov_kwds=cov_kwds or {},
+            )
+        elif model_cls_name == "GLS":
+            sigma = getattr(self.results.model, "sigma", None)
+            new_results = sm.GLS(endog, exog, sigma=sigma).fit(
+                cov_type=cov_type, cov_kwds=cov_kwds or {},
+            )
+        else:
+            new_results = sm.OLS(endog, exog).fit(
+                cov_type=cov_type, cov_kwds=cov_kwds or {},
+            )
         return jnp.asarray(new_results.cov_params())
 
     def refit(self, resampled_data: pd.DataFrame) -> "StatsmodelsOLSAdapter":
         """Refit the model on resampled data."""
-        from statsmodels.formula.api import ols as smf_ols
-
         formula = getattr(self.results.model, "formula", None)
         if formula is not None:
-            new_results = smf_ols(formula, data=resampled_data).fit()
+            model_cls_name = type(self.results.model).__name__
+            if model_cls_name == "WLS":
+                from statsmodels.formula.api import wls as smf_wls
+                weights = getattr(self.results.model, "weights", None)
+                new_results = smf_wls(formula, data=resampled_data, weights=weights).fit()
+            elif model_cls_name == "GLS":
+                from statsmodels.formula.api import gls as smf_gls
+                sigma = getattr(self.results.model, "sigma", None)
+                new_results = smf_gls(formula, data=resampled_data, sigma=sigma).fit()
+            else:
+                from statsmodels.formula.api import ols as smf_ols
+                new_results = smf_ols(formula, data=resampled_data).fit()
             return StatsmodelsOLSAdapter(new_results, training_data=resampled_data)
 
         # Array-fit refit
@@ -163,5 +211,13 @@ class StatsmodelsOLSAdapter(LinearPredictionAdapter):
             if "const" not in exog_df.columns and "Intercept" not in exog_df.columns:
                 exog_df = exog_df.copy()
                 exog_df.insert(0, "const", 1.0)
-        new_results = sm.OLS(endog, exog_df).fit()
+        model_cls_name = type(self.results.model).__name__
+        if model_cls_name == "WLS":
+            weights = getattr(self.results.model, "weights", None)
+            new_results = sm.WLS(endog, exog_df, weights=weights).fit()
+        elif model_cls_name == "GLS":
+            sigma = getattr(self.results.model, "sigma", None)
+            new_results = sm.GLS(endog, exog_df, sigma=sigma).fit()
+        else:
+            new_results = sm.OLS(endog, exog_df).fit()
         return StatsmodelsOLSAdapter(new_results, training_data=resampled_data)

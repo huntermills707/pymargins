@@ -22,7 +22,7 @@ tests hide them as test-level workarounds.
 > continuous classification at the design-matrix level no longer affects
 > slope semantics.
 >
-> Remaining open items: B16, B17, A4, A5, A8, A11, B12, B18.
+> Remaining open items: B16 (partial), B17 (partial), A8 (partial), A11, B18.
 >
 > **Behavioral changes since this review:**
 > - `dydx(v)` now returns the **total** derivative ∂μ/∂v computed via a
@@ -161,9 +161,8 @@ or update the docstring.
 - **A11 — No third-party adapter registry.** `_detect_adapter_class` is
   hardcoded. PRIMER invites custom adapters; needs a `register()` hook.
 
-- **B12 — `result.test(kind=...)` ignores `kind`.** Only Wald is
-  implemented. Either drop the parameter or stub LR/score and raise
-  NotImplementedError.
+- **B12 — `result.test(kind=...)` ignores `kind`.** *(FIXED)* Only Wald is
+  implemented; unsupported values now raise `NotImplementedError`.
 
 - **B13 — `dydx` doesn't block "discrete" var_type.** *(MOOT)*
   `_infer_variable_type` no longer emits `"discrete"`; integer columns
@@ -209,29 +208,33 @@ exercising end-to-end:
    both before any AME testing.~~ Both fixed.
 
 2. **`_inference.py`** — ~~Functional but inefficient (B6, A8).~~ B6 fixed.
-   A8 (kappa fallback throws away gradient) remains open. Bootstrap path
-   now exists with `h_factory` (per inner IMPLEMENTATION_GUIDE), which is
-   good — but Margins should pass it conditionally.
+   A8 (kappa fallback throws away gradient) partially fixed — `skip_kappa`
+   avoids redundant recomputation, but gradient reuse would need deeper
+   refactoring. ~~Margins passes `h_factory` unconditionally~~ — now passed
+   only when `method="bootstrap"` (A5 fixed).
 
 3. **`_result.py`** — ~~Composition arithmetic is correct on identity scale;
    broken on non-identity (B10). Capture `phi`/`phi_inv` on the result
    instead of dereferencing the session.~~ Both fixed.
 
 4. **`margins.py`** — ~~Eager Σ̂ (B15), `rng_seed` plumbing (B14), DataFrame
-   atexog routing (A6)~~ — fixed. pandas-coupling for `over=` (B17) remains
-   open. The class is doing a lot; consider extracting `_build_*_estimand`
-   into a separate "session compiler" once the bugs are out.
+   atexog routing (A6)~~ — fixed. ~~pandas-coupling for `over=` (B17)~~ now
+   guarded with a descriptive error. ~~Contiguous grid slicing (B16)~~ now
+   validated before slicing. The class is doing a lot; consider extracting
+   `_build_*_estimand` into a separate "session compiler" once the bugs are
+   out.
 
-5. **`StatsmodelsGLMAdapter`** — Skeleton works for formula-fit logit.
-   `column_index_of_variable`'s factor heuristic is fragile (acknowledged
-   in IMPLEMENTATION_GUIDE 0.3). Cluster vcov requires refit (acknowledged).
+5. **`StatsmodelsGLMAdapter`** — Reference implementation for formula-fit
+   and array-fit GLM. `column_index_of_variable`'s factor heuristic is
+   fragile (acknowledged in IMPLEMENTATION_GUIDE 0.3). Cluster vcov requires
+   refit (acknowledged).
 
 
 ## Recommended order of operations
 
-*Completed:* B1, B2/B3, B4, B6, B10, B14, B15, A1, A6, B27.
+*Completed:* B1, B2/B3, B4, B6, B10, B14, B15, A1, A4, A5, A6, B12, B13, B27.
 
-*Remaining open items:* B16, B17, A4, A5, A8, A11, B12, B13, B18.
+*Remaining open items:* B16 (partial), B17 (partial), A8 (partial), A11, B18.
 
 1. ~~Fix B1 (10-second fix; otherwise dydx fails on first call).~~ Done.
 2. ~~Fix B4 (Cholesky NaN check on JAX) — same scale of fix.~~ Done.

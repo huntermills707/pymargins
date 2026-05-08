@@ -372,3 +372,59 @@ def test_kappa_non_psd_covariance():
     # Linear estimand => after ridge regularization κ should be near 0
     assert np.isfinite(k), f"Expected finite κ after ridge, got {k}"
     assert k < 1e-6, f"Expected κ ≈ 0 for linear estimand, got {k}"
+
+
+
+def test_kappa_vector_scalar_estimand():
+    """kappa_vector on a scalar estimand should return a 1-element array."""
+    rng = np.random.default_rng(42)
+    p = 3
+    beta = jnp.asarray(rng.standard_normal(p))
+    Sigma = jnp.eye(p) * 0.01
+    x = jnp.asarray(rng.standard_normal(p))
+
+    def h(b):
+        return x @ b  # scalar
+
+    kappas = kappa_vector(h, beta, Sigma, backend="autodiff")
+    assert kappas.shape == (1,)
+    assert float(kappas[0]) < 1e-6
+
+
+def test_kappa_core_rejects_vector_estimand():
+    """_kappa_core should raise when given a vector estimand."""
+    from pymargins._kappa import _kappa_core
+    rng = np.random.default_rng(42)
+    p = 3
+    beta = jnp.asarray(rng.standard_normal(p))
+    Sigma = jnp.eye(p) * 0.01
+    x1 = jnp.asarray(rng.standard_normal(p))
+    x2 = jnp.asarray(rng.standard_normal(p))
+
+    def h(b):
+        return jnp.array([x1 @ b, x2 @ b])
+
+    with pytest.raises(ValueError, match="scalar estimands"):
+        _kappa_core(h, beta, Sigma, L=None, backend="autodiff")
+
+
+def test_classify_kappa_nan():
+    """classify_kappa with NaN must return delta_unreliable."""
+    assert classify_kappa(float("nan")) == "delta_unreliable"
+    assert classify_kappa(float("inf")) == "delta_unreliable"
+    assert classify_kappa(-float("inf")) == "delta_unreliable"
+
+
+def test_kappa_non_psd_negative_diagonal():
+    """Tiny negative diagonal covariance should be handled with a non-negative ridge."""
+    p = 2
+    beta = jnp.array([0.5, -0.3])
+    # Build a PSD matrix, then add a tiny negative to the diagonal
+    base = jnp.array([[1.0, 0.3], [0.3, 1.0]])
+    Sigma = base - 1e-10 * jnp.eye(p)
+
+    def h(b):
+        return b.sum()
+
+    k = kappa(h, beta, Sigma, backend="autodiff")
+    assert np.isfinite(k), f"Expected finite κ after ridge, got {k}"

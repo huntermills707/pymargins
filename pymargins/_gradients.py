@@ -330,7 +330,7 @@ def make_predict_with_fd_jvp(
         # so we cannot convert it to NumPy. Instead, we compute the full
         # Jacobian w.r.t. beta via FD using basis vectors, then compute
         # the matrix-vector product J @ beta_dot in JAX space.
-        deriv_beta = 0.0
+        deriv_beta = jnp.array(0.0)
         if beta_dot is not None:
             n_params = beta_np.shape[0]
             J_beta = np.zeros((n_out, n_params))
@@ -349,7 +349,7 @@ def make_predict_with_fd_jvp(
         # ------------------------------------------------------------------
         # X directional derivative (same tracer-safe pattern)
         # ------------------------------------------------------------------
-        deriv_X = 0.0
+        deriv_X = jnp.array(0.0)
         if X_dot is not None:
             # WARNING: this path is O(n_obs · n_features) predict_native
             # calls. For a 1000×10 design that is 20_000 calls per HVP.
@@ -401,18 +401,27 @@ def _jax_link_inverse(link):
         if p == 0.0:
             # statsmodels treats Power(0) as the log link
             return jnp.exp
-        return lambda z: jnp.power(z, 1.0 / p)
+        return lambda z: jnp.where(z <= 0, 0.0, jnp.power(z, 1.0 / p))
     if name == "InversePower":
-        return lambda z: 1.0 / z
+        return lambda z: jnp.where(jnp.abs(z) < 1e-12, jnp.where(z >= 0, 1e12, -1e12), 1.0 / z)
     if name == "InverseSquared":
-        return lambda z: 1.0 / jnp.sqrt(z)
+        return lambda z: jnp.where(z <= 0, 0.0, 1.0 / jnp.sqrt(z))
     if name == "Sqrt":
         return lambda z: z ** 2
     if name == "Cauchy":
         return lambda z: 0.5 + (1.0 / jnp.pi) * jnp.arctan(z)
     if name == "NegativeBinomial":
-        alpha = float(link.alpha)
-        return lambda z: jnp.exp(z) / (alpha * (jnp.exp(z) - 1.0) + 1.0)
+        alpha = float(getattr(link, "alpha", 1.0))
+        def nb_inv(z):
+            ez = jnp.exp(z)
+            denom = alpha * (ez - 1.0) + 1.0
+            denom = jnp.where(
+                jnp.abs(denom) < 1e-12,
+                jnp.where(denom >= 0, 1e-12, -1e-12),
+                denom,
+            )
+            return ez / denom
+        return nb_inv
     raise NotImplementedError(f"No JAX mapping for link {name!r}")
 
 
@@ -442,20 +451,26 @@ def _jax_link_inverse_deriv(link):
         if p == 0.0:
             # statsmodels treats Power(0) as log link → derivative is exp
             return jnp.exp
-        return lambda z: jnp.power(z, 1.0 / p - 1.0) / p
+        return lambda z: jnp.where(z <= 0, 0.0, jnp.power(z, 1.0 / p - 1.0) / p)
     if name == "InversePower":
-        return lambda z: -1.0 / (z ** 2)
+        return lambda z: jnp.where(jnp.abs(z) < 1e-12, -1e24, -1.0 / (z ** 2))
     if name == "InverseSquared":
-        return lambda z: -0.5 / (z ** 1.5)
+        return lambda z: jnp.where(z <= 0, 0.0, -0.5 / (z ** 1.5))
     if name == "Sqrt":
         return lambda z: 2.0 * z
     if name == "Cauchy":
         return lambda z: 1.0 / (jnp.pi * (1.0 + z ** 2))
     if name == "NegativeBinomial":
-        alpha = float(link.alpha)
+        alpha = float(getattr(link, "alpha", 1.0))
         def deriv(z):
             ez = jnp.exp(z)
-            return ez / (alpha * (ez - 1.0) + 1.0) ** 2
+            denom = alpha * (ez - 1.0) + 1.0
+            denom = jnp.where(
+                jnp.abs(denom) < 1e-12,
+                jnp.where(denom >= 0, 1e-12, -1e-12),
+                denom,
+            )
+            return ez / (denom ** 2)
         return deriv
     raise NotImplementedError(f"No JAX mapping for link derivative {name!r}")
 

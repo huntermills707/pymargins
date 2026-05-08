@@ -181,8 +181,10 @@ cluster via refit), `design_matrix_from_df`, `variable_metadata`, and
 
 ### 1.2 Auto-detection for the new adapter *(complete)*
 
-`_detect_adapter_class` matches `RegressionResultsWrapper` for
-OLS/WLS/GLS.
+`_detect_adapter_class` matches `RegressionResultsWrapper`,
+`WLSResultsWrapper`, and `GLSResultsWrapper` for OLS/WLS/GLS, plus
+`LogitResultsWrapper` and `ProbitResultsWrapper` for discrete models
+fit via the GLM path.
 
 ### 1.3 Adapter interface is settled *(no work — design statement)*
 
@@ -202,32 +204,35 @@ not be changed.
 config argument still set to `_NOT_GIVEN` raises `ValueError`. Defaults
 are applied only after the strict check passes.
 
-### 2.2 Better error messages
+### 2.2 Better error messages *(implemented)*
 
-When user passes a model that doesn't have a registered adapter, the
-`auto_detect_adapter` error should suggest the closest registered
-adapter and link to docs on writing custom adapters.
+`auto_detect_adapter` errors now suggest the closest registered adapter
+based on module and class-name heuristics, and include a pointer to the
+custom-adapter guide. The suggestion is *strong* ("Did you mean...") when
+both module prefix and class-name hint align, *weak* ("Possibly
+related...") when only one aligns, and falls back to listing all
+registered adapters for completely unknown frameworks.
 
-When a user passes an unknown variable in `atexog=`, the error should
-print exactly which variables are unrecognized.
+Unknown variables in `atexog=` already print exactly which variables
+are unrecognized and which are known.
 
-When κ is high and auto-fallback fires, the fallback should be visible
-in the result (already wired via `fallback_triggered` and
-`fallback_reason`); make sure `MarginsResult.summary()` surfaces this
-clearly.
+Auto-fallback from high κ is visible via `fallback_triggered` and
+`fallback_reason` on the result, and `MarginsResult.summary()` surfaces
+it with a clear WARNING line.
 
-### 2.3 Validate session-adapter compatibility
+### 2.3 Validate session-adapter compatibility *(implemented)*
 
 `adapter.attach(session)` is called from `Margins.__init__`. The base
-`ModelAdapter.attach` is a no-op, but `GLMAdapter.attach` now validates
-that `phi` and `phi_inv` are approximate inverses at a test point.
-Concrete adapters should extend this pattern:
-- A survival adapter that doesn't support log scale should error if
-  `phi=jnp.exp` is supplied.
-- An adapter that doesn't support a requested vcov flavor should error
-  here, not on first computation.
-- Any adapter with link/scale constraints should validate them at
-  attach time so misconfigurations surface immediately.
+`ModelAdapter.attach` validates that `phi` and `phi_inv` are
+approximate inverses at a test point when both are provided.
+
+Concrete adapters extend this pattern:
+- `StatsmodelsGLMAdapter.attach` validates the requested `vcov` spec
+  (strings: HC0–HC3; dicts: `{"type": "cluster", "groups": ...}`) and
+  raises `ValueError` immediately for unsupported flavors.
+- `StatsmodelsOLSAdapter.attach` applies the same vcov validation.
+- Both call `super().attach(session)` to preserve the base phi/phi_inv
+  check.
 
 ---
 
@@ -418,20 +423,17 @@ scenario tuple would help. Not critical but easy win.
 
 ## What's next
 
-Priorities 0 and 1 are done. The natural next steps, in rough order of
+Priorities 0, 1, and 2 are done. The natural next steps, in rough order of
 user-visible payoff:
 
-1. **Priority 2** — strict mode, better error messages, attach-time
-   adapter validation. Tightens the user-facing surface against the
-   adapters that are now shipping.
-2. **Priority 3** — cluster and block bootstrap (3.1), parallelization
+1. **Priority 3** — cluster and block bootstrap (3.1), parallelization
    (3.2), BCa / basic / studentized CIs (3.3). The current i.i.d. path
    covers the common case but cluster bootstrap is the natural next
    need for any panel-data user.
-3. **Priority 4** — additional adapters (sklearn, linearmodels, mixed
+2. **Priority 4** — additional adapters (sklearn, linearmodels, mixed
    models). Each new adapter exercises the existing interface; if the
    four-shape factoring is right, none should require core changes.
-4. **Priority 5** — reporting polish, plotting, LaTeX/HTML output.
+3. **Priority 5** — reporting polish, plotting, LaTeX/HTML output.
 
 Don't worry about getting the API perfect on the first iteration. The
 architecture is the asset; the API is replaceable. As long as the

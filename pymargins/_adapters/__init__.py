@@ -14,7 +14,6 @@ To add support for a new framework:
 """
 
 # Future adapters to add (one per file in this directory):
-#   StatsmodelsOLSAdapter         — uses LinearPredictionAdapter
 #   StatsmodelsMixedLMAdapter     — uses WrappedFDAdapter
 #   StatsmodelsTSAAdapter         — uses WrappedFDAdapter; for ARIMA etc.
 #   LinearmodelsPanelAdapter      — uses LinearPredictionAdapter
@@ -22,6 +21,64 @@ To add support for a new framework:
 #   SklearnLinearAdapter          — uses LinearPredictionAdapter, computes Σ̂
 #   SklearnTreeAdapter            — uses BootstrapOnlyAdapter
 
+
+# ---------------------------------------------------------------------------
+# Adapter registry for error suggestions
+# ---------------------------------------------------------------------------
+
+_REGISTERED_ADAPTERS = [
+    {
+        "name": "StatsmodelsGLMAdapter",
+        "description": "statsmodels GLM (Logit, Probit, Poisson, Gamma, etc.)",
+        "hint_modules": ["statsmodels."],
+        "hint_names": ["GLM"],
+    },
+    {
+        "name": "StatsmodelsOLSAdapter",
+        "description": "statsmodels OLS / WLS / GLS",
+        "hint_modules": ["statsmodels."],
+        "hint_names": ["RegressionResultsWrapper", "OLS", "WLS", "GLS"],
+    },
+]
+
+
+def _suggest_adapters(cls_name, module):
+    """Build a suggestion message for unsupported models."""
+    # Heuristic: strong match when both module prefix and class name hint align
+    strong = []
+    weak = []
+    for entry in _REGISTERED_ADAPTERS:
+        mod_match = any(module.startswith(m) for m in entry["hint_modules"])
+        cls_match = any(hint in cls_name for hint in entry["hint_names"])
+        if mod_match and cls_match:
+            strong.append(entry)
+        elif mod_match or cls_match:
+            weak.append(entry)
+
+    lines = []
+    if strong:
+        lines.append("Did you mean one of these adapters?")
+        for entry in strong:
+            lines.append(f"  - {entry['name']}: {entry['description']}")
+    elif weak:
+        lines.append("Possibly related adapters:")
+        for entry in weak:
+            lines.append(f"  - {entry['name']}: {entry['description']}")
+    else:
+        lines.append("Currently registered adapters:")
+        for entry in _REGISTERED_ADAPTERS:
+            lines.append(f"  - {entry['name']}: {entry['description']}")
+
+    lines.append(
+        "To write a custom adapter, see the guide in "
+        "pymargins._adapters.__init__ and the ModelAdapter base class."
+    )
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Auto-detection
+# ---------------------------------------------------------------------------
 
 def _detect_adapter_class(model):
     """Inspect a fitted model and return the appropriate adapter class.
@@ -42,15 +99,28 @@ def _detect_adapter_class(model):
         return StatsmodelsGLMAdapter
 
     # statsmodels OLS / WLS / GLS
-    if module.startswith("statsmodels.") and cls_name == "RegressionResultsWrapper":
+    if module.startswith("statsmodels.") and cls_name in (
+        "RegressionResultsWrapper",
+        "WLSResultsWrapper",
+        "GLSResultsWrapper",
+    ):
         from .statsmodels_ols import StatsmodelsOLSAdapter
         return StatsmodelsOLSAdapter
 
-    # Fall through with a clear error
+    # statsmodels Logit / Probit (discrete choice, wrapper around GLM family)
+    if module.startswith("statsmodels.") and cls_name in (
+        "LogitResultsWrapper",
+        "ProbitResultsWrapper",
+    ):
+        from .statsmodels_glm import StatsmodelsGLMAdapter
+        return StatsmodelsGLMAdapter
+
+    # Fall through with a clear error that suggests the closest adapter
+    suggestion = _suggest_adapters(cls_name, module)
     raise NotImplementedError(
-        f"No adapter registered for {module}.{cls_name}. "
-        "Either pass an explicit `adapter=` to Margins(), or register a "
-        "new adapter in pymargins._adapters._detect_adapter_class."
+        f"No adapter registered for {module}.{cls_name}.\n"
+        f"{suggestion}\n"
+        "Alternatively, pass an explicit `adapter=` to Margins()."
     )
 
 

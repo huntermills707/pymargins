@@ -100,6 +100,8 @@ def make_prediction_estimand(
                 # For multi-output, average over rows (axis=0), keeping outputs
                 value = jnp.mean(mu, axis=0) if mu.ndim > 1 else jnp.mean(mu)
             else:
+                if jnp.sum(weights) == 0:
+                    raise ValueError("weights must not sum to zero")
                 if mu.ndim > 1:
                     # weights (n_rows,) broadcast against mu (n_rows, n_outputs)
                     value = jnp.sum(weights[:, None] * mu, axis=0) / jnp.sum(weights)
@@ -109,6 +111,8 @@ def make_prediction_estimand(
             if weights is None:
                 value = jnp.mean(mu, axis=0) if mu.ndim > 1 else jnp.mean(mu)
             else:
+                if jnp.sum(weights) == 0:
+                    raise ValueError("weights must not sum to zero")
                 if mu.ndim > 1:
                     # weights (n_rows,) broadcast against mu (n_rows, n_outputs)
                     value = jnp.sum(weights[:, None] * mu, axis=0) / jnp.sum(weights)
@@ -200,6 +204,9 @@ def make_slope_estimand(
             "dydx() is only defined for finite numeric columns."
         )
 
+    if fd_step <= 0:
+        raise ValueError(f"fd_step must be positive, got {fd_step}")
+
     eps = fd_step * np.maximum(1.0, np.abs(v))  # shape (n_rows,)
 
     df_plus = df.copy()
@@ -214,15 +221,28 @@ def make_slope_estimand(
     def h(beta):
         mu_p = adapter.predict(beta, Xp, offset=offset)
         mu_m = adapter.predict(beta, Xm, offset=offset)
-        slopes = (mu_p - mu_m) / (2.0 * eps_jax)
+        if mu_p.ndim > 1:
+            slopes = (mu_p - mu_m) / (2.0 * eps_jax[:, None])
+        else:
+            slopes = (mu_p - mu_m) / (2.0 * eps_jax)
         if transform is not None:
             slopes = transform(slopes)
         if aggregate == "overall":
-            value = jnp.mean(slopes, axis=0) if slopes.ndim > 1 else jnp.mean(slopes)
+            if weights is None:
+                value = jnp.mean(slopes, axis=0) if slopes.ndim > 1 else jnp.mean(slopes)
+            else:
+                if jnp.sum(weights) == 0:
+                    raise ValueError("weights must not sum to zero")
+                if slopes.ndim > 1:
+                    value = jnp.sum(weights[:, None] * slopes, axis=0) / jnp.sum(weights)
+                else:
+                    value = jnp.sum(weights * slopes) / jnp.sum(weights)
         elif aggregate == "weighted":
             if weights is None:
                 value = jnp.mean(slopes, axis=0) if slopes.ndim > 1 else jnp.mean(slopes)
             else:
+                if jnp.sum(weights) == 0:
+                    raise ValueError("weights must not sum to zero")
                 if slopes.ndim > 1:
                     value = jnp.sum(weights[:, None] * slopes, axis=0) / jnp.sum(weights)
                 else:
@@ -296,15 +316,17 @@ def make_linear_combination_estimand(
         Scalar for single weight vector; vector for dict of contrasts.
     """
     n_scenarios = len(scenarios_X)
-    offsets = scenario_offsets if scenario_offsets else [None] * n_scenarios
-    sw = scenario_weights if scenario_weights else [None] * n_scenarios
+    offsets = scenario_offsets if scenario_offsets is not None else [None] * n_scenarios
+    sw = scenario_weights if scenario_weights is not None else [None] * n_scenarios
 
     def per_scenario_value(beta, X, offset, w):
         mu = adapter.predict(beta, X, offset=offset)
         if scenario_aggregate in ("overall", "weighted"):
             if w is None:
-                return jnp.mean(mu)
-            return jnp.sum(w * mu) / jnp.sum(w)
+                return jnp.mean(mu, axis=0) if mu.ndim > 1 else jnp.mean(mu)
+            if jnp.sum(w) == 0:
+                raise ValueError("scenario_weights must not sum to zero")
+            return jnp.sum(w * mu, axis=0) / jnp.sum(w) if mu.ndim > 1 else jnp.sum(w * mu) / jnp.sum(w)
         elif scenario_aggregate == "none":
             # Means a single-row scenario; just return scalar
             return mu[0] if mu.shape[0] == 1 else mu
@@ -389,15 +411,17 @@ def make_evaluate_estimand(
     h : callable (beta) -> scalar or vector
     """
     n_scenarios = len(scenarios_X)
-    offsets = scenario_offsets if scenario_offsets else [None] * n_scenarios
-    sw = scenario_weights if scenario_weights else [None] * n_scenarios
+    offsets = scenario_offsets if scenario_offsets is not None else [None] * n_scenarios
+    sw = scenario_weights if scenario_weights is not None else [None] * n_scenarios
 
     def per_scenario_value(beta, X, offset, w):
         mu = adapter.predict(beta, X, offset=offset)
         if scenario_aggregate in ("overall", "weighted"):
             if w is None:
-                return jnp.mean(mu)
-            return jnp.sum(w * mu) / jnp.sum(w)
+                return jnp.mean(mu, axis=0) if mu.ndim > 1 else jnp.mean(mu)
+            if jnp.sum(w) == 0:
+                raise ValueError("scenario_weights must not sum to zero")
+            return jnp.sum(w * mu, axis=0) / jnp.sum(w) if mu.ndim > 1 else jnp.sum(w * mu) / jnp.sum(w)
         elif scenario_aggregate == "none":
             return mu[0] if mu.shape[0] == 1 else mu
         else:
