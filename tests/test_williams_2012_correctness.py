@@ -133,6 +133,22 @@ RR_FEMALE_CI = (0.982, 1.09)
 RR_BLACK_FEMALE0_CI = (1.09, 1.20)
 RR_BLACK_FEMALE1_CI = (1.09, 1.19)
 
+# -- Direct ratio (same point estimate as RR, different inference) ---------
+DIRECT_RATIO_BLACK_EXPECTED = 1.1415
+DIRECT_RATIO_FEMALE_EXPECTED = 1.0232
+
+# -- True lift = RR - 1 -----------------------------------------------------
+LIFT_BLACK_EXPECTED = 0.1415
+LIFT_FEMALE_EXPECTED = 0.0232
+LIFT_BLACK_CI = (0.088, 0.197)
+LIFT_FEMALE_CI = (-0.012, 0.059)
+
+# -- lift_scale: (1+p1)/(1+p0) - 1 ------------------------------------------
+LIFT_SCALE_BLACK_EXPECTED = 0.0539
+LIFT_SCALE_FEMALE_EXPECTED = 0.0088
+LIFT_SCALE_BLACK_CI = (0.034, 0.075)
+LIFT_SCALE_FEMALE_CI = (-0.004, 0.022)
+
 # -- OLS ------------------------------------------------------------------
 OLS_AGE_COEF_EXPECTED = 0.3938
 OLS_AGE_SE_EXPECTED = 0.0082
@@ -277,7 +293,193 @@ def test_mer_black_female1_risk_ratio_and_ci(fit_logit):
 
 
 # ---------------------------------------------------------------------------
-# 9. OLS model
+# 9. Direct ratio via evaluate() on linear_scale
+# ---------------------------------------------------------------------------
+
+def test_direct_ratio_black_matches_log_scale_point_estimate(fit_logit):
+    """Direct ratio via evaluate() should match log_scale RR point estimate."""
+    m = Margins.linear_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
+    ratio = m.evaluate(
+        scenarios=[
+            {"atexog": {"black": 1}},
+            {"atexog": {"black": 0}},
+        ],
+        compose=lambda p: p[0] / p[1],
+    )
+    _assert_point_estimate(ratio, DIRECT_RATIO_BLACK_EXPECTED, abs_tol=1e-4)
+
+
+def test_direct_ratio_female_matches_log_scale_point_estimate(fit_logit):
+    m = Margins.linear_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
+    ratio = m.evaluate(
+        scenarios=[
+            {"atexog": {"female": 1}},
+            {"atexog": {"female": 0}},
+        ],
+        compose=lambda p: p[0] / p[1],
+    )
+    _assert_point_estimate(ratio, DIRECT_RATIO_FEMALE_EXPECTED, abs_tol=1e-4)
+
+
+# ---------------------------------------------------------------------------
+# 10. True lift = RR - 1 (derived from log_scale)
+# ---------------------------------------------------------------------------
+
+def test_true_lift_black_from_log_scale(fit_logit):
+    m = Margins.log_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
+    rr = m.contrasts(
+        scenarios=[
+            {"atexog": {"black": 1}},
+            {"atexog": {"black": 0}},
+        ],
+        contrasts=[+1, -1],
+    )
+    lift_est = float(rr.estimate) - 1.0
+    lo, hi = rr.conf_int()
+    lift_ci = (float(lo) - 1.0, float(hi) - 1.0)
+
+    assert lift_est == pytest.approx(LIFT_BLACK_EXPECTED, abs=1e-4)
+    assert lift_ci[0] == pytest.approx(LIFT_BLACK_CI[0], abs=1e-3)
+    assert lift_ci[1] == pytest.approx(LIFT_BLACK_CI[1], abs=1e-3)
+
+
+def test_true_lift_female_from_log_scale(fit_logit):
+    m = Margins.log_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
+    rr = m.contrasts(
+        scenarios=[
+            {"atexog": {"female": 1}},
+            {"atexog": {"female": 0}},
+        ],
+        contrasts=[+1, -1],
+    )
+    lift_est = float(rr.estimate) - 1.0
+    lo, hi = rr.conf_int()
+    lift_ci = (float(lo) - 1.0, float(hi) - 1.0)
+
+    assert lift_est == pytest.approx(LIFT_FEMALE_EXPECTED, abs=1e-4)
+    assert lift_ci[0] == pytest.approx(LIFT_FEMALE_CI[0], abs=1e-3)
+    assert lift_ci[1] == pytest.approx(LIFT_FEMALE_CI[1], abs=1e-3)
+
+
+# ---------------------------------------------------------------------------
+# 11. lift_scale: (1+p1)/(1+p0) - 1
+# ---------------------------------------------------------------------------
+
+def test_lift_scale_black(fit_logit):
+    m = Margins.lift_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
+    lift = m.contrasts(
+        scenarios=[
+            {"atexog": {"black": 1}},
+            {"atexog": {"black": 0}},
+        ],
+        contrasts=[+1, -1],
+    )
+    _assert_point_estimate(lift, LIFT_SCALE_BLACK_EXPECTED, abs_tol=1e-4)
+    _assert_ci(lift, LIFT_SCALE_BLACK_CI[0], LIFT_SCALE_BLACK_CI[1], abs_tol=1e-3)
+
+
+def test_lift_scale_female(fit_logit):
+    m = Margins.lift_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
+    lift = m.contrasts(
+        scenarios=[
+            {"atexog": {"female": 1}},
+            {"atexog": {"female": 0}},
+        ],
+        contrasts=[+1, -1],
+    )
+    _assert_point_estimate(lift, LIFT_SCALE_FEMALE_EXPECTED, abs_tol=1e-4)
+    _assert_ci(lift, LIFT_SCALE_FEMALE_CI[0], LIFT_SCALE_FEMALE_CI[1], abs_tol=1e-3)
+
+
+# ---------------------------------------------------------------------------
+# 12. Lift via evaluate() — direct delta method on (p1-p0)/p0
+# ---------------------------------------------------------------------------
+
+# Reference: manual computation of (mean(Y_1) - mean(Y_0)) / mean(Y_0)
+EVALUATE_LIFT_BLACK_EXPECTED = 0.1415
+EVALUATE_LIFT_BLACK_CI = (0.087, 0.196)
+EVALUATE_LIFT_FEMALE_EXPECTED = 0.0232
+EVALUATE_LIFT_FEMALE_CI = (-0.012, 0.058)
+
+
+def test_evaluate_lift_black_matches_manual_and_rr_minus_one(fit_logit, df_williams):
+    """evaluate() lift = (p1-p0)/p0 should match manual comp and RR-1."""
+    # Manual ground truth
+    tmp_b1 = df_williams.copy()
+    tmp_b1["black"] = 1
+    tmp_b0 = df_williams.copy()
+    tmp_b0["black"] = 0
+    p1 = fit_logit.predict(tmp_b1).mean()
+    p0 = fit_logit.predict(tmp_b0).mean()
+    manual_lift = (p1 - p0) / p0
+
+    # evaluate() lift on linear_scale
+    m = Margins.linear_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
+    lift_eval = m.evaluate(
+        scenarios=[
+            {"atexog": {"black": 1}, "label": "black=1"},
+            {"atexog": {"black": 0}, "label": "black=0"},
+        ],
+        compose=lambda p: (p[0] - p[1]) / p[1],
+    )
+
+    # Point estimate matches manual exactly
+    assert float(lift_eval.estimate) == pytest.approx(manual_lift, abs=1e-6)
+    assert float(lift_eval.estimate) == pytest.approx(EVALUATE_LIFT_BLACK_EXPECTED, abs=1e-4)
+
+    # CI matches reference (direct delta method on ratio scale)
+    _assert_ci(lift_eval, EVALUATE_LIFT_BLACK_CI[0], EVALUATE_LIFT_BLACK_CI[1], abs_tol=1e-3)
+
+    # Also matches RR - 1 from log_scale (point estimate only)
+    m_rr = Margins.log_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
+    rr = m_rr.contrasts(
+        scenarios=[
+            {"atexog": {"black": 1}},
+            {"atexog": {"black": 0}},
+        ],
+        contrasts=[+1, -1],
+    )
+    lift_from_rr = float(rr.estimate) - 1.0
+    assert float(lift_eval.estimate) == pytest.approx(lift_from_rr, abs=1e-6)
+
+
+def test_evaluate_lift_female_matches_manual_and_rr_minus_one(fit_logit, df_williams):
+    """evaluate() lift for female should match manual comp and RR-1."""
+    tmp_f1 = df_williams.copy()
+    tmp_f1["female"] = 1
+    tmp_f0 = df_williams.copy()
+    tmp_f0["female"] = 0
+    pf1 = fit_logit.predict(tmp_f1).mean()
+    pf0 = fit_logit.predict(tmp_f0).mean()
+    manual_lift = (pf1 - pf0) / pf0
+
+    m = Margins.linear_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
+    lift_eval = m.evaluate(
+        scenarios=[
+            {"atexog": {"female": 1}, "label": "female=1"},
+            {"atexog": {"female": 0}, "label": "female=0"},
+        ],
+        compose=lambda p: (p[0] - p[1]) / p[1],
+    )
+
+    assert float(lift_eval.estimate) == pytest.approx(manual_lift, abs=1e-6)
+    assert float(lift_eval.estimate) == pytest.approx(EVALUATE_LIFT_FEMALE_EXPECTED, abs=1e-4)
+    _assert_ci(lift_eval, EVALUATE_LIFT_FEMALE_CI[0], EVALUATE_LIFT_FEMALE_CI[1], abs_tol=1e-3)
+
+    m_rr = Margins.log_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
+    rr = m_rr.contrasts(
+        scenarios=[
+            {"atexog": {"female": 1}},
+            {"atexog": {"female": 0}},
+        ],
+        contrasts=[+1, -1],
+    )
+    lift_from_rr = float(rr.estimate) - 1.0
+    assert float(lift_eval.estimate) == pytest.approx(lift_from_rr, abs=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# 13. OLS model
 # ---------------------------------------------------------------------------
 
 def test_ols_mem_age_matches_coefficient_and_ci(fit_ols):

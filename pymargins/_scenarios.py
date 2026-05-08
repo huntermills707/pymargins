@@ -291,6 +291,13 @@ def _to_list(value):
     return [value]
 
 
+def _auto_label_from_atexog(atexog: Optional[dict]) -> Optional[str]:
+    """Build a readable label from an atexog dict, e.g. {'x': 1, 'y': 2} → 'x=1, y=2'."""
+    if not atexog:
+        return None
+    return ", ".join(f"{k}={v}" for k, v in atexog.items())
+
+
 # ---------------------------------------------------------------------------
 # Expected usage
 # ---------------------------------------------------------------------------

@@ -48,6 +48,7 @@ from ._estimands import (
 from ._scenarios import (
     expand_scenario,
     make_aggregation_resolver,
+    _auto_label_from_atexog,
 )
 from ._kappa import session_kappa
 from ._result import MarginsResult, DiagnosticResult
@@ -308,6 +309,7 @@ class Margins:
         atexog: Optional[Union[dict, "pd.DataFrame"]] = None,
         over: Optional[Union[str, list[str]]] = None,
         transform: Optional[Callable] = None,
+        label: Optional[str] = None,
     ) -> MarginsResult:
         """Adjusted prediction (level quantity).
 
@@ -348,6 +350,10 @@ class Margins:
             *across already-aggregated scenario predictions*; ``transform``
             here is a per-row mapping that runs *before* aggregation.
 
+        label : str, optional
+            Override label used in output summaries. Only applies when the
+            call produces a single estimand (no grid expansion and no ``over``).
+
         Returns
         -------
         result : MarginsResult
@@ -357,12 +363,22 @@ class Margins:
             observed level combinations.
         """
         if atexog is not None and hasattr(atexog, "iloc"):
-            scenario = {"data": atexog, "over": over}
+            scenario = {"data": atexog, "over": over, "label": label}
         else:
-            scenario = {"atexog": atexog, "over": over}
+            scenario = {"atexog": atexog, "over": over, "label": label}
         h, labels = self._build_prediction_estimand(scenario, transform)
         config = self._inference_config()
         meta = {"kind": "prediction"}
+        if label is not None:
+            if labels is None or (isinstance(labels, list) and len(labels) == 1):
+                labels = [label]
+            else:
+                import warnings
+                warnings.warn(
+                    "label= is ignored when atexog or over produces multiple estimands",
+                    UserWarning,
+                    stacklevel=2,
+                )
         if labels is not None:
             meta["labels"] = labels
         if over is not None:
@@ -386,6 +402,7 @@ class Margins:
         atexog: Optional[Union[dict, "pd.DataFrame"]] = None,
         over: Optional[Union[str, list[str]]] = None,
         transform: Optional[Callable] = None,
+        label: Optional[str] = None,
     ) -> MarginsResult:
         """Slope (∂μ/∂x_j) for continuous covariates.
 
@@ -398,6 +415,10 @@ class Margins:
         variables : str or list of str
             Variable(s) to compute slopes for. For multiple variables,
             returns a vector estimand with joint inference.
+
+        label : str, optional
+            Override label used in output summaries. Only applies when the
+            call produces a single estimand (no grid expansion and no ``over``).
 
         Other parameters : see predict().
 
@@ -417,12 +438,22 @@ class Margins:
                 )
 
         if atexog is not None and hasattr(atexog, "iloc"):
-            scenario = {"data": atexog, "over": over}
+            scenario = {"data": atexog, "over": over, "label": label}
         else:
-            scenario = {"atexog": atexog, "over": over}
+            scenario = {"atexog": atexog, "over": over, "label": label}
         h, labels = self._build_slope_estimand(scenario, var_list, transform)
         config = self._inference_config()
         meta = {"kind": "slope", "variables": var_list}
+        if label is not None:
+            if labels is None or (isinstance(labels, list) and len(labels) == 1):
+                labels = [label]
+            else:
+                import warnings
+                warnings.warn(
+                    "label= is ignored when atexog or over produces multiple estimands",
+                    UserWarning,
+                    stacklevel=2,
+                )
         if labels is not None:
             meta["labels"] = labels
         if over is not None:
@@ -586,7 +617,10 @@ class Margins:
         h = self._build_evaluate_estimand(scenarios, compose)
         config = self._inference_config()
 
-        labels = [s.get("label", f"scenario[{i}]") for i, s in enumerate(scenarios)]
+        labels = [
+            s.get("label", _auto_label_from_atexog(s.get("atexog")) or f"scenario[{i}]")
+            for i, s in enumerate(scenarios)
+        ]
         h_factory = None
         if config.method == "bootstrap":
             h_factory = lambda new_adapter: self._build_evaluate_estimand(
@@ -861,9 +895,9 @@ class Margins:
                     if grid_row and grid_keys:
                         grid_suffix = ", ".join(f"{k}={v}" for k, v in zip(grid_keys, grid_row))
                     else:
-                        grid_suffix = f"grid[{i}]"
+                        grid_suffix = _auto_label_from_atexog(sub_scenario.get("atexog")) or f"grid[{i}]"
                 else:
-                    grid_suffix = None
+                    grid_suffix = _auto_label_from_atexog(sub_scenario.get("atexog"))
                 label = self._format_atom_label(group_label, over_keys, grid_suffix)
                 atoms.append((label, h_atom))
 
@@ -998,7 +1032,9 @@ class Margins:
                     transform=transform,
                     fd_step=self.fd_step,
                 )
-                label = self._format_atom_label(group_label, over_keys, var_name)
+                atexog_label = _auto_label_from_atexog(sub_scenario.get("atexog"))
+                suffix = f"{atexog_label}, {var_name}" if atexog_label else var_name
+                label = self._format_atom_label(group_label, over_keys, suffix)
                 atoms.append((label, h_atom))
 
         return self._finalize_atoms(atoms)
