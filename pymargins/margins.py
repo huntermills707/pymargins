@@ -855,7 +855,15 @@ class Margins:
                     phi_inv=self.phi_inv,
                     transform=transform,
                 )
-                grid_suffix = f"grid[{i}]" if n_grid > 1 else None
+                if n_grid > 1:
+                    grid_row = meta.get("grid_rows", [])[i] if i < len(meta.get("grid_rows", [])) else ()
+                    grid_keys = meta.get("atexog_keys", [])
+                    if grid_row and grid_keys:
+                        grid_suffix = ", ".join(f"{k}={v}" for k, v in zip(grid_keys, grid_row))
+                    else:
+                        grid_suffix = f"grid[{i}]"
+                else:
+                    grid_suffix = None
                 label = self._format_atom_label(group_label, over_keys, grid_suffix)
                 atoms.append((label, h_atom))
 
@@ -924,7 +932,8 @@ class Margins:
         stack into a vector estimand and return the labels list.
         """
         if len(atoms) == 1:
-            return atoms[0][1], None
+            label = atoms[0][0]
+            return atoms[0][1], ([label] if label is not None else None)
         individual_h = [h for _, h in atoms]
         labels = [lab for lab, _ in atoms]
         def h_vector(beta):
@@ -989,8 +998,7 @@ class Margins:
                     transform=transform,
                     fd_step=self.fd_step,
                 )
-                var_suffix = var_name if len(var_list) > 1 else None
-                label = self._format_atom_label(group_label, over_keys, var_suffix)
+                label = self._format_atom_label(group_label, over_keys, var_name)
                 atoms.append((label, h_atom))
 
         return self._finalize_atoms(atoms)

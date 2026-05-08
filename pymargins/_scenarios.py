@@ -130,7 +130,8 @@ def expand_scenario(
 
     metadata = {
         "strategy": "expanded",
-        "atexog_keys": list(atexog.keys()),
+        "atexog_keys": grid_keys,
+        "grid_rows": grid_rows,
         "n_grid_points": len(grid_rows),
         "rows_per_grid_point": len(background),
     }

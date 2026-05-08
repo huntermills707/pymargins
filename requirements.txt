@@ -1,0 +1,19 @@
+# Core runtime dependencies
+jax>=0.4.20
+jaxlib>=0.4.20
+numpy>=1.24
+scipy>=1.10
+pandas>=2.0
+
+# Primary modeling framework (used by demos and tests)
+statsmodels>=0.14
+patsy>=0.5
+
+# Testing
+pytest>=7.0
+pytest-cov
+hypothesis
+
+# Optional adapters (uncomment if needed)
+# linearmodels>=5.0
+# scikit-learn>=1.3
