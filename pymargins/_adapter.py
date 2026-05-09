@@ -393,7 +393,7 @@ class ModelAdapter(abc.ABC):
     # Bootstrap support (optional)
     # -----------------------------------------------------------------------
 
-    def refit(self, resampled_data) -> "ModelAdapter":
+    def refit(self, resampled_data, *, index=None) -> "ModelAdapter":
         """Refit the model on resampled data, returning a new adapter.
 
         Required for bootstrap inference. Implementations should re-run the
@@ -411,6 +411,11 @@ class ModelAdapter(abc.ABC):
             Resampled training data. Format depends on the framework: pandas
             DataFrame for statsmodels formula API, NumPy arrays for direct
             API, etc.
+        index : array-like of int, optional
+            The index array used to produce ``resampled_data`` from the
+            original training data. Adapters that store external arrays
+            (offset, exposure, weights) alongside the data should use this
+            to resample those arrays so they align with ``resampled_data``.
 
         Returns
         -------

@@ -184,7 +184,7 @@ class StatsmodelsMNLogitAdapter(ModelAdapter):
         )
         return jnp.asarray(new_results.cov_params())
 
-    def refit(self, resampled_data: pd.DataFrame) -> "StatsmodelsMNLogitAdapter":
+    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "StatsmodelsMNLogitAdapter":
         formula = getattr(self.results.model, "formula", None)
         if formula is not None:
             from statsmodels.formula.api import mnlogit as smf_mnlogit

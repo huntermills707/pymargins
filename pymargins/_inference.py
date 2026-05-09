@@ -19,6 +19,7 @@ import warnings
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pandas as pd
 
 from ._gradients import gradient, GradientBackend
 from ._delta import (
@@ -171,14 +172,14 @@ def run_inference(
                 # Auto-route to simulation with a warning marker in the result
                 warnings.warn(
                     "Estimand is not JAX-differentiable; falling back to simulation.",
-                    UserWarning, stacklevel=2,
+                    UserWarning, stacklevel=3,
                 )
                 return _run_simulation(h, adapter, config, estimand_metadata,
                                        fallback_reason="non_differentiable")
             elif "bootstrap" in supported and h_factory is not None:
                 warnings.warn(
                     "Estimand is not JAX-differentiable; falling back to bootstrap.",
-                    UserWarning, stacklevel=2,
+                    UserWarning, stacklevel=3,
                 )
                 return _run_bootstrap(h, adapter, config, estimand_metadata,
                                       fallback_reason="non_differentiable",
@@ -230,7 +231,7 @@ def _run_delta(h, adapter, config, estimand_metadata):
             warnings.warn(
                 f"Delta-method curvature κ={max_k:.3f} exceeds threshold "
                 f"({config.kappa_threshold}); falling back to simulation.",
-                UserWarning, stacklevel=2,
+                UserWarning, stacklevel=3,
             )
             sim_result = _run_simulation(
                 h, adapter, config, estimand_metadata,
@@ -417,7 +418,7 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
                 f"cluster IDs length ({len(cluster_ids)}) must match "
                 f"training data length ({n_obs})."
             )
-        if np.any(np.isnan(cluster_ids)):
+        if np.any(pd.isna(cluster_ids)):
             raise ValueError("cluster IDs must not contain NaN values.")
         unique_clusters = np.unique(cluster_ids)
         n_clusters = len(unique_clusters)
@@ -488,7 +489,7 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
             resampled = data[idx]
 
         try:
-            new_adapter = adapter.refit(resampled)
+            new_adapter = adapter.refit(resampled, index=idx)
             h_b = h_factory(new_adapter)
             h_draws_inf.append(np.asarray(h_b(new_adapter.coefficients())))
         except Exception as exc:
@@ -505,7 +506,7 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
             f"({n_failures / config.n_boot:.1%}). CI computed from "
             f"{len(h_draws_inf)} successful replicates.",
             UserWarning,
-            stacklevel=2,
+            stacklevel=3,
         )
 
     if len(h_draws_inf) == 0:

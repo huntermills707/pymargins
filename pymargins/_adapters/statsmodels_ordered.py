@@ -161,7 +161,7 @@ class StatsmodelsOrderedAdapter(WrappedFDAdapter):
         ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False)
         return jnp.asarray(new_results.cov_params())
 
-    def refit(self, resampled_data: pd.DataFrame) -> "StatsmodelsOrderedAdapter":
+    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "StatsmodelsOrderedAdapter":
         # OrderedModel does not have a formula API in statsmodels, so we
         # always refit using the array API.
         endog_name = getattr(self.results.model, "endog_names", None)

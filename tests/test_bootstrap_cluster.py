@@ -163,10 +163,11 @@ def test_cluster_bootstrap_multiplicity(ols_fit_formula, df_clustered):
 
     result = _run_bootstrap(lambda b: float(len(adapter.training_data)),
                             adapter, config, {}, h_factory=h_factory)
-    # Resampled data should have 4 rows (2 clusters × 2 rows each),
-    # or potentially more if one cluster is sampled twice
+    # With 2 equal-size clusters of 2 rows each, resampled length is always 4
+    # (sample 2 clusters with replacement from 2 clusters; each sampled cluster
+    # contributes its 2 rows, so total is always 2 × 2 = 4).
     resampled_n = result["draws"][0]
-    assert resampled_n in (4, 6, 8)  # 4=both diff, 6=one dup, 8=both dup
+    assert resampled_n == 4
 
 
 # ---------------------------------------------------------------------------

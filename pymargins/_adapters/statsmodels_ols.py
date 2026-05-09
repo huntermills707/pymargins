@@ -167,7 +167,7 @@ class StatsmodelsOLSAdapter(LinearPredictionAdapter):
             )
         return jnp.asarray(new_results.cov_params())
 
-    def refit(self, resampled_data: pd.DataFrame) -> "StatsmodelsOLSAdapter":
+    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "StatsmodelsOLSAdapter":
         """Refit the model on resampled data."""
         formula = getattr(self.results.model, "formula", None)
         if formula is not None:

@@ -31,6 +31,7 @@ import weakref
 
 import jax.numpy as jnp
 import numpy as np
+import pandas as pd
 
 from ._adapter import (
     ModelAdapter,
@@ -275,7 +276,7 @@ class Margins:
         # Validate cluster IDs against training data length
         if self.cluster is not None:
             cluster_arr = np.asarray(self.cluster)
-            if np.any(np.isnan(cluster_arr)):
+            if np.any(pd.isna(cluster_arr)):
                 raise ValueError("cluster IDs must not contain NaN values.")
             try:
                 n_data = len(self.adapter.training_data)

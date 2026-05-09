@@ -106,27 +106,27 @@ def test_auto_detect_gls_wrapper():
 
 
 def test_auto_detect_logit_wrapper():
-    """LogitResultsWrapper should map to StatsmodelsGLMAdapter."""
+    """LogitResultsWrapper should map to StatsmodelsDiscreteBinaryAdapter."""
     from pymargins._adapters import _detect_adapter_class
     class FakeLogitResult:
         pass
     FakeLogitResult.__module__ = "statsmodels.discrete"
     FakeLogitResult.__name__ = "LogitResultsWrapper"
     cls = _detect_adapter_class(FakeLogitResult())
-    from pymargins._adapters.statsmodels_glm import StatsmodelsGLMAdapter
-    assert cls is StatsmodelsGLMAdapter
+    from pymargins._adapters.statsmodels_discrete_binary import StatsmodelsDiscreteBinaryAdapter
+    assert cls is StatsmodelsDiscreteBinaryAdapter
 
 
 def test_auto_detect_probit_wrapper():
-    """ProbitResultsWrapper should map to StatsmodelsGLMAdapter."""
+    """ProbitResultsWrapper should map to StatsmodelsDiscreteBinaryAdapter."""
     from pymargins._adapters import _detect_adapter_class
     class FakeProbitResult:
         pass
     FakeProbitResult.__module__ = "statsmodels.discrete"
     FakeProbitResult.__name__ = "ProbitResultsWrapper"
     cls = _detect_adapter_class(FakeProbitResult())
-    from pymargins._adapters.statsmodels_glm import StatsmodelsGLMAdapter
-    assert cls is StatsmodelsGLMAdapter
+    from pymargins._adapters.statsmodels_discrete_binary import StatsmodelsDiscreteBinaryAdapter
+    assert cls is StatsmodelsDiscreteBinaryAdapter
 
 
 def test_adapter_coefficients(fit_ols_formula):

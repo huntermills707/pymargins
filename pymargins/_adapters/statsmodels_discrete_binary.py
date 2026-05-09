@@ -1,15 +1,12 @@
 """
-pymargins._adapters.statsmodels_discrete_count
+pymargins._adapters.statsmodels_discrete_binary
 
-Concrete adapter for statsmodels discrete count result objects:
-  - Poisson
-  - NegativeBinomial
-  - NegativeBinomialP
-  - GeneralizedPoisson
+Concrete adapter for statsmodels discrete binary result objects:
+  - Logit
+  - Probit
 
-These models all predict the conditional mean as exp(X β_mean), where
-β_mean is the first p coefficients. Extra parameters (alpha, dispersion)
-are present in the coefficient vector but not used in the mean prediction.
+These models predict the conditional probability via a link function
+(expit for Logit, ndtr for Probit).
 """
 
 from __future__ import annotations
@@ -18,6 +15,8 @@ import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
+
+from jax.scipy.special import expit, ndtr
 
 from .._adapter import ModelAdapter, VariableInfo
 from ._common import (
@@ -29,15 +28,12 @@ from ._common import (
 )
 
 
-class StatsmodelsDiscreteCountAdapter(ModelAdapter):
-    """Adapter for statsmodels discrete count model results.
-
-    Covers Poisson, NegativeBinomial, NegativeBinomialP, and
-    GeneralizedPoisson. All predict the conditional mean via a log link.
+class StatsmodelsDiscreteBinaryAdapter(ModelAdapter):
+    """Adapter for statsmodels discrete binary model results (Logit, Probit).
 
     Parameters
     ----------
-    results : fitted statsmodels discrete count result object
+    results : fitted statsmodels discrete binary result object
 
     training_data : pd.DataFrame, optional
         The data the model was fit on.
@@ -46,10 +42,8 @@ class StatsmodelsDiscreteCountAdapter(ModelAdapter):
     def __init__(self, results, training_data: Optional[pd.DataFrame] = None):
         self.results = results
         self._training_data = extract_training_data(results, training_data)
-        # Statsmodels appends extra param names (e.g. 'alpha') to exog_names.
-        # Only the first n_exog names correspond to design-matrix columns.
-        n_exog = results.model.exog.shape[1]
-        self._exog_names = list(results.model.exog_names[:n_exog])
+        self._exog_names = list(results.model.exog_names)
+        self._model_cls_name = type(results.model).__name__
 
     @property
     def training_data(self):
@@ -69,7 +63,7 @@ class StatsmodelsDiscreteCountAdapter(ModelAdapter):
 
     def attach(self, session) -> None:
         vcov = getattr(session, "vcov_spec", None)
-        validate_vcov_spec(vcov, adapter_name="StatsmodelsDiscreteCountAdapter")
+        validate_vcov_spec(vcov, adapter_name="StatsmodelsDiscreteBinaryAdapter")
         super().attach(session)
 
     # -----------------------------------------------------------------------
@@ -117,13 +111,12 @@ class StatsmodelsDiscreteCountAdapter(ModelAdapter):
         X: jnp.ndarray,
         offset: Optional[jnp.ndarray] = None,
     ) -> jnp.ndarray:
-        X_arr = jnp.asarray(X)
-        p = X_arr.shape[1]
-        beta_mean = beta[:p]
-        eta = X_arr @ beta_mean
+        eta = jnp.asarray(X) @ beta
         if offset is not None:
             eta = eta + jnp.asarray(offset)
-        return jnp.exp(eta)
+        if self._model_cls_name == "Probit":
+            return ndtr(eta)
+        return expit(eta)
 
     # -----------------------------------------------------------------------
     # Design matrix construction
@@ -156,83 +149,57 @@ class StatsmodelsDiscreteCountAdapter(ModelAdapter):
                         f"groups length ({len(groups)}) must match training_data "
                         f"length ({len(self._training_data)})."
                     )
-            model_cls_name = type(self.results.model).__name__
-            if model_cls_name == "Poisson":
-                from statsmodels.formula.api import poisson as smf_poisson
-                new_results = smf_poisson(
+            fit_kwargs = self._collect_original_fit_kwargs()
+            if self._model_cls_name == "Logit":
+                from statsmodels.formula.api import logit as smf_logit
+                new_results = smf_logit(
                     formula, data=self._training_data,
-                ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False)
-            elif model_cls_name == "NegativeBinomial":
-                from statsmodels.formula.api import negativebinomial as smf_nb
-                new_results = smf_nb(
+                ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False, **fit_kwargs)
+            elif self._model_cls_name == "Probit":
+                from statsmodels.formula.api import probit as smf_probit
+                new_results = smf_probit(
                     formula, data=self._training_data,
-                ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False)
-            elif model_cls_name == "NegativeBinomialP":
-                from statsmodels.discrete.discrete_model import NegativeBinomialP
-                new_results = NegativeBinomialP.from_formula(
-                    formula, data=self._training_data,
-                ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False)
-            elif model_cls_name == "GeneralizedPoisson":
-                from statsmodels.discrete.discrete_model import GeneralizedPoisson
-                new_results = GeneralizedPoisson.from_formula(
-                    formula, data=self._training_data,
-                ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False)
+                ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False, **fit_kwargs)
             else:
-                raise ValueError(f"Unknown model class: {model_cls_name}")
+                raise ValueError(f"Unknown model class: {self._model_cls_name}")
             return jnp.asarray(new_results.cov_params())
 
         endog = self.results.model.endog
         exog = self.results.model.exog
-        model_cls_name = type(self.results.model).__name__
-        kwargs = self._collect_original_fit_kwargs()
-        if model_cls_name == "Poisson":
-            new_results = sm.Poisson(endog, exog, **kwargs).fit(
+        fit_kwargs = self._collect_original_fit_kwargs()
+        if self._model_cls_name == "Logit":
+            new_results = sm.Logit(endog, exog, **fit_kwargs).fit(
                 cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False,
             )
-        elif model_cls_name == "NegativeBinomial":
-            new_results = sm.NegativeBinomial(endog, exog, **kwargs).fit(
-                cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False,
-            )
-        elif model_cls_name == "NegativeBinomialP":
-            new_results = sm.NegativeBinomialP(endog, exog, **kwargs).fit(
-                cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False,
-            )
-        elif model_cls_name == "GeneralizedPoisson":
-            new_results = sm.GeneralizedPoisson(endog, exog, **kwargs).fit(
+        elif self._model_cls_name == "Probit":
+            new_results = sm.Probit(endog, exog, **fit_kwargs).fit(
                 cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False,
             )
         else:
-            raise ValueError(f"Unknown model class: {model_cls_name}")
+            raise ValueError(f"Unknown model class: {self._model_cls_name}")
         return jnp.asarray(new_results.cov_params())
 
-    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "StatsmodelsDiscreteCountAdapter":
+    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "StatsmodelsDiscreteBinaryAdapter":
         formula = getattr(self.results.model, "formula", None)
-        fit_kwargs = self._collect_original_fit_kwargs()
-        if index is not None:
-            for attr in ("offset", "exposure"):
-                if attr in fit_kwargs and hasattr(fit_kwargs[attr], "__len__"):
-                    fit_kwargs[attr] = np.asarray(fit_kwargs[attr])[index]
         if formula is not None:
-            model_cls_name = type(self.results.model).__name__
-            if model_cls_name == "Poisson":
-                from statsmodels.formula.api import poisson as smf_poisson
-                new_results = smf_poisson(formula, data=resampled_data).fit(disp=False, **fit_kwargs)
-            elif model_cls_name == "NegativeBinomial":
-                from statsmodels.formula.api import negativebinomial as smf_nb
-                new_results = smf_nb(formula, data=resampled_data).fit(disp=False, **fit_kwargs)
-            elif model_cls_name == "NegativeBinomialP":
-                from statsmodels.discrete.discrete_model import NegativeBinomialP
-                new_results = NegativeBinomialP.from_formula(
+            fit_kwargs = self._collect_original_fit_kwargs()
+            if index is not None:
+                for attr in ("offset", "exposure", "freq_weights", "var_weights"):
+                    if attr in fit_kwargs and hasattr(fit_kwargs[attr], "__len__"):
+                        fit_kwargs[attr] = np.asarray(fit_kwargs[attr])[index]
+            if self._model_cls_name == "Logit":
+                from statsmodels.formula.api import logit as smf_logit
+                new_results = smf_logit(
                     formula, data=resampled_data,
                 ).fit(disp=False, **fit_kwargs)
-            elif model_cls_name == "GeneralizedPoisson":
-                from statsmodels.discrete.discrete_model import GeneralizedPoisson
-                new_results = GeneralizedPoisson.from_formula(
+            elif self._model_cls_name == "Probit":
+                from statsmodels.formula.api import probit as smf_probit
+                new_results = smf_probit(
                     formula, data=resampled_data,
                 ).fit(disp=False, **fit_kwargs)
             else:
-                raise ValueError(f"Unknown model class: {model_cls_name}")
-            return StatsmodelsDiscreteCountAdapter(new_results, training_data=resampled_data)
+                raise ValueError(f"Unknown model class: {self._model_cls_name}")
+            return StatsmodelsDiscreteBinaryAdapter(new_results, training_data=resampled_data)
 
         endog_name = getattr(self.results.model, "endog_names", None)
         if endog_name is None:
@@ -259,29 +226,24 @@ class StatsmodelsDiscreteCountAdapter(ModelAdapter):
             if intercept_name not in exog_df.columns:
                 exog_df = exog_df.copy()
                 exog_df.insert(0, "const", 1.0)
-        model_cls_name = type(self.results.model).__name__
-        if model_cls_name == "Poisson":
-            new_results = sm.Poisson(endog, exog_df, **fit_kwargs).fit(disp=False)
-        elif model_cls_name == "NegativeBinomial":
-            new_results = sm.NegativeBinomial(endog, exog_df, **fit_kwargs).fit(disp=False)
-        elif model_cls_name == "NegativeBinomialP":
-            new_results = sm.NegativeBinomialP(endog, exog_df, **fit_kwargs).fit(disp=False)
-        elif model_cls_name == "GeneralizedPoisson":
-            new_results = sm.GeneralizedPoisson(endog, exog_df, **fit_kwargs).fit(disp=False)
+        fit_kwargs = self._collect_original_fit_kwargs()
+        if index is not None:
+            for attr in ("offset", "exposure", "freq_weights", "var_weights"):
+                if attr in fit_kwargs and hasattr(fit_kwargs[attr], "__len__"):
+                    fit_kwargs[attr] = np.asarray(fit_kwargs[attr])[index]
+        if self._model_cls_name == "Logit":
+            new_results = sm.Logit(endog, exog_df, **fit_kwargs).fit(disp=False)
+        elif self._model_cls_name == "Probit":
+            new_results = sm.Probit(endog, exog_df, **fit_kwargs).fit(disp=False)
         else:
-            raise ValueError(f"Unknown model class: {model_cls_name}")
-        return StatsmodelsDiscreteCountAdapter(new_results, training_data=resampled_data)
+            raise ValueError(f"Unknown model class: {self._model_cls_name}")
+        return StatsmodelsDiscreteBinaryAdapter(new_results, training_data=resampled_data)
 
     def _collect_original_fit_kwargs(self) -> dict:
         """Capture model-specific kwargs from the original fit for refit."""
         kwargs = {}
-        for attr in ("offset", "exposure"):
+        for attr in ("offset", "exposure", "freq_weights", "var_weights"):
             val = getattr(self.results.model, attr, None)
             if val is not None:
                 kwargs[attr] = val
-        # Preserve model-specific parameters like p for GeneralizedPoisson / NegativeBinomialP
-        if hasattr(self.results.model, "parameter"):
-            kwargs["p"] = self.results.model.parameter
-        elif hasattr(self.results.model, "p"):
-            kwargs["p"] = self.results.model.p
         return kwargs

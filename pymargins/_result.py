@@ -439,12 +439,14 @@ class MarginsResult:
                 "Note: std err is on the inference scale; estimate and CI are on the reporting scale."
             )
         if self.kappa is not None:
-            kappa_str = (
-                f"{float(self.kappa):.3f}"
-                if np.ndim(self.kappa) == 0
-                else f"max={float(np.max(self.kappa)):.3f}"
-            )
-            footers.append(f"κ: {kappa_str}")
+            k = np.asarray(self.kappa)
+            if not np.all(np.isnan(k)):
+                kappa_str = (
+                    f"{float(k):.3f}"
+                    if k.ndim == 0
+                    else f"max={float(np.nanmax(k)):.3f}"
+                )
+                footers.append(f"κ: {kappa_str}")
         if self.delta_sim_disagreement is not None:
             footers.append(f"Delta-vs-sim disagreement: {self.delta_sim_disagreement:.3%}")
         if footers:
@@ -1039,7 +1041,22 @@ class MarginsResult:
             if a.ndim == 1:
                 return a[mask]
             elif a.ndim == 2:
-                return a[np.ix_(mask, mask)]
+                # Gradient is (n_components, n_params) → slice rows.
+                # Draws are (n_draws, n_components) → slice columns.
+                if a.shape[0] == n_components:
+                    return a[mask]
+                elif a.shape[1] == n_components:
+                    return a[:, mask]
+                else:
+                    return a
+            elif a.ndim == 3:
+                # (n_draws, n_atoms, n_outcomes) or similar
+                if a.shape[1] == n_components:
+                    return a[:, mask]
+                elif a.shape[2] == n_components:
+                    return a[:, :, mask]
+                else:
+                    return a
             return a
 
         new_labels = [labels[i] for i in np.where(mask)[0]]

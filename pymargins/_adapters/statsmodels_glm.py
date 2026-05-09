@@ -198,7 +198,7 @@ class StatsmodelsGLMAdapter(GLMAdapter):
                 kwargs[attr] = val
         return kwargs
 
-    def refit(self, resampled_data: pd.DataFrame) -> "StatsmodelsGLMAdapter":
+    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "StatsmodelsGLMAdapter":
         """Refit the model on resampled data.
 
         Reconstructs the formula and family from the original results and
@@ -207,6 +207,10 @@ class StatsmodelsGLMAdapter(GLMAdapter):
         from statsmodels.formula.api import glm as smf_glm
 
         fit_kwargs = self._collect_original_fit_kwargs()
+        if index is not None:
+            for attr in ("offset", "exposure", "freq_weights", "var_weights"):
+                if attr in fit_kwargs and hasattr(fit_kwargs[attr], "__len__"):
+                    fit_kwargs[attr] = np.asarray(fit_kwargs[attr])[index]
         formula = getattr(self.results.model, "formula", None)
         if formula is not None:
             new_results = smf_glm(

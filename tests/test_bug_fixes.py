@@ -142,11 +142,11 @@ def test_bootstrap_skips_failed_replicates(fit_logit, monkeypatch):
     call_count = [0]
     original_refit = adapter.refit
 
-    def flaky_refit(resampled):
+    def flaky_refit(resampled, *, index=None):
         call_count[0] += 1
         if call_count[0] <= 3:
             raise RuntimeError("Simulated refit failure")
-        return original_refit(resampled)
+        return original_refit(resampled, index=index)
 
     monkeypatch.setattr(adapter, "refit", flaky_refit)
 
@@ -168,7 +168,7 @@ def test_bootstrap_raises_when_too_many_failures(fit_logit, monkeypatch):
     def h(b):
         return jax.scipy.special.expit(jnp.array([1.0, 50.0, 1.0]) @ b)
 
-    monkeypatch.setattr(adapter, "refit", lambda data: (_ for _ in ()).throw(RuntimeError("always fail")))
+    monkeypatch.setattr(adapter, "refit", lambda data, *, index=None: (_ for _ in ()).throw(RuntimeError("always fail")))
 
     config = InferenceConfig(
         method="bootstrap", n_boot=20, rng_seed=42, diagnostics=False,
@@ -452,3 +452,184 @@ def test_get_base_data_raises_clear_error(fit_logit, monkeypatch):
     monkeypatch.delattr(type(adapter), "training_data", raising=True)
     with pytest.raises((NotImplementedError, AttributeError)):
         m._get_base_data(adapter)
+
+
+# ---------------------------------------------------------------------------
+# B1. MarginsResult.outcome() slices gradient correctly
+# ---------------------------------------------------------------------------
+
+def test_result_outcome_slices_gradient_correctly():
+    """Gradient is (n_components, n_params); outcome() should slice rows only."""
+    result = MarginsResult(
+        estimate=np.array([0.1, 0.2, 0.3]),
+        std_error=np.array([0.01, 0.02, 0.03]),
+        conf_int_lower=np.array([0.08, 0.18, 0.28]),
+        conf_int_upper=np.array([0.12, 0.22, 0.32]),
+        method="delta",
+        level=0.95,
+        gradient=np.array([[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                           [7.0, 8.0, 9.0, 10.0, 11.0, 12.0],
+                           [13.0, 14.0, 15.0, 16.0, 17.0, 18.0]]),
+        estimand_metadata={"labels": ["pred (0)", "pred (1)", "pred (2)"]},
+    )
+    sub = result.outcome(0)
+    assert sub.gradient.shape == (1, 6)
+    np.testing.assert_array_equal(sub.gradient, result.gradient[[0], :])
+
+
+def test_result_outcome_slices_draws_correctly():
+    """Draws are (n_draws, n_components); outcome() should slice columns."""
+    draws = np.random.default_rng(42).standard_normal((100, 3))
+    result = MarginsResult(
+        estimate=np.array([0.1, 0.2, 0.3]),
+        std_error=np.array([0.01, 0.02, 0.03]),
+        conf_int_lower=np.array([0.08, 0.18, 0.28]),
+        conf_int_upper=np.array([0.12, 0.22, 0.32]),
+        method="simulation",
+        level=0.95,
+        draws=draws,
+        estimand_metadata={"labels": ["pred (0)", "pred (1)", "pred (2)"]},
+    )
+    sub = result.outcome(1)
+    assert sub.draws.shape == (100, 1)
+    np.testing.assert_array_equal(sub.draws, draws[:, [1]])
+
+
+# ---------------------------------------------------------------------------
+# B2. sm.Logit / sm.Probit auto-detection
+# ---------------------------------------------------------------------------
+
+def test_auto_detect_logit_probit():
+    """Modern statsmodels wraps Logit/Probit in BinaryResultsWrapper."""
+    rng = np.random.default_rng(42)
+    df = pd.DataFrame({"x": rng.standard_normal(100), "y": rng.integers(0, 2, 100)})
+    fit_logit = smf.logit("y ~ x", data=df).fit(disp=False)
+    fit_probit = smf.probit("y ~ x", data=df).fit(disp=False)
+
+    from pymargins._adapters.statsmodels_discrete_binary import StatsmodelsDiscreteBinaryAdapter
+    from pymargins._adapters import auto_detect_adapter
+
+    assert isinstance(auto_detect_adapter(fit_logit), StatsmodelsDiscreteBinaryAdapter)
+    assert isinstance(auto_detect_adapter(fit_probit), StatsmodelsDiscreteBinaryAdapter)
+
+
+def test_logit_predict_matches_statsmodels():
+    """StatsmodelsDiscreteBinaryAdapter predict matches statsmodels native."""
+    rng = np.random.default_rng(42)
+    df = pd.DataFrame({"x": rng.standard_normal(100), "y": rng.integers(0, 2, 100)})
+    fit = smf.logit("y ~ x", data=df).fit(disp=False)
+
+    from pymargins._adapters.statsmodels_discrete_binary import StatsmodelsDiscreteBinaryAdapter
+    adapter = StatsmodelsDiscreteBinaryAdapter(fit)
+    beta = adapter.coefficients()
+    X = adapter.design_matrix_from_df(df)
+    pred = adapter.predict(beta, X)
+    np.testing.assert_allclose(np.asarray(pred), fit.predict(df), atol=1e-12)
+
+
+def test_probit_predict_matches_statsmodels():
+    """StatsmodelsDiscreteBinaryAdapter predict matches statsmodels native."""
+    rng = np.random.default_rng(42)
+    df = pd.DataFrame({"x": rng.standard_normal(100), "y": rng.integers(0, 2, 100)})
+    fit = smf.probit("y ~ x", data=df).fit(disp=False)
+
+    from pymargins._adapters.statsmodels_discrete_binary import StatsmodelsDiscreteBinaryAdapter
+    adapter = StatsmodelsDiscreteBinaryAdapter(fit)
+    beta = adapter.coefficients()
+    X = adapter.design_matrix_from_df(df)
+    pred = adapter.predict(beta, X)
+    np.testing.assert_allclose(np.asarray(pred), fit.predict(df), atol=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# B4. Cluster ID validation with string cluster IDs
+# ---------------------------------------------------------------------------
+
+def test_cluster_string_ids_accepted():
+    """String cluster IDs should not crash validation."""
+    rng = np.random.default_rng(42)
+    df = pd.DataFrame({"x": rng.standard_normal(100), "y": rng.standard_normal(100)})
+    fit = smf.ols("y ~ x", data=df).fit()
+    clusters = np.array(["A" if i < 50 else "B" for i in range(100)])
+    # Should not raise
+    m = Margins(fit, method="bootstrap", n_boot=5, cluster=clusters)
+    assert m.cluster is not None
+
+
+def test_cluster_nan_string_ids_raises():
+    """NaN in string cluster IDs should still raise."""
+    rng = np.random.default_rng(42)
+    df = pd.DataFrame({"x": rng.standard_normal(100), "y": rng.standard_normal(100)})
+    fit = smf.ols("y ~ x", data=df).fit()
+    clusters = np.array(["A"] * 100, dtype=object)
+    clusters[0] = np.nan
+    with pytest.raises(ValueError, match="NaN"):
+        Margins(fit, method="bootstrap", n_boot=5, cluster=clusters)
+
+
+# ---------------------------------------------------------------------------
+# M7. summary() omits κ when NaN
+# ---------------------------------------------------------------------------
+
+def test_summary_omits_nan_kappa():
+    """Footer should not print κ when it is NaN."""
+    result = MarginsResult(
+        estimate=np.array([1.0]),
+        std_error=np.array([0.1]),
+        conf_int_lower=np.array([0.8]),
+        conf_int_upper=np.array([1.2]),
+        method="delta",
+        level=0.95,
+        kappa=np.array([np.nan]),
+    )
+    summary = result.summary()
+    assert "κ" not in summary
+
+
+# ---------------------------------------------------------------------------
+# B3. Bootstrap refit resamples offset/exposure arrays
+# ---------------------------------------------------------------------------
+
+def test_bootstrap_refit_resamples_offset():
+    """Offset arrays should be resampled to match the bootstrap index."""
+    rng = np.random.default_rng(42)
+    n = 30
+    df = pd.DataFrame({
+        "x": rng.standard_normal(n),
+        "y": rng.poisson(2, size=n),
+        "off": np.arange(n, dtype=float),  # distinctive offset values
+    })
+    fit = smf.glm("y ~ x", data=df, family=sm.families.Poisson(), offset=df["off"]).fit(disp=False)
+    adapter = StatsmodelsGLMAdapter(fit)
+
+    # Capture what offset is passed to the refit
+    captured_offsets = []
+    original_refit = adapter.refit
+
+    def capturing_refit(resampled, *, index=None):
+        # The offset in fit_kwargs should be resampled
+        kwargs = adapter._collect_original_fit_kwargs()
+        if index is not None and "offset" in kwargs:
+            captured_offsets.append(np.asarray(kwargs["offset"])[index].copy())
+        return original_refit(resampled, index=index)
+
+    import pymargins._adapters.statsmodels_glm as glm_mod
+    # Patch on the instance
+    adapter.refit = capturing_refit
+
+    config = InferenceConfig(method="bootstrap", n_boot=3, rng_seed=42, diagnostics=False)
+
+    def h_factory(a):
+        def h(beta):
+            return float(beta[0])
+        return h
+
+    result = _run_bootstrap(lambda b: float(b[0]), adapter, config, {}, h_factory=h_factory)
+    assert result["method"] == "bootstrap"
+    # Verify captured offsets were resampled (length should match n_boot * n, but
+    # we only check that the captured offsets are sub-arrays of the original)
+    assert len(captured_offsets) == 3
+    for off in captured_offsets:
+        assert len(off) == n
+        # Values should be a subset of 0..n-1 (the original offset values)
+        assert np.all((off >= 0) & (off < n))

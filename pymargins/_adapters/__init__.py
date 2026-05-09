@@ -52,6 +52,12 @@ _REGISTERED_ADAPTERS = [
         "hint_names": ["OrderedResultsWrapper", "OrderedModel"],
     },
     {
+        "name": "StatsmodelsDiscreteBinaryAdapter",
+        "description": "statsmodels discrete binary models (Logit, Probit)",
+        "hint_modules": ["statsmodels."],
+        "hint_names": ["BinaryResultsWrapper", "Logit", "Probit"],
+    },
+    {
         "name": "StatsmodelsDiscreteCountAdapter",
         "description": "statsmodels discrete count models (Poisson, NegativeBinomial, etc.)",
         "hint_modules": ["statsmodels."],
@@ -146,13 +152,23 @@ def _detect_adapter_class(model):
         from .statsmodels_ols import StatsmodelsOLSAdapter
         return StatsmodelsOLSAdapter
 
-    # statsmodels Logit / Probit (discrete choice, wrapper around GLM family)
+    # statsmodels Logit / Probit (discrete binary models)
+    # Modern statsmodels (>=0.14) wraps both in BinaryResultsWrapper;
+    # older versions used LogitResultsWrapper / ProbitResultsWrapper.
     if module.startswith("statsmodels.") and cls_name in (
+        "BinaryResultsWrapper",
         "LogitResultsWrapper",
         "ProbitResultsWrapper",
     ):
-        from .statsmodels_glm import StatsmodelsGLMAdapter
-        return StatsmodelsGLMAdapter
+        # For BinaryResultsWrapper, distinguish Logit/Probit from other binary
+        # models by inspecting the underlying model class.
+        model_cls_name = getattr(getattr(model, "model", None), "__class__", None).__name__
+        if model_cls_name in ("Logit", "Probit") or cls_name in (
+            "LogitResultsWrapper",
+            "ProbitResultsWrapper",
+        ):
+            from .statsmodels_discrete_binary import StatsmodelsDiscreteBinaryAdapter
+            return StatsmodelsDiscreteBinaryAdapter
 
     # statsmodels MNLogit
     if module.startswith("statsmodels.") and cls_name in (

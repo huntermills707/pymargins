@@ -95,7 +95,7 @@ class StatsmodelsRLMAdapter(LinearPredictionAdapter):
     # Bootstrap support
     # -----------------------------------------------------------------------
 
-    def refit(self, resampled_data: pd.DataFrame) -> "StatsmodelsRLMAdapter":
+    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "StatsmodelsRLMAdapter":
         formula = getattr(self.results.model, "formula", None)
         if formula is not None:
             from statsmodels.formula.api import rlm as smf_rlm

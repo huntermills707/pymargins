@@ -97,7 +97,7 @@ class StatsmodelsQuantRegAdapter(LinearPredictionAdapter):
     # Bootstrap support
     # -----------------------------------------------------------------------
 
-    def refit(self, resampled_data: pd.DataFrame) -> "StatsmodelsQuantRegAdapter":
+    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "StatsmodelsQuantRegAdapter":
         formula = getattr(self.results.model, "formula", None)
         if formula is not None:
             from statsmodels.formula.api import quantreg as smf_quantreg
