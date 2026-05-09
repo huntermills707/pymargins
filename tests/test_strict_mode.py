@@ -45,6 +45,7 @@ def test_strict_mode_accepts_explicit_args(fit_ols):
         gradient_backend="autodiff",
         fd_step=1e-6,
         diagnostics=True,
+        cluster=None,
     )
     assert m.strict is True
     assert m.at == "overall"
@@ -70,6 +71,7 @@ def test_strict_mode_rejects_auto_gradient_backend(fit_ols):
             gradient_backend="auto",
             fd_step=1e-6,
             diagnostics=True,
+            cluster=None,
         )
 
 
@@ -107,6 +109,7 @@ def test_strict_mode_with_explicit_nondefault_vcov(fit_ols):
         gradient_backend="autodiff",
         fd_step=1e-6,
         diagnostics=True,
+        cluster=None,
     )
     assert m.vcov_spec == "HC0"
 

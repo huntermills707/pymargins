@@ -84,6 +84,10 @@ class InferenceConfig:
     cov_params : jax array
         Σ̂. Pre-extracted from the adapter so the engine doesn't need to
         re-request it.
+
+    cluster : array-like, optional
+        Cluster IDs for cluster bootstrap. When provided, bootstrap resamples
+        clusters with replacement instead of individual rows.
     """
     method: InferenceMethod = "delta"
     level: float = 0.95
@@ -97,6 +101,7 @@ class InferenceConfig:
     rng_seed: Optional[int] = None
     diagnostics: bool = True
     cov_params: Optional[jnp.ndarray] = None
+    cluster: Optional[Any] = None
 
 
 # ---------------------------------------------------------------------------
@@ -382,13 +387,38 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
     data = np.asarray(data) if not hasattr(data, "iloc") else data
     n_obs = len(data)
 
+    # Prepare resampling strategy
+    cluster_ids = config.cluster
+    if cluster_ids is not None:
+        cluster_ids = np.asarray(cluster_ids)
+        if len(cluster_ids) != n_obs:
+            raise ValueError(
+                f"cluster IDs length ({len(cluster_ids)}) must match "
+                f"training data length ({n_obs})."
+            )
+        if np.any(np.isnan(cluster_ids)):
+            raise ValueError("cluster IDs must not contain NaN values.")
+        unique_clusters = np.unique(cluster_ids)
+        n_clusters = len(unique_clusters)
+        if n_clusters == 0:
+            raise ValueError("cluster IDs must not be empty.")
+
     rng = np.random.default_rng(config.rng_seed)
     h_draws_inf = []
 
     n_failures = 0
     max_failures = max(1, int(0.1 * config.n_boot))  # 10% tolerance
     for b in range(config.n_boot):
-        idx = rng.integers(0, n_obs, size=n_obs)
+        if cluster_ids is not None:
+            # Cluster bootstrap: sample clusters with replacement
+            sampled_clusters = rng.choice(unique_clusters, size=n_clusters, replace=True)
+            idx = np.concatenate([
+                np.where(cluster_ids == c)[0]
+                for c in sampled_clusters
+            ])
+        else:
+            # i.i.d. bootstrap: sample rows with replacement
+            idx = rng.integers(0, n_obs, size=n_obs)
         if hasattr(data, "iloc"):
             resampled = data.iloc[idx]
         else:

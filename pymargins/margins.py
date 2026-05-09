@@ -149,6 +149,11 @@ class Margins:
         Whether to compute κ and other diagnostics on every call. Disable
         for performance in tight loops.
 
+    cluster : array-like, optional
+        Cluster IDs for cluster bootstrap. When provided and ``method='bootstrap'``,
+        resamples clusters with replacement instead of individual rows.
+        Must be the same length as the training data and must not contain NaN.
+
     strict : bool, default False
         If True, no defaults are inferred — every analytical choice must be
         explicit at construction. Useful for pre-registered or audit-relevant
@@ -182,6 +187,7 @@ class Margins:
         gradient_backend: GradientBackend = _NOT_GIVEN,
         fd_step: float = _NOT_GIVEN,
         diagnostics: bool = _NOT_GIVEN,
+        cluster: Optional[Any] = _NOT_GIVEN,
         strict: bool = False,
         adapter: Optional[ModelAdapter] = None,
     ):
@@ -193,7 +199,7 @@ class Margins:
                 ("method", method), ("kappa_threshold", kappa_threshold),
                 ("rng_seed", rng_seed), ("n_sim", n_sim), ("n_boot", n_boot),
                 ("gradient_backend", gradient_backend), ("fd_step", fd_step),
-                ("diagnostics", diagnostics),
+                ("diagnostics", diagnostics), ("cluster", cluster),
             ]:
                 if value is _NOT_GIVEN:
                     raise ValueError(
@@ -220,6 +226,7 @@ class Margins:
         gradient_backend = "auto" if gradient_backend is _NOT_GIVEN else gradient_backend
         fd_step = 1e-6 if fd_step is _NOT_GIVEN else fd_step
         diagnostics = True if diagnostics is _NOT_GIVEN else diagnostics
+        cluster = None if cluster is _NOT_GIVEN else cluster
 
         # Validation: phi/phi_inv must come as a pair
         if (phi is None) != (phi_inv is None):
@@ -241,11 +248,27 @@ class Margins:
         self.n_boot = n_boot
         self.fd_step = fd_step
         self.diagnostics = diagnostics
+        self.cluster = cluster
         self.strict = strict
 
         # Adapter setup
         self.adapter = adapter if adapter is not None else auto_detect_adapter(model)
         self.adapter.attach(self)
+
+        # Validate cluster IDs against training data length
+        if self.cluster is not None:
+            cluster_arr = np.asarray(self.cluster)
+            if np.any(np.isnan(cluster_arr)):
+                raise ValueError("cluster IDs must not contain NaN values.")
+            try:
+                n_data = len(self.adapter.training_data)
+            except Exception:
+                n_data = None
+            if n_data is not None and len(cluster_arr) != n_data:
+                raise ValueError(
+                    f"cluster IDs length ({len(cluster_arr)}) must match "
+                    f"training data length ({n_data})."
+                )
 
         # Eagerly freeze Σ̂ at construction so mutations between now and the
         # first method call cannot change the session's analytical posture.
@@ -890,6 +913,7 @@ class Margins:
             rng_seed=self.rng_seed,
             diagnostics=self.diagnostics,
             cov_params=self._frozen_cov(),
+            cluster=self.cluster,
         )
 
     def _frozen_cov(self) -> jnp.ndarray:
