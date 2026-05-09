@@ -88,6 +88,15 @@ class InferenceConfig:
     cluster : array-like, optional
         Cluster IDs for cluster bootstrap. When provided, bootstrap resamples
         clusters with replacement instead of individual rows.
+
+    block_size : int, optional
+        Block length for block bootstrap. When provided, bootstrap resamples
+        contiguous blocks with replacement instead of individual rows.
+        Mutually exclusive with ``cluster``.
+
+    bootstrap_config : dict, optional
+        Advanced bootstrap options. Supported keys:
+          - "block_type": "moving" (default), "nonoverlapping", or "circular"
     """
     method: InferenceMethod = "delta"
     level: float = 0.95
@@ -102,6 +111,8 @@ class InferenceConfig:
     diagnostics: bool = True
     cov_params: Optional[jnp.ndarray] = None
     cluster: Optional[Any] = None
+    block_size: Optional[int] = None
+    bootstrap_config: Optional[dict] = None
 
 
 # ---------------------------------------------------------------------------
@@ -389,6 +400,16 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
 
     # Prepare resampling strategy
     cluster_ids = config.cluster
+    block_size = config.block_size
+    bootstrap_config = config.bootstrap_config or {}
+    block_type = bootstrap_config.get("block_type", "moving")
+
+    if cluster_ids is not None and block_size is not None:
+        raise ValueError(
+            "cluster and block_size are mutually exclusive. "
+            "Use cluster for cluster bootstrap or block_size for block bootstrap, not both."
+        )
+
     if cluster_ids is not None:
         cluster_ids = np.asarray(cluster_ids)
         if len(cluster_ids) != n_obs:
@@ -403,6 +424,19 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
         if n_clusters == 0:
             raise ValueError("cluster IDs must not be empty.")
 
+    if block_size is not None:
+        if not isinstance(block_size, int) or block_size < 1:
+            raise ValueError("block_size must be a positive integer.")
+        if block_size > n_obs:
+            raise ValueError(
+                f"block_size ({block_size}) cannot exceed training data length ({n_obs})."
+            )
+        if block_type not in ("moving", "nonoverlapping", "circular"):
+            raise ValueError(
+                f"Unsupported block_type: {block_type!r}. "
+                f"Supported: 'moving', 'nonoverlapping', 'circular'."
+            )
+
     rng = np.random.default_rng(config.rng_seed)
     h_draws_inf = []
 
@@ -416,6 +450,35 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
                 np.where(cluster_ids == c)[0]
                 for c in sampled_clusters
             ])
+        elif block_size is not None:
+            # Block bootstrap
+            k = int(np.ceil(n_obs / block_size))
+            if block_type == "moving":
+                # Moving Block Bootstrap (MBB): n - b + 1 possible starting positions
+                start_positions = rng.integers(0, n_obs - block_size + 1, size=k)
+                idx = np.concatenate([
+                    np.arange(s, s + block_size)
+                    for s in start_positions
+                ])
+            elif block_type == "circular":
+                # Circular Block Bootstrap (CBB): wrap around using modulo
+                start_positions = rng.integers(0, n_obs, size=k)
+                idx = np.concatenate([
+                    np.arange(s, s + block_size) % n_obs
+                    for s in start_positions
+                ])
+            else:  # nonoverlapping
+                # Non-overlapping Block Bootstrap (NBB): fixed divisions
+                n_blocks = n_obs // block_size
+                if n_blocks == 0:
+                    raise ValueError(
+                        f"block_size ({block_size}) too large for n_obs ({n_obs})."
+                    )
+                sampled_blocks = rng.integers(0, n_blocks, size=n_blocks)
+                idx = np.concatenate([
+                    np.arange(bi * block_size, (bi + 1) * block_size)
+                    for bi in sampled_blocks
+                ])
         else:
             # i.i.d. bootstrap: sample rows with replacement
             idx = rng.integers(0, n_obs, size=n_obs)

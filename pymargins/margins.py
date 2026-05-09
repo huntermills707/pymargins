@@ -153,6 +153,16 @@ class Margins:
         Cluster IDs for cluster bootstrap. When provided and ``method='bootstrap'``,
         resamples clusters with replacement instead of individual rows.
         Must be the same length as the training data and must not contain NaN.
+        Mutually exclusive with ``block_size``.
+
+    block_size : int, optional
+        Block length for block bootstrap. When provided and ``method='bootstrap'``,
+        resamples contiguous blocks with replacement instead of individual rows.
+        Mutually exclusive with ``cluster``.
+
+    bootstrap_config : dict, optional
+        Advanced bootstrap options. Supported keys:
+          - "block_type": "moving" (default), "nonoverlapping", or "circular"
 
     strict : bool, default False
         If True, no defaults are inferred — every analytical choice must be
@@ -188,6 +198,8 @@ class Margins:
         fd_step: float = _NOT_GIVEN,
         diagnostics: bool = _NOT_GIVEN,
         cluster: Optional[Any] = _NOT_GIVEN,
+        block_size: Optional[int] = _NOT_GIVEN,
+        bootstrap_config: Optional[dict] = _NOT_GIVEN,
         strict: bool = False,
         adapter: Optional[ModelAdapter] = None,
     ):
@@ -200,6 +212,7 @@ class Margins:
                 ("rng_seed", rng_seed), ("n_sim", n_sim), ("n_boot", n_boot),
                 ("gradient_backend", gradient_backend), ("fd_step", fd_step),
                 ("diagnostics", diagnostics), ("cluster", cluster),
+                ("block_size", block_size), ("bootstrap_config", bootstrap_config),
             ]:
                 if value is _NOT_GIVEN:
                     raise ValueError(
@@ -227,6 +240,8 @@ class Margins:
         fd_step = 1e-6 if fd_step is _NOT_GIVEN else fd_step
         diagnostics = True if diagnostics is _NOT_GIVEN else diagnostics
         cluster = None if cluster is _NOT_GIVEN else cluster
+        block_size = None if block_size is _NOT_GIVEN else block_size
+        bootstrap_config = None if bootstrap_config is _NOT_GIVEN else bootstrap_config
 
         # Validation: phi/phi_inv must come as a pair
         if (phi is None) != (phi_inv is None):
@@ -249,6 +264,8 @@ class Margins:
         self.fd_step = fd_step
         self.diagnostics = diagnostics
         self.cluster = cluster
+        self.block_size = block_size
+        self.bootstrap_config = bootstrap_config
         self.strict = strict
 
         # Adapter setup
@@ -268,6 +285,34 @@ class Margins:
                 raise ValueError(
                     f"cluster IDs length ({len(cluster_arr)}) must match "
                     f"training data length ({n_data})."
+                )
+
+        # Mutual exclusion: cluster and block_size
+        if self.cluster is not None and self.block_size is not None:
+            raise ValueError(
+                "cluster and block_size are mutually exclusive. "
+                "Use cluster for cluster bootstrap or block_size for block bootstrap, not both."
+            )
+
+        # Validate block_size
+        if self.block_size is not None:
+            if not isinstance(self.block_size, int) or self.block_size < 1:
+                raise ValueError("block_size must be a positive integer.")
+            try:
+                n_data = len(self.adapter.training_data)
+            except Exception:
+                n_data = None
+            if n_data is not None and self.block_size > n_data:
+                raise ValueError(
+                    f"block_size ({self.block_size}) cannot exceed "
+                    f"training data length ({n_data})."
+                )
+            cfg = self.bootstrap_config or {}
+            block_type = cfg.get("block_type", "moving")
+            if block_type not in ("moving", "nonoverlapping", "circular"):
+                raise ValueError(
+                    f"Unsupported block_type: {block_type!r}. "
+                    f"Supported: 'moving', 'nonoverlapping', 'circular'."
                 )
 
         # Eagerly freeze Σ̂ at construction so mutations between now and the
@@ -914,6 +959,8 @@ class Margins:
             diagnostics=self.diagnostics,
             cov_params=self._frozen_cov(),
             cluster=self.cluster,
+            block_size=self.block_size,
+            bootstrap_config=self.bootstrap_config,
         )
 
     def _frozen_cov(self) -> jnp.ndarray:
