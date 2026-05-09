@@ -51,6 +51,29 @@ _REGISTERED_ADAPTERS = [
         "hint_modules": ["statsmodels."],
         "hint_names": ["OrderedResultsWrapper", "OrderedModel"],
     },
+    {
+        "name": "StatsmodelsDiscreteCountAdapter",
+        "description": "statsmodels discrete count models (Poisson, NegativeBinomial, etc.)",
+        "hint_modules": ["statsmodels."],
+        "hint_names": [
+            "PoissonResultsWrapper",
+            "NegativeBinomialResultsWrapper",
+            "NegativeBinomialPResultsWrapper",
+            "GeneralizedPoissonResultsWrapper",
+        ],
+    },
+    {
+        "name": "StatsmodelsRLMAdapter",
+        "description": "statsmodels RLM (robust linear model)",
+        "hint_modules": ["statsmodels."],
+        "hint_names": ["RLMResultsWrapper", "RLM"],
+    },
+    {
+        "name": "StatsmodelsQuantRegAdapter",
+        "description": "statsmodels QuantReg (quantile regression)",
+        "hint_modules": ["statsmodels."],
+        "hint_names": ["QuantRegResults", "QuantReg"],
+    },
 ]
 
 
@@ -110,6 +133,12 @@ def _detect_adapter_class(model):
         from .statsmodels_glm import StatsmodelsGLMAdapter
         return StatsmodelsGLMAdapter
 
+    # statsmodels QuantReg (also uses RegressionResultsWrapper, so check first)
+    if module.startswith("statsmodels.") and cls_name == "RegressionResultsWrapper":
+        if hasattr(model, "q") or getattr(getattr(model, "model", None), "__class__", None).__name__ == "QuantReg":
+            from .statsmodels_quantreg import StatsmodelsQuantRegAdapter
+            return StatsmodelsQuantRegAdapter
+
     # statsmodels OLS / WLS / GLS
     if module.startswith("statsmodels.") and cls_name in (
         "RegressionResultsWrapper",
@@ -138,6 +167,30 @@ def _detect_adapter_class(model):
     ):
         from .statsmodels_ordered import StatsmodelsOrderedAdapter
         return StatsmodelsOrderedAdapter
+
+    # statsmodels discrete count models
+    if module.startswith("statsmodels.") and cls_name in (
+        "PoissonResultsWrapper",
+        "NegativeBinomialResultsWrapper",
+        "NegativeBinomialPResultsWrapper",
+        "GeneralizedPoissonResultsWrapper",
+    ):
+        from .statsmodels_discrete_count import StatsmodelsDiscreteCountAdapter
+        return StatsmodelsDiscreteCountAdapter
+
+    # statsmodels RLM
+    if module.startswith("statsmodels.") and cls_name in (
+        "RLMResultsWrapper",
+    ):
+        from .statsmodels_rlm import StatsmodelsRLMAdapter
+        return StatsmodelsRLMAdapter
+
+    # statsmodels QuantReg
+    if module.startswith("statsmodels.") and cls_name in (
+        "QuantRegResults",
+    ):
+        from .statsmodels_quantreg import StatsmodelsQuantRegAdapter
+        return StatsmodelsQuantRegAdapter
 
     # Fall through with a clear error that suggests the closest adapter
     suggestion = _suggest_adapters(cls_name, module)
