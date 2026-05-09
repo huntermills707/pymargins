@@ -287,10 +287,13 @@ class Margins:
 
     @classmethod
     def lift_scale(cls, model, **kwargs) -> "Margins":
-        """Lift scale: contrasts on log(1+lift); reported as lift = RR - 1.
+        """Lift scale: contrasts on log(1+lift); reported as (1+p1)/(1+p0) - 1.
 
         For marketing/uplift analysis where 0 represents no effect and
         positive values represent multiplicative excess.
+
+        Note: This is *not* the same as RR - 1 (p1/p0 - 1). For true lift
+        (p1-p0)/p0, use ``evaluate(compose=...)`` directly.
         """
         return cls(model, phi=jnp.expm1, phi_inv=jnp.log1p, **kwargs)
 
@@ -310,6 +313,7 @@ class Margins:
         over: Optional[Union[str, list[str]]] = None,
         transform: Optional[Callable] = None,
         label: Optional[str] = None,
+        outcome: Optional[Union[int, list[int]]] = None,
     ) -> MarginsResult:
         """Adjusted prediction (level quantity).
 
@@ -354,6 +358,10 @@ class Margins:
             Override label used in output summaries. Only applies when the
             call produces a single estimand (no grid expansion and no ``over``).
 
+        outcome : int or list of int, optional
+            For multi-outcome models (e.g. MNLogit, OrderedModel), subset
+            to the specified outcome class(es). Default returns all outcomes.
+
         Returns
         -------
         result : MarginsResult
@@ -393,6 +401,8 @@ class Margins:
             estimand_metadata=meta,
             h_factory=h_factory,
         )
+        if outcome is not None and self.adapter.n_outcomes > 1:
+            result_data = self._slice_by_outcome(result_data, outcome)
         return self._wrap_result(result_data)
 
     def dydx(
@@ -403,6 +413,7 @@ class Margins:
         over: Optional[Union[str, list[str]]] = None,
         transform: Optional[Callable] = None,
         label: Optional[str] = None,
+        outcome: Optional[Union[int, list[int]]] = None,
     ) -> MarginsResult:
         """Slope (∂μ/∂x_j) for continuous covariates.
 
@@ -419,6 +430,10 @@ class Margins:
         label : str, optional
             Override label used in output summaries. Only applies when the
             call produces a single estimand (no grid expansion and no ``over``).
+
+        outcome : int or list of int, optional
+            For multi-outcome models, subset to the specified outcome
+            class(es). Default returns all outcomes.
 
         Other parameters : see predict().
 
@@ -468,6 +483,8 @@ class Margins:
             estimand_metadata=meta,
             h_factory=h_factory,
         )
+        if outcome is not None and self.adapter.n_outcomes > 1:
+            result_data = self._slice_by_outcome(result_data, outcome)
         return self._wrap_result(result_data)
 
     def contrasts(
@@ -475,6 +492,7 @@ class Margins:
         *,
         scenarios: list[dict],
         contrasts: ContrastSpec,
+        outcome: Optional[Union[int, list[int]]] = None,
     ) -> MarginsResult:
         """Linear combination(s) of predictions across scenarios.
 
@@ -577,6 +595,8 @@ class Margins:
             estimand_metadata={"kind": "contrasts", "labels": labels},
             h_factory=h_factory,
         )
+        if outcome is not None and self.adapter.n_outcomes > 1:
+            result_data = self._slice_by_outcome(result_data, outcome)
         return self._wrap_result(result_data)
 
     def evaluate(
@@ -584,6 +604,7 @@ class Margins:
         *,
         scenarios: list[dict],
         compose: Callable,
+        outcome: Optional[Union[int, list[int]]] = None,
     ) -> MarginsResult:
         """Arbitrary differentiable function of scenario predictions.
 
@@ -631,7 +652,83 @@ class Margins:
             estimand_metadata={"kind": "evaluate", "labels": labels},
             h_factory=h_factory,
         )
+        if outcome is not None and self.adapter.n_outcomes > 1:
+            result_data = self._slice_by_outcome(result_data, outcome)
         return self._wrap_result(result_data)
+
+    # -----------------------------------------------------------------------
+    # Outcome slicing for multi-outcome models
+    # -----------------------------------------------------------------------
+
+    def _slice_by_outcome(
+        self,
+        result_data: dict,
+        outcome: Union[int, list[int]],
+    ) -> dict:
+        """Slice result arrays to the requested outcome indices.
+
+        For multi-outcome models (MNLogit, OrderedModel), the inference
+        engine returns estimates/SEs/CIs for all outcomes. This helper
+        subsets them and updates labels accordingly.
+        """
+        n_outcomes = self.adapter.n_outcomes
+        labels = self.adapter.outcome_labels or [str(i) for i in range(n_outcomes)]
+
+        keys = [outcome] if isinstance(outcome, int) else list(outcome)
+        for k in keys:
+            if not (0 <= k < n_outcomes):
+                raise ValueError(
+                    f"Outcome index {k} is out of range for model with "
+                    f"{n_outcomes} outcomes (valid: 0..{n_outcomes - 1})."
+                )
+        idx = np.asarray(keys, dtype=int)
+
+        def _slice(arr):
+            if arr is None:
+                return None
+            arr = np.asarray(arr)
+            if arr.ndim == 1:
+                return arr[idx]
+            elif arr.ndim == 2:
+                # (n_atoms, n_outcomes) or (n_outcomes, n_params)
+                # We want to slice along the outcome axis. Heuristic:
+                # if the last dim equals n_outcomes, slice last axis.
+                if arr.shape[-1] == n_outcomes:
+                    return arr[..., idx]
+                elif arr.shape[0] == n_outcomes:
+                    return arr[idx]
+                else:
+                    return arr  # Can't determine outcome axis
+            elif arr.ndim == 3:
+                # (n_atoms, n_outcomes, n_params) or (n_sim, n_atoms, n_outcomes)
+                if arr.shape[-1] == n_outcomes:
+                    return arr[..., idx]
+                elif arr.shape[1] == n_outcomes:
+                    return arr[:, idx]
+                else:
+                    return arr
+            return arr
+
+        result = dict(result_data)
+        for key in ("estimate", "std_error", "conf_int_lower", "conf_int_upper",
+                    "gradient", "draws", "kappa"):
+            if key in result:
+                result[key] = _slice(result[key])
+
+        # Update labels
+        meta = result.get("estimand_metadata", {})
+        old_labels = meta.get("labels")
+        if old_labels is not None:
+            new_labels = []
+            for lab in old_labels:
+                for k in idx:
+                    suffix = labels[k]
+                    new_labels.append(f"{lab} ({suffix})")
+            meta = dict(meta)
+            meta["labels"] = new_labels
+            result["estimand_metadata"] = meta
+
+        return result
 
     # -----------------------------------------------------------------------
     # Diagnostics and reporting
@@ -814,6 +911,28 @@ class Margins:
         composition and hypothesis tests do not re-fetch it from the
         adapter (which could change if the underlying model is mutated).
         """
+        n_obs = 0
+        try:
+            n_obs = len(self.adapter.training_data)
+        except Exception:
+            pass
+
+        # Expand labels with outcome suffixes for multi-outcome models
+        meta = dict(result_data.get("estimand_metadata", {}))
+        if self.adapter.n_outcomes > 1:
+            old_labels = meta.get("labels")
+            outcome_labels = self.adapter.outcome_labels or [
+                str(i) for i in range(self.adapter.n_outcomes)
+            ]
+            if old_labels is None:
+                old_labels = [""]
+            expanded = []
+            for lab in old_labels:
+                for k in range(self.adapter.n_outcomes):
+                    suffix = outcome_labels[k]
+                    expanded.append(f"{lab} ({suffix})" if lab else suffix)
+            meta["labels"] = expanded
+
         return MarginsResult(
             estimate=np.asarray(result_data["estimate"]),
             std_error=np.asarray(result_data["std_error"]),
@@ -821,11 +940,12 @@ class Margins:
             conf_int_upper=np.asarray(result_data["conf_int_upper"]),
             method=result_data["method"],
             level=result_data["level"],
+            n_obs=n_obs,
             kappa=result_data.get("kappa"),
             delta_sim_disagreement=result_data.get("delta_sim_disagreement"),
             fallback_triggered=result_data.get("fallback_triggered", False),
             fallback_reason=result_data.get("fallback_reason"),
-            estimand_metadata=result_data.get("estimand_metadata", {}),
+            estimand_metadata=meta,
             gradient=result_data.get("gradient"),
             draws=result_data.get("draws"),
             cov_params=np.asarray(self._frozen_cov()),

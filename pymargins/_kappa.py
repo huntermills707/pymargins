@@ -322,7 +322,13 @@ def session_kappa(
     # design points and is the most expensive part of kappa().
     L = jnp.linalg.cholesky(cov_params)
     if jnp.isnan(L).any():
-        L = None
+        # Ridge-regularize once for rank-deficient Σ̂ (common with HC/cluster estimators)
+        diag_mean = jnp.mean(jnp.diag(cov_params))
+        ridge = 1e-8 * abs(float(diag_mean))
+        reg_cov = cov_params + ridge * jnp.eye(cov_params.shape[0])
+        L = jnp.linalg.cholesky(reg_cov)
+        if jnp.isnan(L).any():
+            L = None
 
     kappas = []
     for X in representative_design:

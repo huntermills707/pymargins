@@ -14,7 +14,7 @@ different sessions cannot be composed without explicit scale conversion.
 """
 
 from __future__ import annotations
-from typing import Optional, Union, Literal, Any
+from typing import Optional, Union, Literal, Any, Callable
 from dataclasses import dataclass, field
 import weakref
 import warnings
@@ -270,7 +270,12 @@ class MarginsResult:
         return self.session
 
     def _summary_rows(self):
-        """Build per-row summary data as a list of dicts."""
+        """Build per-row summary data as a list of dicts.
+
+        Per-row p-values test H0: estimate = 0 on the *inference scale*.
+        For logit-scale predictions this means testing against p = 0.5,
+        which may not be the intended null.
+        """
         est = np.atleast_1d(self.estimate)
         se = np.atleast_1d(self.std_error)
         lo = np.atleast_1d(self.conf_int_lower)
@@ -282,6 +287,8 @@ class MarginsResult:
         z_vals = []
         p_vals = []
         is_delta = self.gradient is not None
+        # Note: null=0 is on the inference scale. For logit-scale predictions,
+        # this tests H0: logit(p)=0 i.e. p=0.5, which is rarely the intended null.
         try:
             tr = self.test(value=0.0, null_scale="inference")
             z_vals = np.atleast_1d(tr.statistic)
@@ -341,6 +348,12 @@ class MarginsResult:
             Format string for p-values.
         max_rows : int, optional
             Truncate table to this many rows (showing ``...`` for remainder).
+
+        Notes
+        -----
+        Per-row p-values test H0: estimate = 0 on the inference scale. For
+        logit-scale predictions this corresponds to p = 0.5, which may not
+        be the intended null hypothesis.
 
         Returns
         -------
@@ -952,6 +965,107 @@ class MarginsResult:
         if units:
             new.estimand_metadata["units"] = units
         return new
+
+    def outcome(self, index: Union[int, str]) -> "MarginsResult":
+        """Slice a multi-outcome result to a single outcome.
+
+        Parameters
+        ----------
+        index : int or str
+            Outcome index (0-based) or label.
+
+        Returns
+        -------
+        MarginsResult
+            A new result with only the requested outcome.
+        """
+        labels = self.estimand_metadata.get("labels", [])
+        est = np.atleast_1d(self.estimate)
+
+        # Determine the outcome axis stride
+        n_components = est.size
+        n_labels = len(labels)
+
+        if n_labels == 0 or n_labels != n_components:
+            raise ValueError(
+                "outcome() requires expanded outcome labels; "
+                "this result may not be from a multi-outcome model."
+            )
+
+        # Each original label was expanded into K suffixed labels.
+        # Find which positions correspond to the requested outcome.
+        # Heuristic: labels are "lab (suffix)"; group by suffix.
+        suffixes = []
+        for lab in labels:
+            if " (" in lab and lab.endswith(")"):
+                suffix = lab[lab.rfind(" (") + 2 : -1]
+            else:
+                suffix = lab
+            suffixes.append(suffix)
+
+        unique_suffixes = []
+        seen = set()
+        for s in suffixes:
+            if s not in seen:
+                unique_suffixes.append(s)
+                seen.add(s)
+
+        K = len(unique_suffixes)
+        if K == 1:
+            raise ValueError("outcome() called on a single-outcome result.")
+
+        if isinstance(index, str):
+            if index not in unique_suffixes:
+                raise ValueError(
+                    f"Outcome label {index!r} not found. Available: {unique_suffixes}"
+                )
+            outcome_idx = unique_suffixes.index(index)
+        else:
+            outcome_idx = int(index)
+            if not (0 <= outcome_idx < K):
+                raise ValueError(
+                    f"Outcome index {outcome_idx} out of range (0..{K - 1})."
+                )
+
+        # Select every K-th entry starting at outcome_idx
+        mask = np.arange(n_components) % K == outcome_idx
+        if not np.any(mask):
+            raise ValueError(f"No components found for outcome {index!r}.")
+
+        def _slice(arr):
+            if arr is None:
+                return None
+            a = np.asarray(arr)
+            if a.ndim == 1:
+                return a[mask]
+            elif a.ndim == 2:
+                return a[np.ix_(mask, mask)]
+            return a
+
+        new_labels = [labels[i] for i in np.where(mask)[0]]
+        new_meta = dict(self.estimand_metadata)
+        new_meta["labels"] = new_labels
+
+        return MarginsResult(
+            estimate=_slice(self.estimate),
+            std_error=_slice(self.std_error),
+            conf_int_lower=_slice(self.conf_int_lower),
+            conf_int_upper=_slice(self.conf_int_upper),
+            method=self.method,
+            level=self.level,
+            n_obs=self.n_obs,
+            kappa=_slice(self.kappa),
+            delta_sim_disagreement=self.delta_sim_disagreement,
+            fallback_triggered=self.fallback_triggered,
+            fallback_reason=self.fallback_reason,
+            estimand_metadata=new_meta,
+            gradient=_slice(self.gradient),
+            draws=_slice(self.draws),
+            cov_params=self.cov_params,
+            phi=self.phi,
+            phi_inv=self.phi_inv,
+            session=self.session,
+        )
 
     def materialize(self) -> "MarginsResult":
         """Drop underlying machinery (gradient, draws, session) to reduce

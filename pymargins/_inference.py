@@ -406,6 +406,15 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
                     f"threshold). Last error: {exc}"
                 ) from exc
 
+    if n_failures > 0:
+        warnings.warn(
+            f"Bootstrap: {n_failures} of {config.n_boot} replicates failed "
+            f"({n_failures / config.n_boot:.1%}). CI computed from "
+            f"{len(h_draws_inf)} successful replicates.",
+            UserWarning,
+            stacklevel=2,
+        )
+
     if len(h_draws_inf) == 0:
         raise RuntimeError("All bootstrap replicates failed.")
 

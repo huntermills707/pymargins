@@ -321,7 +321,9 @@ def make_predict_with_fd_jvp(
         f0 = predict_native(beta_np, X_np)
         is_scalar = np.ndim(f0) == 0
         f0 = np.atleast_1d(f0)
-        n_out = f0.shape[0]
+        original_shape = f0.shape
+        f0_flat = f0.ravel()
+        n_out = f0_flat.shape[0]
 
         # ------------------------------------------------------------------
         # Beta directional derivative
@@ -337,14 +339,15 @@ def make_predict_with_fd_jvp(
             for j in range(n_params):
                 e_j = np.zeros(n_params)
                 e_j[j] = fd_step
-                f_plus = np.atleast_1d(predict_native(beta_np + e_j, X_np))
-                f_minus = np.atleast_1d(predict_native(beta_np - e_j, X_np))
+                f_plus = np.atleast_1d(predict_native(beta_np + e_j, X_np)).ravel()
+                f_minus = np.atleast_1d(predict_native(beta_np - e_j, X_np)).ravel()
                 J_beta[:, j] = (f_plus - f_minus) / (2 * fd_step)
             J_beta_jax = jnp.asarray(J_beta)
             if n_out == 1:
                 deriv_beta = jnp.dot(J_beta_jax.ravel(), beta_dot)
             else:
                 deriv_beta = J_beta_jax @ beta_dot
+            deriv_beta = deriv_beta.reshape(original_shape)
 
         # ------------------------------------------------------------------
         # X directional derivative (same tracer-safe pattern)
@@ -365,11 +368,12 @@ def make_predict_with_fd_jvp(
                 for j in range(n_features):
                     e_ij = np.zeros_like(X_np)
                     e_ij[i, j] = fd_step
-                    f_plus = np.atleast_1d(predict_native(beta_np, X_np + e_ij))
-                    f_minus = np.atleast_1d(predict_native(beta_np, X_np - e_ij))
+                    f_plus = np.atleast_1d(predict_native(beta_np, X_np + e_ij)).ravel()
+                    f_minus = np.atleast_1d(predict_native(beta_np, X_np - e_ij)).ravel()
                     J_X[:, i, j] = (f_plus - f_minus) / (2 * fd_step)
             J_X_jax = jnp.asarray(J_X)
             deriv_X = jnp.einsum('oij,ij->o', J_X_jax, X_dot)
+            deriv_X = deriv_X.reshape(original_shape)
 
         deriv = deriv_beta + deriv_X
         if is_scalar:
@@ -515,8 +519,13 @@ def make_glm_jvp_wrapper(
 
     @predict_wrapped.defjvp
     def predict_wrapped_jvp(primals, tangents):
-        beta, X, offset = primals
-        beta_dot, X_dot, offset_dot = tangents
+        # Defensive unpacking: JAX may pass 2 or 3 primals depending on
+        # whether offset is supplied. We avoid positional unpacking so the
+        # rule stays stable regardless of JAX internal calling conventions.
+        beta, X = primals[0], primals[1]
+        offset = primals[2] if len(primals) > 2 else None
+        beta_dot, X_dot = tangents[0], tangents[1]
+        offset_dot = tangents[2] if len(tangents) > 2 else None
 
         eta = jnp.asarray(X) @ jnp.asarray(beta)
         if offset is not None:

@@ -84,23 +84,23 @@ def test_auto_detect_array_fit_ols(df_ols):
 
 
 def test_auto_detect_wls_wrapper():
-    """WLSResultsWrapper should map to StatsmodelsOLSAdapter."""
+    """WLS results use RegressionResultsWrapper and map to StatsmodelsOLSAdapter."""
     from pymargins._adapters import _detect_adapter_class
     class FakeWLSResult:
         pass
     FakeWLSResult.__module__ = "statsmodels.regression"
-    FakeWLSResult.__name__ = "WLSResultsWrapper"
+    FakeWLSResult.__name__ = "RegressionResultsWrapper"
     cls = _detect_adapter_class(FakeWLSResult())
     assert cls is StatsmodelsOLSAdapter
 
 
 def test_auto_detect_gls_wrapper():
-    """GLSResultsWrapper should map to StatsmodelsOLSAdapter."""
+    """GLS results use RegressionResultsWrapper and map to StatsmodelsOLSAdapter."""
     from pymargins._adapters import _detect_adapter_class
     class FakeGLSResult:
         pass
     FakeGLSResult.__module__ = "statsmodels.regression"
-    FakeGLSResult.__name__ = "GLSResultsWrapper"
+    FakeGLSResult.__name__ = "RegressionResultsWrapper"
     cls = _detect_adapter_class(FakeGLSResult())
     assert cls is StatsmodelsOLSAdapter
 

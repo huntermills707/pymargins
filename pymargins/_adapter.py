@@ -291,8 +291,11 @@ class ModelAdapter(abc.ABC):
 
         Returns
         -------
-        mu : jax array of shape (n_obs,)
-            Predicted values on the response scale.
+        mu : jax array of shape (n_obs,) or (n_obs, n_outcomes)
+            Predicted values on the response scale. For single-output models
+            returns a 1D array; for multi-outcome models (e.g. MNLogit,
+            OrderedModel) returns a 2D array with one column per outcome
+            class.
         """
         ...
 
@@ -339,6 +342,16 @@ class ModelAdapter(abc.ABC):
             "Either set self.training_data in __init__, or override "
             "Margins._base_data."
         )
+
+    @property
+    def n_outcomes(self) -> int:
+        """Number of outcome classes for multi-outcome models, default 1."""
+        return 1
+
+    @property
+    def outcome_labels(self) -> Optional[list[str]]:
+        """Outcome class labels for multi-outcome models, or None."""
+        return None
 
     @abc.abstractmethod
     def column_index_of_variable(self, name: str) -> int:

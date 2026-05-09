@@ -39,6 +39,18 @@ _REGISTERED_ADAPTERS = [
         "hint_modules": ["statsmodels."],
         "hint_names": ["RegressionResultsWrapper", "OLS", "WLS", "GLS"],
     },
+    {
+        "name": "StatsmodelsMNLogitAdapter",
+        "description": "statsmodels MNLogit (multinomial logit)",
+        "hint_modules": ["statsmodels."],
+        "hint_names": ["MultinomialResultsWrapper", "MNLogit"],
+    },
+    {
+        "name": "StatsmodelsOrderedAdapter",
+        "description": "statsmodels OrderedModel (ordered probit/logit)",
+        "hint_modules": ["statsmodels."],
+        "hint_names": ["OrderedResultsWrapper", "OrderedModel"],
+    },
 ]
 
 
@@ -101,8 +113,6 @@ def _detect_adapter_class(model):
     # statsmodels OLS / WLS / GLS
     if module.startswith("statsmodels.") and cls_name in (
         "RegressionResultsWrapper",
-        "WLSResultsWrapper",
-        "GLSResultsWrapper",
     ):
         from .statsmodels_ols import StatsmodelsOLSAdapter
         return StatsmodelsOLSAdapter
@@ -114,6 +124,20 @@ def _detect_adapter_class(model):
     ):
         from .statsmodels_glm import StatsmodelsGLMAdapter
         return StatsmodelsGLMAdapter
+
+    # statsmodels MNLogit
+    if module.startswith("statsmodels.") and cls_name in (
+        "MultinomialResultsWrapper",
+    ):
+        from .statsmodels_mnlogit import StatsmodelsMNLogitAdapter
+        return StatsmodelsMNLogitAdapter
+
+    # statsmodels OrderedModel
+    if module.startswith("statsmodels.") and cls_name in (
+        "OrderedResultsWrapper",
+    ):
+        from .statsmodels_ordered import StatsmodelsOrderedAdapter
+        return StatsmodelsOrderedAdapter
 
     # Fall through with a clear error that suggests the closest adapter
     suggestion = _suggest_adapters(cls_name, module)
