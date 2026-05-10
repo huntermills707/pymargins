@@ -81,6 +81,30 @@ _REGISTERED_ADAPTERS = [
         "hint_names": ["QuantRegResults", "QuantReg"],
     },
     {
+        "name": "StatsmodelsGEEAdapter",
+        "description": "statsmodels GEE (generalized estimating equations)",
+        "hint_modules": ["statsmodels."],
+        "hint_names": ["GEEResultsWrapper", "GEE"],
+    },
+    {
+        "name": "StatsmodelsNominalGEEAdapter",
+        "description": "statsmodels NominalGEE (multinomial GEE)",
+        "hint_modules": ["statsmodels."],
+        "hint_names": ["NominalGEEResultsWrapper", "NominalGEE"],
+    },
+    {
+        "name": "StatsmodelsOrdinalGEEAdapter",
+        "description": "statsmodels OrdinalGEE (ordered GEE)",
+        "hint_modules": ["statsmodels."],
+        "hint_names": ["OrdinalGEEResultsWrapper", "OrdinalGEE"],
+    },
+    {
+        "name": "StatsmodelsMixedLMAdapter",
+        "description": "statsmodels MixedLM (linear mixed effects)",
+        "hint_modules": ["statsmodels."],
+        "hint_names": ["MixedLMResultsWrapper", "MixedLM"],
+    },
+    {
         "name": "StatsmodelsPHRegAdapter",
         "description": "statsmodels PHReg (Cox proportional hazards)",
         "hint_modules": ["statsmodels."],
@@ -286,6 +310,34 @@ def _detect_adapter_class(model):
     ):
         from .statsmodels_phreg import StatsmodelsPHRegAdapter
         return StatsmodelsPHRegAdapter
+
+    # statsmodels GEE
+    if module.startswith("statsmodels.") and cls_name in (
+        "GEEResultsWrapper",
+    ):
+        from .statsmodels_gee import StatsmodelsGEEAdapter
+        return StatsmodelsGEEAdapter
+
+    # statsmodels NominalGEE
+    if module.startswith("statsmodels.") and cls_name in (
+        "NominalGEEResultsWrapper",
+    ):
+        from .statsmodels_nominal_gee import StatsmodelsNominalGEEAdapter
+        return StatsmodelsNominalGEEAdapter
+
+    # statsmodels OrdinalGEE
+    if module.startswith("statsmodels.") and cls_name in (
+        "OrdinalGEEResultsWrapper",
+    ):
+        from .statsmodels_ordinal_gee import StatsmodelsOrdinalGEEAdapter
+        return StatsmodelsOrdinalGEEAdapter
+
+    # statsmodels MixedLM
+    if module.startswith("statsmodels.") and cls_name in (
+        "MixedLMResultsWrapper",
+    ):
+        from .statsmodels_mixedlm import StatsmodelsMixedLMAdapter
+        return StatsmodelsMixedLMAdapter
 
     # lifelines CoxPHFitter
     if module.startswith("lifelines.") and cls_name in (
