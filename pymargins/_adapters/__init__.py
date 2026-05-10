@@ -80,6 +80,78 @@ _REGISTERED_ADAPTERS = [
         "hint_modules": ["statsmodels."],
         "hint_names": ["QuantRegResults", "QuantReg"],
     },
+    {
+        "name": "StatsmodelsPHRegAdapter",
+        "description": "statsmodels PHReg (Cox proportional hazards)",
+        "hint_modules": ["statsmodels."],
+        "hint_names": ["PHRegResults", "PHReg"],
+    },
+    {
+        "name": "LifelinesCoxPHAdapter",
+        "description": "lifelines CoxPHFitter (Cox proportional hazards)",
+        "hint_modules": ["lifelines."],
+        "hint_names": ["CoxPHFitter"],
+    },
+    {
+        "name": "LifelinesWeibullAFTAdapter",
+        "description": "lifelines WeibullAFTFitter (Weibull AFT)",
+        "hint_modules": ["lifelines."],
+        "hint_names": ["WeibullAFTFitter"],
+    },
+    {
+        "name": "LifelinesLogNormalAFTAdapter",
+        "description": "lifelines LogNormalAFTFitter (LogNormal AFT)",
+        "hint_modules": ["lifelines."],
+        "hint_names": ["LogNormalAFTFitter"],
+    },
+    {
+        "name": "LifelinesLogLogisticAFTAdapter",
+        "description": "lifelines LogLogisticAFTFitter (LogLogistic AFT)",
+        "hint_modules": ["lifelines."],
+        "hint_names": ["LogLogisticAFTFitter"],
+    },
+    {
+        "name": "LifelinesCoxPHSurvivalAdapter",
+        "description": "lifelines CoxPHFitter survival-probability scale (bootstrap-only)",
+        "hint_modules": ["lifelines."],
+        "hint_names": ["CoxPHFitter"],
+    },
+    {
+        "name": "StatsmodelsPHRegSurvivalAdapter",
+        "description": "statsmodels PHReg survival-probability scale (bootstrap-only)",
+        "hint_modules": ["statsmodels."],
+        "hint_names": ["PHRegResults", "PHReg"],
+    },
+    {
+        "name": "LifelinesGeneralizedGammaAdapter",
+        "description": "lifelines GeneralizedGammaRegressionFitter (bootstrap-only)",
+        "hint_modules": ["lifelines."],
+        "hint_names": ["GeneralizedGammaRegressionFitter"],
+    },
+    {
+        "name": "LifelinesPiecewiseExponentialAdapter",
+        "description": "lifelines PiecewiseExponentialRegressionFitter (bootstrap-only)",
+        "hint_modules": ["lifelines."],
+        "hint_names": ["PiecewiseExponentialRegressionFitter"],
+    },
+    {
+        "name": "LifelinesCRCSplineAdapter",
+        "description": "lifelines CRCSplineFitter (bootstrap-only)",
+        "hint_modules": ["lifelines."],
+        "hint_names": ["CRCSplineFitter"],
+    },
+    {
+        "name": "LifelinesCoxTimeVaryingAdapter",
+        "description": "lifelines CoxTimeVaryingFitter (partial hazard)",
+        "hint_modules": ["lifelines."],
+        "hint_names": ["CoxTimeVaryingFitter"],
+    },
+    {
+        "name": "LifelinesAalenAdditiveAdapter",
+        "description": "lifelines AalenAdditiveFitter (bootstrap-only)",
+        "hint_modules": ["lifelines."],
+        "hint_names": ["AalenAdditiveFitter"],
+    },
 ]
 
 
@@ -207,6 +279,81 @@ def _detect_adapter_class(model):
     ):
         from .statsmodels_quantreg import StatsmodelsQuantRegAdapter
         return StatsmodelsQuantRegAdapter
+
+    # statsmodels PHReg (Cox proportional hazards)
+    if module.startswith("statsmodels.") and cls_name in (
+        "PHRegResults",
+    ):
+        from .statsmodels_phreg import StatsmodelsPHRegAdapter
+        return StatsmodelsPHRegAdapter
+
+    # lifelines CoxPHFitter
+    if module.startswith("lifelines.") and cls_name in (
+        "CoxPHFitter",
+    ):
+        from .lifelines_coxph import LifelinesCoxPHAdapter
+        return LifelinesCoxPHAdapter
+
+    # lifelines WeibullAFTFitter
+    if module.startswith("lifelines.") and cls_name in (
+        "WeibullAFTFitter",
+    ):
+        from .lifelines_weibull_aft import LifelinesWeibullAFTAdapter
+        return LifelinesWeibullAFTAdapter
+
+    # lifelines LogNormalAFTFitter
+    if module.startswith("lifelines.") and cls_name in (
+        "LogNormalAFTFitter",
+    ):
+        from .lifelines_lognormal_aft import LifelinesLogNormalAFTAdapter
+        return LifelinesLogNormalAFTAdapter
+
+    # lifelines LogLogisticAFTFitter
+    if module.startswith("lifelines.") and cls_name in (
+        "LogLogisticAFTFitter",
+    ):
+        from .lifelines_loglogistic_aft import LifelinesLogLogisticAFTAdapter
+        return LifelinesLogLogisticAFTAdapter
+
+    # lifelines GeneralizedGammaRegressionFitter
+    if module.startswith("lifelines.") and cls_name in (
+        "GeneralizedGammaRegressionFitter",
+    ):
+        from .lifelines_generalized_gamma import LifelinesGeneralizedGammaAdapter
+        return LifelinesGeneralizedGammaAdapter
+
+    # lifelines PiecewiseExponentialRegressionFitter
+    if module.startswith("lifelines.") and cls_name in (
+        "PiecewiseExponentialRegressionFitter",
+    ):
+        from .lifelines_piecewise_exponential import LifelinesPiecewiseExponentialAdapter
+        return LifelinesPiecewiseExponentialAdapter
+
+    # lifelines CRCSplineFitter
+    if module.startswith("lifelines.") and cls_name in (
+        "CRCSplineFitter",
+    ):
+        from .lifelines_crc_spline import LifelinesCRCSplineAdapter
+        return LifelinesCRCSplineAdapter
+
+    # lifelines CoxTimeVaryingFitter
+    if module.startswith("lifelines.") and cls_name in (
+        "CoxTimeVaryingFitter",
+    ):
+        from .lifelines_coxtimevarying import LifelinesCoxTimeVaryingAdapter
+        return LifelinesCoxTimeVaryingAdapter
+
+    # lifelines AalenAdditiveFitter
+    if module.startswith("lifelines.") and cls_name in (
+        "AalenAdditiveFitter",
+    ):
+        from .lifelines_aalen_additive import LifelinesAalenAdditiveAdapter
+        return LifelinesAalenAdditiveAdapter
+
+    # Note: LifelinesCoxPHSurvivalAdapter and StatsmodelsPHRegSurvivalAdapter
+    # are NOT auto-detected because they share the same result class as their
+    # hazard-ratio counterparts. Users must construct them explicitly and pass
+    # via adapter=.
 
     # Fall through with a clear error that suggests the closest adapter
     suggestion = _suggest_adapters(cls_name, module)

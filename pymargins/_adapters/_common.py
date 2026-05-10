@@ -18,7 +18,7 @@ def extract_training_data(results, training_data: Optional[pd.DataFrame]) -> pd.
     """Resolve training data from explicit argument or model attribute."""
     if training_data is not None:
         return training_data
-    if hasattr(results.model, "data") and hasattr(results.model.data, "frame"):
+    if hasattr(results, "model") and hasattr(results.model, "data") and hasattr(results.model.data, "frame"):
         frame = results.model.data.frame
         if frame is not None:
             return frame
@@ -30,7 +30,7 @@ def extract_training_data(results, training_data: Optional[pd.DataFrame]) -> pd.
 
 def design_matrix_from_df(results, exog_names: list[str], df: pd.DataFrame) -> jnp.ndarray:
     """Build a design matrix from a DataFrame using the model's formula."""
-    if hasattr(results.model.data, "design_info"):
+    if hasattr(results, "model") and results.model is not None and hasattr(results.model.data, "design_info"):
         from patsy import dmatrix
         design_info = results.model.data.design_info
         X_np = np.asarray(dmatrix(design_info, df, return_type="matrix"))
