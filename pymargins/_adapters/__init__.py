@@ -192,6 +192,30 @@ _REGISTERED_ADAPTERS = [
         "hint_modules": ["lifelines."],
         "hint_names": ["AalenAdditiveFitter"],
     },
+    {
+        "name": "LinearmodelsPanelAdapter",
+        "description": "linearmodels panel models (PanelOLS, PooledOLS, RandomEffects, etc.)",
+        "hint_modules": ["linearmodels."],
+        "hint_names": [
+            "PanelEffectsResults",
+            "PanelResults",
+            "RandomEffectsResults",
+            "BetweenResults",
+            "FirstDifferenceResults",
+        ],
+    },
+    {
+        "name": "LinearmodelsIVAdapter",
+        "description": "linearmodels IV models (IV2SLS, IVGMM, IVLIML)",
+        "hint_modules": ["linearmodels."],
+        "hint_names": ["IVResults", "IVGMMResults", "IVLIMLResults"],
+    },
+    {
+        "name": "LinearmodelsAbsorbingAdapter",
+        "description": "linearmodels AbsorbingLS (high-dimensional fixed effects)",
+        "hint_modules": ["linearmodels."],
+        "hint_names": ["AbsorbingLSResults"],
+    },
 ]
 
 
@@ -506,6 +530,33 @@ def _detect_adapter_class(model):
     ):
         from .lifelines_aalen_additive import LifelinesAalenAdditiveAdapter
         return LifelinesAalenAdditiveAdapter
+
+    # linearmodels panel models
+    if module.startswith("linearmodels.") and cls_name in (
+        "PanelEffectsResults",
+        "PanelResults",
+        "RandomEffectsResults",
+        "BetweenResults",
+        "FirstDifferenceResults",
+    ):
+        from .linearmodels_panel import LinearmodelsPanelAdapter
+        return LinearmodelsPanelAdapter
+
+    # linearmodels IV models
+    if module.startswith("linearmodels.") and cls_name in (
+        "IVResults",
+        "IVGMMResults",
+        "IVLIMLResults",
+    ):
+        from .linearmodels_iv import LinearmodelsIVAdapter
+        return LinearmodelsIVAdapter
+
+    # linearmodels AbsorbingLS
+    if module.startswith("linearmodels.") and cls_name in (
+        "AbsorbingLSResults",
+    ):
+        from .linearmodels_absorbing import LinearmodelsAbsorbingAdapter
+        return LinearmodelsAbsorbingAdapter
 
     # Note: LifelinesCoxPHSurvivalAdapter and StatsmodelsPHRegSurvivalAdapter
     # are NOT auto-detected because they share the same result class as their
