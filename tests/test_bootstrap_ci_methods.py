@@ -194,16 +194,13 @@ def test_invalid_ci_method_raises(fit):
 # Log-scale sessions with alternative CIs
 # ---------------------------------------------------------------------------
 
-def test_basic_ci_with_log_scale(fit):
-    m = Margins.log_scale(
-        fit, method="bootstrap", n_boot=100, rng_seed=42,
-        bootstrap_config={"ci_method": "basic"},
-    )
-    res = m.predict(atexog={"x1": 1.0})
-    assert res.ci_method == "basic"
-    assert np.all(res.estimate > 0)
-    assert np.all(res.conf_int_lower > 0)
-    assert np.all(res.conf_int_lower < res.conf_int_upper)
+def test_basic_ci_with_log_scale_raises(fit):
+    with pytest.raises(ValueError, match="basic bootstrap"):
+        m = Margins.log_scale(
+            fit, method="bootstrap", n_boot=100, rng_seed=42,
+            bootstrap_config={"ci_method": "basic"},
+        )
+        m.predict(atexog={"x1": 1.0})
 
 
 def test_bca_ci_with_log_scale(fit):
@@ -217,12 +214,10 @@ def test_bca_ci_with_log_scale(fit):
     assert np.all(res.conf_int_lower > 0)
 
 
-def test_studentized_ci_with_log_scale(fit):
-    m = Margins.log_scale(
-        fit, method="bootstrap", n_boot=100, rng_seed=42,
-        bootstrap_config={"ci_method": "studentized"},
-    )
-    res = m.predict(atexog={"x1": 1.0})
-    assert res.ci_method == "studentized"
-    assert np.all(res.estimate > 0)
-    assert np.all(res.conf_int_lower > 0)
+def test_studentized_ci_with_log_scale_raises(fit):
+    with pytest.raises(ValueError, match="studentized bootstrap"):
+        m = Margins.log_scale(
+            fit, method="bootstrap", n_boot=100, rng_seed=42,
+            bootstrap_config={"ci_method": "studentized"},
+        )
+        m.predict(atexog={"x1": 1.0})

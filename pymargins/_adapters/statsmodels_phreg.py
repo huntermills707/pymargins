@@ -145,7 +145,12 @@ class StatsmodelsPHRegAdapter(ModelAdapter):
         exog_df = resampled_data[exog_cols]
         status = resampled_data[status_name].values
 
-        new_results = PHReg(endog, exog_df, status=status).fit()
+        kwargs = {"status": status}
+        if index is not None:
+            entry = getattr(self.results.model, "entry", None)
+            if entry is not None:
+                kwargs["entry"] = np.asarray(entry)[index]
+        new_results = PHReg(endog, exog_df, **kwargs).fit()
         return StatsmodelsPHRegAdapter(new_results, training_data=resampled_data)
 
     def _find_survival_columns(self, df: pd.DataFrame) -> tuple[str, str]:

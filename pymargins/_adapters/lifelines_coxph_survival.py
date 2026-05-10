@@ -138,18 +138,27 @@ class LifelinesCoxPHSurvivalAdapter(WrappedFDAdapter):
         return S0_t ** ph
 
     def _baseline_survival_at(self, t: float) -> float:
-        """Interpolate baseline survival to time t."""
+        """Look up baseline survival at time t.
+
+        The baseline survival is a step function (piecewise constant).
+        We return the survival value at the most recent observed event time
+        <= t, which is the correct behavior for a Kaplan-Meier-style estimate.
+        """
         S0_df = self.results.baseline_survival_
         if S0_df is None or S0_df.empty:
             raise ValueError("Baseline survival function not available on the fitted model.")
         col = S0_df.columns[0]
         times = S0_df.index.values
         surv = S0_df[col].values
-        # np.interp requires x-coordinates to be increasing
+        # Ensure increasing order
         if times[0] > times[-1]:
             times = times[::-1]
             surv = surv[::-1]
-        return float(np.interp(t, times, surv))
+        # Step function: find rightmost time <= t
+        idx = np.searchsorted(times, t, side="right") - 1
+        if idx < 0:
+            return float(surv[0])
+        return float(surv[idx])
 
     # -----------------------------------------------------------------------
     # Design matrix construction

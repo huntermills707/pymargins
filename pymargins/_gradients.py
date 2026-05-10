@@ -434,8 +434,8 @@ def _jax_link_inverse_deriv(link):
     name = type(link).__name__
     if name == "Logit":
         def deriv(z):
-            t = jnp.exp(-z)
-            return t / (1.0 + t) ** 2
+            s = jax.nn.sigmoid(z)
+            return s * (1.0 - s)
         return deriv
     if name == "Probit":
         c = 1.0 / jnp.sqrt(2.0 * jnp.pi)
@@ -555,8 +555,8 @@ def make_glm_jvp_wrapper(
 def _gradient_autodiff(h, beta):
     """Use JAX autodiff to compute the gradient. Dispatches to grad or
     jacobian depending on output rank."""
-    out = h(beta)
-    if jnp.ndim(out) == 0:
+    shape = jax.eval_shape(h, beta)
+    if shape.shape == ():
         return jax.grad(h)(beta)
     else:
         return jax.jacobian(h)(beta)
@@ -567,6 +567,9 @@ def _gradient_fd(h, beta, eps):
     parameters this requires 2 * n_params evaluations of h."""
     beta = jnp.asarray(beta)
     n = beta.shape[0]
+    # Adjust step to dtype epsilon to avoid catastrophic cancellation in float32
+    dtype_eps = float(jnp.finfo(beta.dtype).eps) ** 0.5
+    eps = max(float(eps), dtype_eps)
     f0 = h(beta)
     is_scalar = jnp.ndim(f0) == 0
 
@@ -598,6 +601,9 @@ def _hessian_fd(h, beta, eps):
     """
     beta = jnp.asarray(beta)
     n = beta.shape[0]
+    # Adjust step to dtype epsilon to avoid catastrophic cancellation in float32
+    dtype_eps = float(jnp.finfo(beta.dtype).eps) ** 0.5
+    eps = max(float(eps), dtype_eps)
     f0 = h(beta)
     if jnp.ndim(f0) != 0:
         raise ValueError(

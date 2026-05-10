@@ -157,6 +157,7 @@ class LifelinesCoxPHAdapter(ModelAdapter):
         if self._formula is not None:
             kwargs["formula"] = self._formula
 
+        df = resampled_data.reset_index(drop=True)
         new_cph = CoxPHFitter()
-        new_cph.fit(resampled_data, **kwargs)
-        return LifelinesCoxPHAdapter(new_cph, training_data=resampled_data)
+        new_cph.fit(df, **kwargs)
+        return LifelinesCoxPHAdapter(new_cph, training_data=df)

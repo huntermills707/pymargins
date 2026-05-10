@@ -804,6 +804,7 @@ class Margins:
                     new_labels.append(f"{lab} ({suffix})")
             meta = dict(meta)
             meta["labels"] = new_labels
+            meta["outcome_sliced"] = True
             result["estimand_metadata"] = meta
 
         return result
@@ -1002,7 +1003,7 @@ class Margins:
 
         # Expand labels with outcome suffixes for multi-outcome models
         meta = dict(result_data.get("estimand_metadata", {}))
-        if self.adapter.n_outcomes > 1:
+        if self.adapter.n_outcomes > 1 and not meta.get("outcome_sliced"):
             old_labels = meta.get("labels")
             outcome_labels = self.adapter.outcome_labels or [
                 str(i) for i in range(self.adapter.n_outcomes)

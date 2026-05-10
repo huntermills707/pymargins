@@ -142,7 +142,12 @@ class LifelinesCoxTimeVaryingSurvivalAdapter(WrappedFDAdapter):
         return S0_t ** ph
 
     def _baseline_survival_at(self, t: float) -> float:
-        """Interpolate baseline survival to time t."""
+        """Look up baseline survival at time t.
+
+        The baseline survival is a step function (piecewise constant).
+        We return the survival value at the most recent observed event time
+        <= t, which is the correct behavior for a Kaplan-Meier-style estimate.
+        """
         S0_df = self.results.baseline_survival_
         if S0_df is None or S0_df.empty:
             raise ValueError("Baseline survival function not available on the fitted model.")
@@ -152,7 +157,11 @@ class LifelinesCoxTimeVaryingSurvivalAdapter(WrappedFDAdapter):
         if times[0] > times[-1]:
             times = times[::-1]
             surv = surv[::-1]
-        return float(np.interp(t, times, surv))
+        # Step function: find rightmost time <= t
+        idx = np.searchsorted(times, t, side="right") - 1
+        if idx < 0:
+            return float(surv[0])
+        return float(surv[idx])
 
     # -----------------------------------------------------------------------
     # Design matrix construction
@@ -195,7 +204,10 @@ class LifelinesCoxTimeVaryingSurvivalAdapter(WrappedFDAdapter):
         # Remove None values
         kwargs = {k: v for k, v in kwargs.items() if v is not None}
 
-        new_fitter = CoxTimeVaryingFitter(penalizer=0.1)
+        ctor_kwargs = {}
+        if hasattr(self.results, "penalizer") and self.results.penalizer is not None:
+            ctor_kwargs["penalizer"] = self.results.penalizer
+        new_fitter = CoxTimeVaryingFitter(**ctor_kwargs)
         new_fitter.fit(df, **kwargs)
         return LifelinesCoxTimeVaryingSurvivalAdapter(
             new_fitter,

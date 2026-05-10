@@ -214,9 +214,13 @@ class StatsmodelsOLSAdapter(LinearPredictionAdapter):
         model_cls_name = type(self.results.model).__name__
         if model_cls_name == "WLS":
             weights = getattr(self.results.model, "weights", None)
+            if weights is not None and index is not None:
+                weights = np.asarray(weights)[index]
             new_results = sm.WLS(endog, exog_df, weights=weights).fit()
         elif model_cls_name == "GLS":
             sigma = getattr(self.results.model, "sigma", None)
+            if sigma is not None and index is not None:
+                sigma = np.asarray(sigma)[np.ix_(index, index)]
             new_results = sm.GLS(endog, exog_df, sigma=sigma).fit()
         else:
             new_results = sm.OLS(endog, exog_df).fit()

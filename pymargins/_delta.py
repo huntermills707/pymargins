@@ -291,9 +291,10 @@ def delta_wald_test(
     # a deterministic function of beta at this point (e.g., a prediction at
     # the exact fitted value). The z-statistic is +inf if estimate > null,
     # -inf if estimate < null, and 0 if they are equal.
+    eps = jnp.finfo(se.dtype).eps ** 0.5
     z = jnp.where(
-        se < 1e-15,
-        jnp.where(estimate == null_value, 0.0, jnp.sign(estimate - null_value) * jnp.inf),
+        se < eps,
+        jnp.where(jnp.isclose(estimate, null_value, atol=eps), 0.0, jnp.sign(estimate - null_value) * jnp.inf),
         (estimate - null_value) / se,
     )
 
@@ -356,8 +357,11 @@ def joint_wald_test(
     # Solve rather than invert for numerical stability.
     # If Sigma_g is singular (e.g., perfectly collinear estimands),
     # add a tiny ridge and retry once.
-    solved = jnp.linalg.solve(Sigma_g, diff)
-    chi2 = float(diff @ solved)
+    try:
+        solved = jnp.linalg.solve(Sigma_g, diff)
+        chi2 = float(diff @ solved)
+    except Exception:
+        chi2 = float('nan')
     regularized = False
     if not np.isfinite(chi2):
         ridge = 1e-12 * float(jnp.trace(Sigma_g)) / Sigma_g.shape[0]

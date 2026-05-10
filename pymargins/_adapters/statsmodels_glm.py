@@ -251,6 +251,12 @@ class StatsmodelsGLMAdapter(GLMAdapter):
             if "const" not in exog_df.columns and "Intercept" not in exog_df.columns:
                 exog_df = exog_df.copy()
                 exog_df.insert(0, "const", 1.0)
+        # Resample offset/exposure/weights if index provided
+        if index is not None:
+            for attr in ("offset", "exposure", "freq_weights", "var_weights"):
+                arr = getattr(self.results.model, attr, None)
+                if arr is not None:
+                    fit_kwargs[attr] = np.asarray(arr)[index]
         new_results = sm.GLM(endog, exog_df, family=self.family).fit(**fit_kwargs)
         return StatsmodelsGLMAdapter(new_results, training_data=resampled_data)
 

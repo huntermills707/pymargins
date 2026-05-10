@@ -606,14 +606,14 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
                     for s in start_positions
                 ])
             else:  # nonoverlapping
-                n_blocks = n_obs // block_size
+                n_blocks = int(np.ceil(n_obs / block_size))
                 if n_blocks == 0:
                     raise ValueError(
                         f"block_size ({block_size}) too large for n_obs ({n_obs})."
                     )
                 sampled_blocks = rng.integers(0, n_blocks, size=n_blocks)
                 idx = np.concatenate([
-                    np.arange(bi * block_size, (bi + 1) * block_size)
+                    np.arange(bi * block_size, (bi + 1) * block_size) % n_obs
                     for bi in sampled_blocks
                 ])
         else:
@@ -732,13 +732,15 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
         upper = np.quantile(h_draws, 1.0 - alpha, axis=0)
 
     elif ci_method == "basic":
-        lower_inf = 2 * np.asarray(estimate) - np.quantile(h_draws_inf, 1.0 - alpha, axis=0)
-        upper_inf = 2 * np.asarray(estimate) - np.quantile(h_draws_inf, alpha, axis=0)
         if config.phi is not None:
-            lower = np.asarray(config.phi(lower_inf))
-            upper = np.asarray(config.phi(upper_inf))
-        else:
-            lower, upper = lower_inf, upper_inf
+            raise ValueError(
+                "basic bootstrap CI method is not supported with non-identity "
+                "phi transforms because the basic bootstrap formula is not "
+                "equivariant under non-linear transforms. Use ci_method='percentile' "
+                "or 'bca' instead."
+            )
+        lower = 2 * np.asarray(estimate) - np.quantile(h_draws_inf, 1.0 - alpha, axis=0)
+        upper = 2 * np.asarray(estimate) - np.quantile(h_draws_inf, alpha, axis=0)
 
     elif ci_method == "bca":
         bca_z0, bca_a = _compute_bca_params(
@@ -750,6 +752,13 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
         )
 
     elif ci_method == "studentized":
+        if config.phi is not None:
+            raise ValueError(
+                "studentized bootstrap CI method is not supported with non-identity "
+                "phi transforms because the studentized bootstrap formula is not "
+                "equivariant under non-linear transforms. Use ci_method='percentile' "
+                "or 'bca' instead."
+            )
         valid = [i for i, s in enumerate(se_draws) if s is not None]
         if len(valid) == 0:
             raise RuntimeError(
@@ -778,13 +787,8 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
 
         t_lower = np.quantile(studentized_t, alpha, axis=0)
         t_upper = np.quantile(studentized_t, 1.0 - alpha, axis=0)
-        lower_inf = np.asarray(estimate) - t_upper * se_hat
-        upper_inf = np.asarray(estimate) - t_lower * se_hat
-        if config.phi is not None:
-            lower = np.asarray(config.phi(lower_inf))
-            upper = np.asarray(config.phi(upper_inf))
-        else:
-            lower, upper = lower_inf, upper_inf
+        lower = np.asarray(estimate) - t_upper * se_hat
+        upper = np.asarray(estimate) - t_lower * se_hat
 
     se = np.std(h_draws_inf, axis=0, ddof=1)
 
@@ -904,7 +908,7 @@ def run_test(
             # Correct for asymmetric simulation distributions.
             p_left = np.mean(draws <= null_value, axis=0)
             p_right = np.mean(draws >= null_value, axis=0)
-            p = np.clip(2.0 * np.minimum(p_left, p_right), a_min=None, a_max=1.0)
+            p = np.clip(2.0 * np.minimum(p_left, p_right), min=None, max=1.0)
         elif alternative == "greater":
             # H1: effect > null. Under H0, draws are centered at estimate;
             # the null lies to the left. Small p when null is in the lower

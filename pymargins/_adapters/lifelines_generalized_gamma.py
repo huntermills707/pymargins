@@ -124,29 +124,27 @@ class LifelinesGeneralizedGammaAdapter(WrappedFDAdapter):
     def native_predict(self, beta_np: np.ndarray, X) -> np.ndarray:
         """Compute survival probability at prediction_time.
 
-        Uses lifelines' predict_survival_function. We temporarily override
-        the fitted parameters to evaluate at beta_np.
+        Uses lifelines' predict_survival_function. We create a shallow copy
+        of the fitter and override its parameters to evaluate at beta_np,
+        avoiding mutation of the original fitter (which is not thread-safe).
         """
         X_np = np.asarray(X)
         n_obs = X_np.shape[0]
         t = self._prediction_time
 
         # lifelines predict_survival_function uses the stored params.
-        # We need to evaluate at beta_np. Unfortunately lifelines doesn't
-        # expose a predict with custom params, so we temporarily swap.
-        original_params = self.results.params_.copy()
-        try:
-            # Assign the new params
-            self.results.params_ = pd.Series(
-                beta_np,
-                index=original_params.index,
-            )
-            # Build a DataFrame with the required columns
-            df_pred = pd.DataFrame(X_np, columns=self._exog_names)
-            S = self.results.predict_survival_function(df_pred, times=[t])
-            return S.values.flatten()
-        finally:
-            self.results.params_ = original_params
+        # We need to evaluate at beta_np. Create a shallow copy to avoid
+        # mutating the original fitter (critical for thread-safe bootstrap).
+        from copy import copy
+        fitter_copy = copy(self.results)
+        fitter_copy.params_ = pd.Series(
+            beta_np,
+            index=self.results.params_.index,
+        )
+        # Build a DataFrame with the required columns
+        df_pred = pd.DataFrame(X_np, columns=self._exog_names)
+        S = fitter_copy.predict_survival_function(df_pred, times=[t])
+        return S.values.flatten()
 
     # -----------------------------------------------------------------------
     # Design matrix construction

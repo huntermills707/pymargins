@@ -779,7 +779,10 @@ class MarginsResult:
 
         # Get inference-scale estimate and draws
         est_inf = self.phi_inv(self.estimate) if self.phi_inv is not None else self.estimate
-        draws_inf = self.phi_inv(self.draws) if self.phi_inv is not None and self.draws is not None else self.draws
+        draws_inf = (
+            self.draws_inf if self.draws_inf is not None else
+            (self.phi_inv(self.draws) if self.phi_inv is not None and self.draws is not None else self.draws)
+        )
 
         if self.gradient is not None and self.cov_params is None:
             raise ValueError(
@@ -979,10 +982,13 @@ class MarginsResult:
             gradient=(self.gradient * scalar
                       if self.gradient is not None else None),
             draws=new_draws,
+            draws_inf=(self.draws_inf * scalar if self.draws_inf is not None else None),
             cov_params=self.cov_params,
             phi=self.phi,
             phi_inv=self.phi_inv,
             session=self.session,
+            ci_method=self.ci_method,
+            bootstrap_extras=self.bootstrap_extras,
         )
 
     def __truediv__(self, other) -> "MarginsResult":
@@ -1133,10 +1139,13 @@ class MarginsResult:
             estimand_metadata=new_meta,
             gradient=_slice(self.gradient),
             draws=_slice(self.draws),
+            draws_inf=_slice(self.draws_inf),
             cov_params=self.cov_params,
             phi=self.phi,
             phi_inv=self.phi_inv,
             session=self.session,
+            ci_method=self.ci_method,
+            bootstrap_extras=self.bootstrap_extras,
         )
 
     def materialize(self) -> "MarginsResult":
