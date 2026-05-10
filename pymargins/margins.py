@@ -138,6 +138,11 @@ class Margins:
     n_boot : int, default 1000
         Number of bootstrap replicates for bootstrap inference.
 
+    n_jobs : int, default 1
+        Number of parallel workers for bootstrap refits. ``-1`` uses all
+        available cores. Uses thread-based parallelization with BLAS threads
+        limited to 1 per worker to prevent oversubscription.
+
     gradient_backend : str, default "auto"
         Gradient method. "auto" uses the adapter's recommendation. Manual
         choices: "autodiff", "fd", "wrapped_fd".
@@ -195,6 +200,7 @@ class Margins:
         rng_seed: Optional[int] = _NOT_GIVEN,
         n_sim: int = _NOT_GIVEN,
         n_boot: int = _NOT_GIVEN,
+        n_jobs: int = _NOT_GIVEN,
         gradient_backend: GradientBackend = _NOT_GIVEN,
         fd_step: float = _NOT_GIVEN,
         diagnostics: bool = _NOT_GIVEN,
@@ -211,9 +217,10 @@ class Margins:
                 ("weights", weights), ("at", at), ("level", level),
                 ("method", method), ("kappa_threshold", kappa_threshold),
                 ("rng_seed", rng_seed), ("n_sim", n_sim), ("n_boot", n_boot),
-                ("gradient_backend", gradient_backend), ("fd_step", fd_step),
-                ("diagnostics", diagnostics), ("cluster", cluster),
-                ("block_size", block_size), ("bootstrap_config", bootstrap_config),
+                ("n_jobs", n_jobs), ("gradient_backend", gradient_backend),
+                ("fd_step", fd_step), ("diagnostics", diagnostics),
+                ("cluster", cluster), ("block_size", block_size),
+                ("bootstrap_config", bootstrap_config),
             ]:
                 if value is _NOT_GIVEN:
                     raise ValueError(
@@ -237,6 +244,7 @@ class Margins:
         rng_seed = None if rng_seed is _NOT_GIVEN else rng_seed
         n_sim = 4000 if n_sim is _NOT_GIVEN else n_sim
         n_boot = 1000 if n_boot is _NOT_GIVEN else n_boot
+        n_jobs = 1 if n_jobs is _NOT_GIVEN else n_jobs
         gradient_backend = "auto" if gradient_backend is _NOT_GIVEN else gradient_backend
         fd_step = 1e-6 if fd_step is _NOT_GIVEN else fd_step
         diagnostics = True if diagnostics is _NOT_GIVEN else diagnostics
@@ -262,6 +270,7 @@ class Margins:
         self.rng_seed = rng_seed
         self.n_sim = n_sim
         self.n_boot = n_boot
+        self.n_jobs = n_jobs
         self.fd_step = fd_step
         self.diagnostics = diagnostics
         self.cluster = cluster
@@ -883,6 +892,7 @@ class Margins:
         Margins instance.
         """
         scale_name = self._scale_label()
+        jobs_str = f"n_jobs={self.n_jobs}" if self.method == "bootstrap" else ""
         return (
             f"Margins session\n"
             f"  Model: {type(self.model).__name__}\n"
@@ -893,7 +903,7 @@ class Margins:
             f"  At: {self.at}\n"
             f"  Method: {self.method} (κ-threshold={self.kappa_threshold})\n"
             f"  n_sim: {self.n_sim}\n"
-            f"  n_boot: {self.n_boot}\n"
+            f"  n_boot: {self.n_boot} {jobs_str}\n"
             f"  Gradient backend: {self.gradient_backend}\n"
             f"  Diagnostics: {'enabled' if self.diagnostics else 'disabled'}\n"
             f"  Strict: {self.strict}"
@@ -956,6 +966,7 @@ class Margins:
             fd_step=self.fd_step,
             n_sim=self.n_sim,
             n_boot=self.n_boot,
+            n_jobs=self.n_jobs,
             rng_seed=self.rng_seed,
             diagnostics=self.diagnostics,
             cov_params=self._frozen_cov(),
@@ -1020,10 +1031,13 @@ class Margins:
             estimand_metadata=meta,
             gradient=result_data.get("gradient"),
             draws=result_data.get("draws"),
+            draws_inf=result_data.get("draws_inf"),
             cov_params=np.asarray(self._frozen_cov()),
             phi=self.phi,
             phi_inv=self.phi_inv,
             session=weakref.ref(self),
+            ci_method=result_data.get("ci_method"),
+            bootstrap_extras=result_data.get("bootstrap_extras"),
         )
 
     def _build_prediction_estimand(

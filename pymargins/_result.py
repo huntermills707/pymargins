@@ -213,9 +213,13 @@ class MarginsResult:
         used for inter-call composition.
 
     draws : array, optional
-        Estimand evaluations at simulated/bootstrapped β. Present for
-        simulation/bootstrap results; used for inter-call composition with
-        other simulation/bootstrap results.
+        Estimand evaluations at simulated/bootstrapped β on the reporting
+        scale (after ``phi``). Present for simulation/bootstrap results.
+
+    draws_inf : array, optional
+        Estimand evaluations on the inference scale (before ``phi``).
+        Present for simulation/bootstrap results; used for recomputing CIs
+        with alternative bootstrap methods.
 
     cov_params : array, optional
         Σ̂ frozen at the time the result was produced. Used by hypothesis
@@ -237,6 +241,14 @@ class MarginsResult:
         (same-session check). Σ̂ is read from ``cov_params`` rather than
         re-fetched from ``session.adapter`` to make results robust to model
         mutation and to make ``materialize()`` semantically clean.
+
+    ci_method : str, optional
+        CI method used for bootstrap results: "percentile", "basic",
+        "bca", or "studentized".
+
+    bootstrap_extras : dict, optional
+        Method-specific data for recomputing CIs (e.g., BCa z0/a,
+        studentized t-star draws).
     """
     estimate: np.ndarray
     std_error: np.ndarray
@@ -252,10 +264,13 @@ class MarginsResult:
     estimand_metadata: dict = field(default_factory=dict)
     gradient: Optional[np.ndarray] = None
     draws: Optional[np.ndarray] = None
+    draws_inf: Optional[np.ndarray] = None
     cov_params: Optional[np.ndarray] = None
     phi: Optional[Callable] = None
     phi_inv: Optional[Callable] = None
     session: Optional[Any] = None
+    ci_method: Optional[str] = None
+    bootstrap_extras: Optional[dict] = None
 
     # -----------------------------------------------------------------------
     # Reporting
@@ -652,6 +667,46 @@ class MarginsResult:
                 est_inf, self.std_error, level=level, phi=self.phi,
             )
             return np.asarray(lower), np.asarray(upper)
+        elif self.draws_inf is not None:
+            alpha = (1.0 - level) / 2.0
+            est_inf = self.phi_inv(self.estimate) if self.phi_inv is not None else self.estimate
+
+            if self.ci_method == "basic":
+                lower_inf = 2 * np.asarray(est_inf) - np.quantile(self.draws_inf, 1.0 - alpha, axis=0)
+                upper_inf = 2 * np.asarray(est_inf) - np.quantile(self.draws_inf, alpha, axis=0)
+                if self.phi is not None:
+                    return np.asarray(self.phi(lower_inf)), np.asarray(self.phi(upper_inf))
+                return lower_inf, upper_inf
+
+            elif self.ci_method == "bca" and self.bootstrap_extras is not None:
+                z0 = self.bootstrap_extras.get("z0")
+                a = self.bootstrap_extras.get("a")
+                if z0 is not None:
+                    from ._inference import _bca_confint
+                    lower, upper = _bca_confint(
+                        self.draws_inf, est_inf, level, z0, a, self.phi,
+                    )
+                    return np.asarray(lower), np.asarray(upper)
+
+            elif self.ci_method == "studentized" and self.bootstrap_extras is not None:
+                t_stats = self.bootstrap_extras.get("t_star")
+                se_hat = self.bootstrap_extras.get("se_hat")
+                if t_stats is not None and se_hat is not None:
+                    t_lower = np.quantile(t_stats, alpha, axis=0)
+                    t_upper = np.quantile(t_stats, 1.0 - alpha, axis=0)
+                    lower_inf = np.asarray(est_inf) - t_upper * se_hat
+                    upper_inf = np.asarray(est_inf) - t_lower * se_hat
+                    if self.phi is not None:
+                        return np.asarray(self.phi(lower_inf)), np.asarray(self.phi(upper_inf))
+                    return lower_inf, upper_inf
+
+            # Default to percentile
+            lower = np.quantile(self.draws_inf, alpha, axis=0)
+            upper = np.quantile(self.draws_inf, 1.0 - alpha, axis=0)
+            if self.phi is not None:
+                return np.asarray(self.phi(lower)), np.asarray(self.phi(upper))
+            return lower, upper
+
         elif self.draws is not None:
             alpha = (1.0 - level) / 2.0
             lower = np.quantile(self.draws, alpha, axis=0)

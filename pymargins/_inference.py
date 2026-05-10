@@ -15,11 +15,14 @@ from __future__ import annotations
 from typing import Callable, Optional, Literal, Any
 from dataclasses import dataclass
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
+from scipy import stats
+import threadpoolctl
 
 from ._gradients import gradient, GradientBackend
 from ._delta import (
@@ -95,9 +98,17 @@ class InferenceConfig:
         contiguous blocks with replacement instead of individual rows.
         Mutually exclusive with ``cluster``.
 
+    n_jobs : int, default 1
+        Number of parallel workers for bootstrap refits. ``n_jobs=-1`` uses
+        all available cores. Parallelization is thread-based; BLAS threads
+        are capped to 1 per worker via ``threadpoolctl`` to prevent
+        oversubscription.
+
     bootstrap_config : dict, optional
         Advanced bootstrap options. Supported keys:
           - "block_type": "moving" (default), "nonoverlapping", or "circular"
+          - "ci_method": "percentile" (default), "basic", "bca", "studentized"
+          - "acceleration": float or array, BCa acceleration parameter (a)
     """
     method: InferenceMethod = "delta"
     level: float = 0.95
@@ -108,6 +119,7 @@ class InferenceConfig:
     fd_step: float = 1e-6
     n_sim: int = 4000
     n_boot: int = 1000
+    n_jobs: int = 1
     rng_seed: Optional[int] = None
     diagnostics: bool = True
     cov_params: Optional[jnp.ndarray] = None
@@ -278,7 +290,10 @@ def _run_delta(h, adapter, config, estimand_metadata):
         "fallback_reason": None,
         "gradient": np.asarray(grad),
         "draws": None,
+        "draws_inf": None,
         "estimand_metadata": estimand_metadata or {},
+        "ci_method": None,
+        "bootstrap_extras": None,
     }
 
 
@@ -361,8 +376,127 @@ def _run_simulation(h, adapter, config, estimand_metadata, *, fallback_reason=No
         "fallback_reason": fallback_reason,
         "gradient": None,
         "draws": h_draws,
+        "draws_inf": h_draws_inf,
         "estimand_metadata": estimand_metadata or {},
+        "ci_method": None,
+        "bootstrap_extras": None,
     }
+
+
+# ---------------------------------------------------------------------------
+# BCa helpers
+# ---------------------------------------------------------------------------
+
+def _compute_acceleration_jackknife(adapter, h_factory, data, cluster_ids, block_size):
+    """Compute BCa acceleration via leave-one-out jackknife.
+
+    Returns None when jackknife is deemed too expensive (n_obs or n_clusters
+    > 200) or for block bootstrap where leave-one-out is not well-defined.
+    """
+    n_obs = len(data)
+    if cluster_ids is not None:
+        unique_clusters = np.unique(cluster_ids)
+        n_units = len(unique_clusters)
+        if n_units > 200:
+            return None
+        theta_minus = []
+        for c in unique_clusters:
+            mask = cluster_ids != c
+            if hasattr(data, "iloc"):
+                resampled = data.iloc[mask]
+            else:
+                resampled = data[mask]
+            new_adapter = adapter.refit(resampled, index=np.where(mask)[0])
+            h_b = h_factory(new_adapter)
+            theta_minus.append(np.asarray(h_b(new_adapter.coefficients())))
+    elif block_size is not None:
+        return None
+    else:
+        if n_obs > 200:
+            return None
+        theta_minus = []
+        for i in range(n_obs):
+            mask = np.ones(n_obs, dtype=bool)
+            mask[i] = False
+            if hasattr(data, "iloc"):
+                resampled = data.iloc[mask]
+            else:
+                resampled = data[mask]
+            new_adapter = adapter.refit(resampled, index=np.where(mask)[0])
+            h_b = h_factory(new_adapter)
+            theta_minus.append(np.asarray(h_b(new_adapter.coefficients())))
+
+    theta_minus = np.stack(theta_minus, axis=0)  # shape (n_units, n_components)
+    theta_mean = np.mean(theta_minus, axis=0)
+    diffs = theta_mean - theta_minus  # shape (n_units, n_components)
+    num = np.sum(diffs ** 3, axis=0)
+    den = np.sum(diffs ** 2, axis=0)
+    a = np.where(den > 0, num / (6.0 * den ** 1.5), 0.0)
+    return a
+
+
+def _compute_bca_params(h_draws_inf, estimate, adapter, h_factory, data,
+                        cluster_ids, block_size, bootstrap_config):
+    """Compute BCa bias correction (z0) and acceleration (a)."""
+    prop = np.mean(h_draws_inf < np.asarray(estimate), axis=0)
+    prop = np.clip(prop, 1e-10, 1 - 1e-10)
+    z0 = stats.norm.ppf(prop)
+
+    a = None
+    if bootstrap_config is not None and "acceleration" in bootstrap_config:
+        a = np.asarray(bootstrap_config["acceleration"])
+    else:
+        a = _compute_acceleration_jackknife(
+            adapter, h_factory, data, cluster_ids, block_size,
+        )
+        if a is None:
+            warnings.warn(
+                "BCa acceleration could not be computed automatically "
+                "(jackknife is too expensive for this data size). "
+                "Using a=0 (BC, bias-corrected only). Pass "
+                "bootstrap_config={'acceleration': value} to supply a "
+                "custom acceleration.",
+                UserWarning, stacklevel=4,
+            )
+    return z0, a
+
+
+def _bca_confint(h_draws_inf, estimate, level, z0, a, phi):
+    """Compute BCa confidence interval."""
+    alpha = (1.0 - level) / 2.0
+    z_alpha = stats.norm.ppf(alpha)
+    z_1_alpha = stats.norm.ppf(1.0 - alpha)
+    estimate_arr = np.asarray(estimate)
+
+    if a is not None:
+        a_arr = np.asarray(a)
+        a1 = z0 + z_alpha
+        a2 = z0 + z_1_alpha
+        denom1 = 1 - a_arr * a1
+        denom2 = 1 - a_arr * a2
+        b1 = np.where(
+            denom1 > 0,
+            stats.norm.cdf(z0 + a1 / denom1),
+            stats.norm.cdf(2 * z0 + z_alpha),
+        )
+        b2 = np.where(
+            denom2 > 0,
+            stats.norm.cdf(z0 + a2 / denom2),
+            stats.norm.cdf(2 * z0 + z_1_alpha),
+        )
+    else:
+        b1 = stats.norm.cdf(2 * z0 + z_alpha)
+        b2 = stats.norm.cdf(2 * z0 + z_1_alpha)
+
+    lower_inf = np.quantile(h_draws_inf, b1, axis=0)
+    upper_inf = np.quantile(h_draws_inf, b2, axis=0)
+
+    if phi is not None:
+        lower = np.asarray(phi(lower_inf))
+        upper = np.asarray(phi(upper_inf))
+    else:
+        lower, upper = lower_inf, upper_inf
+    return lower, upper
 
 
 # ---------------------------------------------------------------------------
@@ -379,8 +513,10 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
     via ``h_factory(new_adapter)``, and the estimand is evaluated at the new
     coefficients.
 
-    Bootstrap is the heaviest inference method; expect O(n_boot) refits,
-    which can take minutes for nontrivial models.
+    Supports parallel execution via ``config.n_jobs`` (thread-based, with
+    BLAS threads limited to 1 per worker to avoid oversubscription).
+    Supports alternative CI methods: percentile (default), basic, bca,
+    and studentized.
     """
     if h_factory is None:
         raise ValueError(
@@ -404,6 +540,12 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
     block_size = config.block_size
     bootstrap_config = config.bootstrap_config or {}
     block_type = bootstrap_config.get("block_type", "moving")
+    ci_method = bootstrap_config.get("ci_method", "percentile")
+    if ci_method not in ("percentile", "basic", "bca", "studentized"):
+        raise ValueError(
+            f"Unsupported bootstrap ci_method: {ci_method!r}. "
+            f"Supported: 'percentile', 'basic', 'bca', 'studentized'."
+        )
 
     if cluster_ids is not None and block_size is not None:
         raise ValueError(
@@ -439,37 +581,31 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
             )
 
     rng = np.random.default_rng(config.rng_seed)
-    h_draws_inf = []
 
-    n_failures = 0
-    max_failures = max(1, int(0.1 * config.n_boot))  # 10% tolerance
-    for b in range(config.n_boot):
+    # Pre-generate all resampling indices
+    all_idx = []
+    for _ in range(config.n_boot):
         if cluster_ids is not None:
-            # Cluster bootstrap: sample clusters with replacement
             sampled_clusters = rng.choice(unique_clusters, size=n_clusters, replace=True)
             idx = np.concatenate([
                 np.where(cluster_ids == c)[0]
                 for c in sampled_clusters
             ])
         elif block_size is not None:
-            # Block bootstrap
             k = int(np.ceil(n_obs / block_size))
             if block_type == "moving":
-                # Moving Block Bootstrap (MBB): n - b + 1 possible starting positions
                 start_positions = rng.integers(0, n_obs - block_size + 1, size=k)
                 idx = np.concatenate([
                     np.arange(s, s + block_size)
                     for s in start_positions
                 ])
             elif block_type == "circular":
-                # Circular Block Bootstrap (CBB): wrap around using modulo
                 start_positions = rng.integers(0, n_obs, size=k)
                 idx = np.concatenate([
                     np.arange(s, s + block_size) % n_obs
                     for s in start_positions
                 ])
             else:  # nonoverlapping
-                # Non-overlapping Block Bootstrap (NBB): fixed divisions
                 n_blocks = n_obs // block_size
                 if n_blocks == 0:
                     raise ValueError(
@@ -481,24 +617,77 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
                     for bi in sampled_blocks
                 ])
         else:
-            # i.i.d. bootstrap: sample rows with replacement
             idx = rng.integers(0, n_obs, size=n_obs)
+        all_idx.append(idx)
+
+    # Worker function for a single replicate
+    def _single_replicate(args):
+        b, idx = args
         if hasattr(data, "iloc"):
             resampled = data.iloc[idx]
         else:
             resampled = data[idx]
-
         try:
             new_adapter = adapter.refit(resampled, index=idx)
             h_b = h_factory(new_adapter)
-            h_draws_inf.append(np.asarray(h_b(new_adapter.coefficients())))
+            beta_b = new_adapter.coefficients()
+            theta_b = np.asarray(h_b(beta_b))
+
+            se_b = None
+            if ci_method == "studentized":
+                try:
+                    Sigma_b = new_adapter.covariance()
+                    if is_jax_differentiable(h_b, beta_b):
+                        grad_b = gradient(
+                            h_b, beta_b,
+                            backend=config.gradient_backend,
+                            fd_step=config.fd_step,
+                        )
+                        se_b = np.asarray(delta_se(grad_b, Sigma_b))
+                    else:
+                        se_b = None
+                except Exception:
+                    se_b = None
+
+            return (theta_b, se_b)
         except Exception as exc:
+            return exc
+
+    # Execute replicates
+    n_jobs = config.n_jobs
+    if n_jobs == -1:
+        import os
+        n_jobs = os.cpu_count() or 1
+
+    if n_jobs != 1:
+        with threadpoolctl.threadpool_limits(limits=1):
+            with ThreadPoolExecutor(max_workers=n_jobs) as executor:
+                raw_results = list(executor.map(_single_replicate, enumerate(all_idx)))
+    else:
+        raw_results = list(map(_single_replicate, enumerate(all_idx)))
+
+    # Collect results
+    h_draws_inf = []
+    se_draws = []
+    n_failures = 0
+    max_failures = max(1, int(0.1 * config.n_boot))
+    failure_exceptions = []
+    for result in raw_results:
+        if isinstance(result, Exception):
             n_failures += 1
-            if n_failures > max_failures:
-                raise RuntimeError(
-                    f"Bootstrap failed on {n_failures} replicates (>{max_failures} "
-                    f"threshold). Last error: {exc}"
-                ) from exc
+            failure_exceptions.append(result)
+        else:
+            theta_b, se_b = result
+            h_draws_inf.append(theta_b)
+            if ci_method == "studentized":
+                se_draws.append(se_b)
+
+    if n_failures > max_failures:
+        last_exc = failure_exceptions[-1] if failure_exceptions else None
+        raise RuntimeError(
+            f"Bootstrap failed on {n_failures} replicates (>{max_failures} "
+            f"threshold)."
+        ) from last_exc
 
     if n_failures > 0:
         warnings.warn(
@@ -530,15 +719,76 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
         h_draws = h_draws_inf
         estimate_report = np.asarray(estimate)
 
+    # Compute CIs
     alpha = (1.0 - config.level) / 2.0
-    lower = np.quantile(h_draws, alpha, axis=0)
-    upper = np.quantile(h_draws, 1.0 - alpha, axis=0)
+    lower = upper = None
+    bca_z0 = None
+    bca_a = None
+    studentized_t = None
+    se_hat = None
+
+    if ci_method == "percentile":
+        lower = np.quantile(h_draws, alpha, axis=0)
+        upper = np.quantile(h_draws, 1.0 - alpha, axis=0)
+
+    elif ci_method == "basic":
+        lower_inf = 2 * np.asarray(estimate) - np.quantile(h_draws_inf, 1.0 - alpha, axis=0)
+        upper_inf = 2 * np.asarray(estimate) - np.quantile(h_draws_inf, alpha, axis=0)
+        if config.phi is not None:
+            lower = np.asarray(config.phi(lower_inf))
+            upper = np.asarray(config.phi(upper_inf))
+        else:
+            lower, upper = lower_inf, upper_inf
+
+    elif ci_method == "bca":
+        bca_z0, bca_a = _compute_bca_params(
+            h_draws_inf, estimate, adapter, h_factory, data,
+            cluster_ids, block_size, bootstrap_config,
+        )
+        lower, upper = _bca_confint(
+            h_draws_inf, estimate, config.level, bca_z0, bca_a, config.phi,
+        )
+
+    elif ci_method == "studentized":
+        valid = [i for i, s in enumerate(se_draws) if s is not None]
+        if len(valid) == 0:
+            raise RuntimeError(
+                "Studentized bootstrap failed: no replicates had valid SE estimates. "
+                "This typically means the estimand is not JAX-differentiable or the "
+                "adapter does not provide a covariance matrix."
+            )
+        valid_draws = h_draws_inf[valid]
+        valid_se = np.stack([se_draws[i] for i in valid], axis=0)
+        studentized_t = (valid_draws - np.asarray(estimate)) / valid_se
+
+        beta_hat = adapter.coefficients()
+        Sigma_hat = config.cov_params if config.cov_params is not None else adapter.covariance()
+        if is_jax_differentiable(h, beta_hat):
+            try:
+                grad_hat = gradient(
+                    h, beta_hat,
+                    backend=config.gradient_backend,
+                    fd_step=config.fd_step,
+                )
+                se_hat = np.asarray(delta_se(grad_hat, Sigma_hat))
+            except Exception:
+                se_hat = np.std(h_draws_inf, axis=0, ddof=1)
+        else:
+            se_hat = np.std(h_draws_inf, axis=0, ddof=1)
+
+        t_lower = np.quantile(studentized_t, alpha, axis=0)
+        t_upper = np.quantile(studentized_t, 1.0 - alpha, axis=0)
+        lower_inf = np.asarray(estimate) - t_upper * se_hat
+        upper_inf = np.asarray(estimate) - t_lower * se_hat
+        if config.phi is not None:
+            lower = np.asarray(config.phi(lower_inf))
+            upper = np.asarray(config.phi(upper_inf))
+        else:
+            lower, upper = lower_inf, upper_inf
 
     se = np.std(h_draws_inf, axis=0, ddof=1)
 
-    # κ at β̂ when h is JAX-differentiable (PRIMER §5.1: κ is the universal
-    # delta-validity diagnostic; bootstrap reports it for cross-comparison
-    # with delta inference at the same point).
+    # κ at β̂ when h is JAX-differentiable
     k = None
     beta_hat = adapter.coefficients()
     Sigma_hat = config.cov_params if config.cov_params is not None else adapter.covariance()
@@ -553,6 +803,18 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
         except Exception:
             pass  # Best-effort diagnostic
 
+    bootstrap_extras = {}
+    if bca_z0 is not None:
+        bootstrap_extras["z0"] = np.asarray(bca_z0)
+    if bca_a is not None:
+        bootstrap_extras["a"] = np.asarray(bca_a)
+    if studentized_t is not None:
+        bootstrap_extras["t_star"] = np.asarray(studentized_t)
+    if se_hat is not None:
+        bootstrap_extras["se_hat"] = np.asarray(se_hat)
+    if not bootstrap_extras:
+        bootstrap_extras = None
+
     return {
         "estimate": estimate_report,
         "std_error": se,
@@ -566,7 +828,10 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
         "fallback_reason": fallback_reason,
         "gradient": None,
         "draws": h_draws,
+        "draws_inf": h_draws_inf,
         "estimand_metadata": estimand_metadata or {},
+        "ci_method": ci_method,
+        "bootstrap_extras": bootstrap_extras,
     }
 
 
