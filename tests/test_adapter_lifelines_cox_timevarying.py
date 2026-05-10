@@ -6,11 +6,12 @@ import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import pytest
+pytest.importorskip("lifelines")
 from lifelines import CoxTimeVaryingFitter
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins._adapters.lifelines_cox_timevarying import LifelinesCoxTimeVaryingAdapter
+from pymargins._adapters.lifelines_cox_timevarying import LifelinesCoxTimeVaryingSurvivalAdapter
 from pymargins._adapter import auto_detect_adapter
 from pymargins import Margins
 
@@ -47,7 +48,7 @@ def test_auto_detect_requires_training_data(ctv_fit):
 
 
 def test_predict_matches_lifelines(ctv_fit, df_survival_tv):
-    adapter = LifelinesCoxTimeVaryingAdapter(ctv_fit, training_data=df_survival_tv)
+    adapter = LifelinesCoxTimeVaryingSurvivalAdapter(ctv_fit, training_data=df_survival_tv)
     df = adapter.training_data
     X = adapter.design_matrix_from_df(df[:10])
     our_pred = np.asarray(adapter.predict(adapter.coefficients(), X))
@@ -66,29 +67,29 @@ def test_predict_matches_lifelines(ctv_fit, df_survival_tv):
 
 
 def test_coefficients_shape(ctv_fit, df_survival_tv):
-    adapter = LifelinesCoxTimeVaryingAdapter(ctv_fit, training_data=df_survival_tv)
+    adapter = LifelinesCoxTimeVaryingSurvivalAdapter(ctv_fit, training_data=df_survival_tv)
     assert adapter.coefficients().shape == (2,)
 
 
 def test_covariance_default(ctv_fit, df_survival_tv):
-    adapter = LifelinesCoxTimeVaryingAdapter(ctv_fit, training_data=df_survival_tv)
+    adapter = LifelinesCoxTimeVaryingSurvivalAdapter(ctv_fit, training_data=df_survival_tv)
     cov = adapter.covariance()
     assert cov.shape == (2, 2)
 
 
 def test_design_matrix(ctv_fit, df_survival_tv):
-    adapter = LifelinesCoxTimeVaryingAdapter(ctv_fit, training_data=df_survival_tv)
+    adapter = LifelinesCoxTimeVaryingSurvivalAdapter(ctv_fit, training_data=df_survival_tv)
     X = adapter.design_matrix_from_df(df_survival_tv[:5])
     assert X.shape == (5, 2)
 
 
 def test_supported_inference_methods(ctv_fit, df_survival_tv):
-    adapter = LifelinesCoxTimeVaryingAdapter(ctv_fit, training_data=df_survival_tv)
+    adapter = LifelinesCoxTimeVaryingSurvivalAdapter(ctv_fit, training_data=df_survival_tv)
     assert adapter.supported_inference_methods == {"bootstrap"}
 
 
 def test_bootstrap_end_to_end(ctv_fit, df_survival_tv):
-    adapter = LifelinesCoxTimeVaryingAdapter(ctv_fit, training_data=df_survival_tv)
+    adapter = LifelinesCoxTimeVaryingSurvivalAdapter(ctv_fit, training_data=df_survival_tv)
     m = Margins(ctv_fit, adapter=adapter, at="typical",
                 method="bootstrap", n_boot=50, rng_seed=42)
     rd = m.predict()
@@ -99,11 +100,11 @@ def test_bootstrap_end_to_end(ctv_fit, df_survival_tv):
 
 
 def test_refit(ctv_fit, df_survival_tv):
-    adapter = LifelinesCoxTimeVaryingAdapter(ctv_fit, training_data=df_survival_tv)
+    adapter = LifelinesCoxTimeVaryingSurvivalAdapter(ctv_fit, training_data=df_survival_tv)
     new_adapter = adapter.refit(df_survival_tv)
-    assert isinstance(new_adapter, LifelinesCoxTimeVaryingAdapter)
+    assert isinstance(new_adapter, LifelinesCoxTimeVaryingSurvivalAdapter)
 
 
 def test_default_prediction_time(ctv_fit, df_survival_tv):
-    adapter = LifelinesCoxTimeVaryingAdapter(ctv_fit, training_data=df_survival_tv)
+    adapter = LifelinesCoxTimeVaryingSurvivalAdapter(ctv_fit, training_data=df_survival_tv)
     assert adapter._prediction_time > 0

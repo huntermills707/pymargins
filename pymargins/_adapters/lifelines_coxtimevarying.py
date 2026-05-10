@@ -45,6 +45,9 @@ class LifelinesCoxTimeVaryingAdapter(ModelAdapter):
         self.results = results
         self._training_data = extract_training_data(results, training_data)
         self._exog_names = list(results.params_.index)
+        self._x_mean = getattr(results, "_norm_mean", None)
+        if self._x_mean is not None:
+            self._x_mean = jnp.asarray(self._x_mean.values)
         self._id_col = getattr(results, "id_col", None)
         self._event_col = getattr(results, "event_col", None)
         self._start_col = getattr(results, "start_col", None)
@@ -110,7 +113,10 @@ class LifelinesCoxTimeVaryingAdapter(ModelAdapter):
         X: jnp.ndarray,
         offset: Optional[jnp.ndarray] = None,
     ) -> jnp.ndarray:
-        eta = jnp.asarray(X) @ beta
+        X_arr = jnp.asarray(X)
+        if self._x_mean is not None:
+            X_arr = X_arr - self._x_mean
+        eta = X_arr @ beta
         if offset is not None:
             eta = eta + jnp.asarray(offset)
         return jnp.exp(eta)

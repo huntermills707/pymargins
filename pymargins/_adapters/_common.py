@@ -30,7 +30,7 @@ def extract_training_data(results, training_data: Optional[pd.DataFrame]) -> pd.
 
 def design_matrix_from_df(results, exog_names: list[str], df: pd.DataFrame) -> jnp.ndarray:
     """Build a design matrix from a DataFrame using the model's formula."""
-    if hasattr(results, "model") and results.model is not None and hasattr(results.model.data, "design_info"):
+    if hasattr(results, "model") and results.model is not None and hasattr(results.model, "data") and hasattr(results.model.data, "design_info"):
         from patsy import dmatrix
         design_info = results.model.data.design_info
         X_np = np.asarray(dmatrix(design_info, df, return_type="matrix"))

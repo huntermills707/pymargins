@@ -33,7 +33,7 @@ from ._common import (
 )
 
 
-class LifelinesCoxTimeVaryingAdapter(WrappedFDAdapter):
+class LifelinesCoxTimeVaryingSurvivalAdapter(WrappedFDAdapter):
     """Adapter for lifelines CoxTimeVaryingFitter on the survival-probability scale.
 
     Predicts survival probability at a fixed time using the nonparametric
@@ -106,7 +106,7 @@ class LifelinesCoxTimeVaryingAdapter(WrappedFDAdapter):
 
     def attach(self, session) -> None:
         vcov = getattr(session, "vcov_spec", None)
-        validate_vcov_spec(vcov, adapter_name="LifelinesCoxTimeVaryingAdapter")
+        validate_vcov_spec(vcov, adapter_name="LifelinesCoxTimeVaryingSurvivalAdapter")
         super().attach(session)
 
     # -----------------------------------------------------------------------
@@ -124,7 +124,7 @@ class LifelinesCoxTimeVaryingAdapter(WrappedFDAdapter):
             return jnp.asarray(vcov_spec)
 
         raise ValueError(
-            f"LifelinesCoxTimeVaryingAdapter only supports vcov=None or ndarray. "
+            f"LifelinesCoxTimeVaryingSurvivalAdapter only supports vcov=None or ndarray. "
             f"Got {vcov_spec!r}"
         )
 
@@ -182,7 +182,7 @@ class LifelinesCoxTimeVaryingAdapter(WrappedFDAdapter):
     # Bootstrap support
     # -----------------------------------------------------------------------
 
-    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "LifelinesCoxTimeVaryingAdapter":
+    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "LifelinesCoxTimeVaryingSurvivalAdapter":
         from lifelines import CoxTimeVaryingFitter
 
         df = resampled_data.reset_index(drop=True)
@@ -197,7 +197,7 @@ class LifelinesCoxTimeVaryingAdapter(WrappedFDAdapter):
 
         new_fitter = CoxTimeVaryingFitter(penalizer=0.1)
         new_fitter.fit(df, **kwargs)
-        return LifelinesCoxTimeVaryingAdapter(
+        return LifelinesCoxTimeVaryingSurvivalAdapter(
             new_fitter,
             training_data=df,
             prediction_time=self._prediction_time,

@@ -6,6 +6,7 @@ import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import pytest
+pytest.importorskip("lifelines")
 from lifelines import PiecewiseExponentialRegressionFitter
 
 jax.config.update("jax_enable_x64", True)
