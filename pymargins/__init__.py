@@ -24,6 +24,7 @@ Public API
 - TestResult           : output of result.test() and result.joint_test()
 - DiagnosticResult     : output of m.diagnose()
 - VariableInfo         : per-variable metadata used by adapters
+- register_adapter     : register a custom adapter for auto-detection
 
 Internal modules (prefixed with _) hold the numerical kernels and engine.
 End users should not import from these directly. Adapter implementers
@@ -33,6 +34,7 @@ and the type aliases in _adapter and _gradients.
 
 from .margins import Margins
 from ._result import MarginsResult, TestResult, DiagnosticResult
+from ._adapters import register_adapter
 from ._adapter import (
     ModelAdapter,
     GLMAdapter,
@@ -62,6 +64,7 @@ __all__ = [
     "WrappedFDAdapter",
     "BootstrapOnlyAdapter",
     "VariableInfo",
+    "register_adapter",
     # Helpers for adapter implementers
     "make_predict_with_fd_jvp",
     "make_glm_jvp_wrapper",

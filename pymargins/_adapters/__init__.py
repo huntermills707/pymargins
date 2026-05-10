@@ -3,7 +3,7 @@ pymargins._adapters
 
 Concrete adapter implementations and the auto-detection dispatch table.
 
-To add support for a new framework:
+To add support for a new framework **inside pymargins core**:
   1. Subclass one of the adapter shapes from pymargins._adapter
      (GLMAdapter, LinearPredictionAdapter, WrappedFDAdapter,
      BootstrapOnlyAdapter)
@@ -11,15 +11,31 @@ To add support for a new framework:
      design_matrix_from_df, variable_metadata, column_index_of_variable,
      and optionally refit and training_data)
   3. Register the dispatch in _detect_adapter_class below
+
+To add support **from an external package**:
+  1. Implement the adapter as above.
+  2. Call ``pymargins.register_adapter(adapter_class, predicate=...)``
+     at import time.
+  3. No changes to pymargins core are required.
 """
 
 # Future adapters to add (one per file in this directory):
-#   StatsmodelsMixedLMAdapter     — uses WrappedFDAdapter
-#   StatsmodelsTSAAdapter         — uses WrappedFDAdapter; for ARIMA etc.
 #   LinearmodelsPanelAdapter      — uses LinearPredictionAdapter
 #   LinearmodelsIVAdapter         — uses LinearPredictionAdapter
 #   SklearnLinearAdapter          — uses LinearPredictionAdapter, computes Σ̂
 #   SklearnTreeAdapter            — uses BootstrapOnlyAdapter
+
+
+# ---------------------------------------------------------------------------
+# Third-party adapter registry (A11)
+# ---------------------------------------------------------------------------
+
+_DETECTION_REGISTRY = []
+"""List of (predicate, adapter_class) tuples for auto-detection.
+
+Registered adapters are checked *before* the built-in hardcoded dispatch,
+so external packages can override default behaviour.
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +195,90 @@ _REGISTERED_ADAPTERS = [
 ]
 
 
+def register_adapter(
+    adapter_class,
+    *,
+    predicate=None,
+    hint_modules=None,
+    hint_names=None,
+    description=None,
+):
+    """Register an adapter class for auto-detection.
+
+    This is the public hook for third-party packages (or user code) that
+    want to support a new modelling framework without modifying pymargins
+    core.  Registered adapters are checked *before* the built-in hardcoded
+    dispatch, so they can override default behaviour when necessary.
+
+    Parameters
+    ----------
+    adapter_class : type
+        A concrete subclass of `pymargins.ModelAdapter`.
+    predicate : callable, optional
+        A function ``predicate(model) -> bool`` that returns ``True`` when
+        ``adapter_class`` can wrap the supplied fitted model.  If not
+        provided, ``hint_modules`` and ``hint_names`` are used to build a
+        default predicate that inspects ``type(model).__module__`` and
+        ``type(model).__name__``.
+    hint_modules : list[str], optional
+        Module-name prefixes used for error suggestions (e.g.
+        ``["statsmodels."]``).
+    hint_names : list[str], optional
+        Class-name substrings used for error suggestions (e.g.
+        ``["GLM"]``).
+    description : str, optional
+        Human-readable description shown in "Did you mean …?" error
+        messages.
+
+    Examples
+    --------
+    >>> from pymargins import register_adapter, ModelAdapter
+    >>> class MyAdapter(ModelAdapter):
+    ...     pass
+    >>> register_adapter(
+    ...     MyAdapter,
+    ...     predicate=lambda m: type(m).__module__.startswith("mypackage."),
+    ...     hint_modules=["mypackage."],
+    ...     hint_names=["MyModel"],
+    ...     description="mypackage MyModel",
+    ... )
+
+    Notes
+    -----
+    Order matters: adapters are checked in registration order.  Register
+    more-specific predicates before broader ones.
+    """
+    if predicate is None:
+        if hint_modules is None or hint_names is None:
+            raise ValueError(
+                "register_adapter requires either a `predicate` or both "
+                "`hint_modules` and `hint_names`."
+            )
+        _mods = list(hint_modules)
+        _names = list(hint_names)
+
+        def predicate(model):
+            module = type(model).__module__
+            cls_name = type(model).__name__
+            return (
+                any(module.startswith(m) for m in _mods)
+                and any(hint in cls_name for hint in _names)
+            )
+
+    _DETECTION_REGISTRY.append((predicate, adapter_class))
+
+    # Also add to the suggestion list so the adapter appears in
+    # "Did you mean …?" error messages.
+    _REGISTERED_ADAPTERS.append(
+        {
+            "name": adapter_class.__name__,
+            "description": description or adapter_class.__name__,
+            "hint_modules": list(hint_modules or []),
+            "hint_names": list(hint_names or []),
+        }
+    )
+
+
 def _suggest_adapters(cls_name, module):
     """Build a suggestion message for unsupported models."""
     # Heuristic: strong match when both module prefix and class name hint align
@@ -227,6 +327,11 @@ def _detect_adapter_class(model):
     _adapter.py; it lives here so the imports of concrete adapters don't
     pollute the base module.
     """
+    # Third-party registry (checked first so external packages can override)
+    for pred, adapter_class in _DETECTION_REGISTRY:
+        if pred(model):
+            return adapter_class
+
     cls_name = type(model).__name__
     module = type(model).__module__
 
