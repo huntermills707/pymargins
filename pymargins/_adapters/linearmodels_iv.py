@@ -43,6 +43,8 @@ class LinearmodelsIVAdapter(LinearPredictionAdapter):
     def __init__(self, results, training_data: Optional[pd.DataFrame] = None):
         self.results = results
         if training_data is None:
+            training_data = self._try_reconstruct_training_data(results)
+        if training_data is None:
             raise ValueError(
                 "LinearmodelsIVAdapter requires training_data to be provided "
                 "explicitly because linearmodels IV models do not store the "
@@ -52,6 +54,45 @@ class LinearmodelsIVAdapter(LinearPredictionAdapter):
         self._exog_names = list(results.params.index)
         self._formula = getattr(results.model, "formula", None)
         self._model_cls = type(results.model)
+
+    @staticmethod
+    def _try_reconstruct_training_data(results) -> Optional[pd.DataFrame]:
+        """Attempt to reconstruct training data from linearmodels IVData objects.
+
+        This works for OLSResults (IV2SLS without endogenous variables) where
+        the model stores dependent and exog as IVData with .ndarray and .cols.
+        """
+        model = results.model
+        try:
+            dep = model.dependent
+            exog = model.exog
+            dfs = []
+            if dep is not None and hasattr(dep, "ndarray") and hasattr(dep, "cols"):
+                dep_df = pd.DataFrame(dep.ndarray, columns=dep.cols)
+                dfs.append(dep_df)
+            if exog is not None and hasattr(exog, "ndarray") and hasattr(exog, "cols"):
+                exog_df = pd.DataFrame(exog.ndarray, columns=exog.cols)
+                # Drop intercept if present to avoid duplication
+                exog_df = exog_df.loc[:, exog_df.columns != "Intercept"]
+                if not exog_df.empty:
+                    dfs.append(exog_df)
+            if len(dfs) == 0:
+                return None
+            df = pd.concat(dfs, axis=1)
+            # Add endog and instruments if present (for full IV models)
+            if hasattr(model, "endog") and model.endog is not None:
+                endog = model.endog
+                if hasattr(endog, "ndarray") and hasattr(endog, "cols"):
+                    endog_df = pd.DataFrame(endog.ndarray, columns=endog.cols)
+                    df = pd.concat([df, endog_df], axis=1)
+            if hasattr(model, "instruments") and model.instruments is not None:
+                instr = model.instruments
+                if hasattr(instr, "ndarray") and hasattr(instr, "cols"):
+                    instr_df = pd.DataFrame(instr.ndarray, columns=instr.cols)
+                    df = pd.concat([df, instr_df], axis=1)
+            return df
+        except Exception:
+            return None
 
     @property
     def training_data(self):

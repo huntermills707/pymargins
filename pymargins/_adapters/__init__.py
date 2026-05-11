@@ -85,6 +85,16 @@ _REGISTERED_ADAPTERS = [
         ],
     },
     {
+        "name": "StatsmodelsZIAdapter",
+        "description": "statsmodels zero-inflated count models (ZIP, ZINB, ZIGP)",
+        "hint_modules": ["statsmodels."],
+        "hint_names": [
+            "ZeroInflatedPoissonResultsWrapper",
+            "ZeroInflatedNegativeBinomialResultsWrapper",
+            "ZeroInflatedGeneralizedPoissonResultsWrapper",
+        ],
+    },
+    {
         "name": "StatsmodelsRLMAdapter",
         "description": "statsmodels RLM (robust linear model)",
         "hint_modules": ["statsmodels."],
@@ -194,7 +204,7 @@ _REGISTERED_ADAPTERS = [
     },
     {
         "name": "LinearmodelsPanelAdapter",
-        "description": "linearmodels panel models (PanelOLS, PooledOLS, RandomEffects, etc.)",
+        "description": "linearmodels panel models (PanelOLS, PooledOLS, RandomEffects, FamaMacBeth, etc.)",
         "hint_modules": ["linearmodels."],
         "hint_names": [
             "PanelEffectsResults",
@@ -202,13 +212,14 @@ _REGISTERED_ADAPTERS = [
             "RandomEffectsResults",
             "BetweenResults",
             "FirstDifferenceResults",
+            "FamaMacBethResults",
         ],
     },
     {
         "name": "LinearmodelsIVAdapter",
-        "description": "linearmodels IV models (IV2SLS, IVGMM, IVLIML)",
+        "description": "linearmodels IV models (IV2SLS, IVGMM, IVLIML) and OLS",
         "hint_modules": ["linearmodels."],
-        "hint_names": ["IVResults", "IVGMMResults", "IVLIMLResults"],
+        "hint_names": ["IVResults", "IVGMMResults", "IVLIMLResults", "OLSResults"],
     },
     {
         "name": "LinearmodelsAbsorbingAdapter",
@@ -419,6 +430,15 @@ def _detect_adapter_class(model):
         from .statsmodels_discrete_count import StatsmodelsDiscreteCountAdapter
         return StatsmodelsDiscreteCountAdapter
 
+    # statsmodels zero-inflated count models
+    if module.startswith("statsmodels.") and cls_name in (
+        "ZeroInflatedPoissonResultsWrapper",
+        "ZeroInflatedNegativeBinomialResultsWrapper",
+        "ZeroInflatedGeneralizedPoissonResultsWrapper",
+    ):
+        from .statsmodels_zi import StatsmodelsZIAdapter
+        return StatsmodelsZIAdapter
+
     # statsmodels RLM
     if module.startswith("statsmodels.") and cls_name in (
         "RLMResultsWrapper",
@@ -538,6 +558,7 @@ def _detect_adapter_class(model):
         "RandomEffectsResults",
         "BetweenResults",
         "FirstDifferenceResults",
+        "FamaMacBethResults",
     ):
         from .linearmodels_panel import LinearmodelsPanelAdapter
         return LinearmodelsPanelAdapter
@@ -547,6 +568,7 @@ def _detect_adapter_class(model):
         "IVResults",
         "IVGMMResults",
         "IVLIMLResults",
+        "OLSResults",
     ):
         from .linearmodels_iv import LinearmodelsIVAdapter
         return LinearmodelsIVAdapter

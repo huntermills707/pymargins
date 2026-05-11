@@ -35,11 +35,12 @@ def test_adapter_from_iv2sls(iv_data):
     assert adapter.covariance().shape == (2, 2)
 
 
-def test_adapter_requires_training_data(iv_data):
+def test_adapter_reconstructs_training_data(iv_data):
     mod = IV2SLS.from_formula("y ~ 1 + [x ~ z + w]", data=iv_data)
     res = mod.fit()
-    with pytest.raises(ValueError, match="training_data"):
-        LinearmodelsIVAdapter(res)
+    adapter = LinearmodelsIVAdapter(res)
+    assert adapter.training_data is not None
+    assert set(adapter.training_data.columns) >= {"y", "x", "z", "w"}
 
 
 def test_adapter_from_ivgmm(iv_data):
