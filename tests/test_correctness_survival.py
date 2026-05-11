@@ -166,8 +166,15 @@ def test_phreg_ame_matches_analytical(df_survival):
 # 2. Lifelines CoxPH (centered partial hazard scale)
 # ---------------------------------------------------------------------------
 
+def _skip_if_no_r_data():
+    import os
+    if not os.path.exists("/tmp/survival_data.csv"):
+        pytest.skip("R-generated survival data CSV not found; skipping R reference comparison")
+
+
 def test_coxph_predictions_match_marginaleffects(df_survival):
     """Lifelines CoxPH predictions should match R marginaleffects type='risk'."""
+    _skip_if_no_r_data()
     fit = CoxPHFitter()
     fit.fit(df_survival, duration_col="time", event_col="status", formula="x1 + x2")
     adapter = LifelinesCoxPHAdapter(fit, training_data=df_survival)
@@ -180,6 +187,7 @@ def test_coxph_predictions_match_marginaleffects(df_survival):
 
 def test_coxph_ame_matches_marginaleffects(df_survival):
     """AME on centered HR scale should match R marginaleffects avg_slopes."""
+    _skip_if_no_r_data()
     fit = CoxPHFitter()
     fit.fit(df_survival, duration_col="time", event_col="status", formula="x1 + x2")
     adapter = LifelinesCoxPHAdapter(fit, training_data=df_survival)
@@ -191,6 +199,28 @@ def test_coxph_ame_matches_marginaleffects(df_survival):
 
     np.testing.assert_allclose(float(res_x1.estimate), R_COX_AME_X1, rtol=1e-4)
     np.testing.assert_allclose(float(res_x2.estimate), R_COX_AME_X2, rtol=1e-4)
+
+
+def test_coxph_ame_matches_analytical(df_survival):
+    """AME on centered partial-hazard scale matches analytical derivative."""
+    fit = CoxPHFitter()
+    fit.fit(df_survival, duration_col="time", event_col="status", formula="x1 + x2")
+    adapter = LifelinesCoxPHAdapter(fit, training_data=df_survival)
+    m = Margins(fit, adapter=adapter)
+
+    res_x1 = m.dydx("x1")
+    res_x2 = m.dydx("x2")
+
+    # Analytical AME for centered scale: mean(beta_j * exp((X - X_mean) @ beta))
+    beta = fit.params_.values
+    X = df_survival[["x1", "x2"]].values
+    x_mean = fit._norm_mean.values
+    pred_all = np.exp((X - x_mean) @ beta)
+    manual_ame_x1 = np.mean(beta[0] * pred_all)
+    manual_ame_x2 = np.mean(beta[1] * pred_all)
+
+    np.testing.assert_allclose(float(res_x1.estimate), manual_ame_x1, rtol=1e-5)
+    np.testing.assert_allclose(float(res_x2.estimate), manual_ame_x2, rtol=1e-5)
 
 
 def test_coxph_predictions_match_lifelines(df_survival):
