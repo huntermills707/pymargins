@@ -49,6 +49,15 @@ from ._gradients import (
     make_glm_jvp_wrapper,
     GradientBackend,
 )
+from .scenarios import (
+    pairwise,
+    reference,
+    at_levels,
+    grid,
+    did,
+    diff,
+    all_pairwise,
+)
 
 __all__ = [
     # Main entry point
@@ -71,6 +80,14 @@ __all__ = [
     # Type aliases (for type hints in user code)
     "InferenceMethod",
     "GradientBackend",
+    # Scenario/contrast helpers
+    "pairwise",
+    "reference",
+    "at_levels",
+    "grid",
+    "did",
+    "diff",
+    "all_pairwise",
 ]
 
 __version__ = "0.0.1"

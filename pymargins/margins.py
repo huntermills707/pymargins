@@ -613,6 +613,32 @@ class Margins:
             For a single weight vector: scalar result. For multiple
             contrasts (dict or matrix), vector result with one entry per
             contrast and joint inference across them via the shared Σ̂.
+
+        Notes
+        -----
+        contrasts() forms a *linear combination on the inference scale*:
+
+            result = φ( Σᵢ wᵢ · φ⁻¹(pᵢ) )
+
+        where pᵢ is the response-scale prediction for scenario i.
+        On an identity-scale session this is just a weighted sum of
+        probabilities; on a log-scale session it becomes a log-ratio
+        (weights [+1, −1] give log(p₁) − log(p₂) = log(p₁/p₂)).
+
+        For nonlinear functions of predictions (ratios, NNT, lift,
+        custom utility), use evaluate() instead — it applies the
+        function on the response scale before φ⁻¹.
+
+        Example: pairwise risk difference on a linear-scale session
+            m = Margins.linear_scale(fitted_logit, at="overall")
+            rd = m.contrasts(
+                scenarios=[
+                    {"atexog": {"treatment": 1}},
+                    {"atexog": {"treatment": 0}},
+                ],
+                contrasts=[+1, -1],
+            )
+            # rd.estimate is P(Y=1 | treated) − P(Y=1 | control)
         """
         if len(scenarios) == 0:
             raise ValueError("contrasts() requires at least one scenario")
@@ -712,6 +738,57 @@ class Margins:
         Returns
         -------
         result : MarginsResult
+
+        Notes
+        -----
+        evaluate() applies an *arbitrary function on the response scale*:
+
+            result = φ( φ⁻¹( compose(p₁, p₂, …) ) )
+
+        where pᵢ is the response-scale prediction for scenario i.
+        This is the escape hatch for nonlinear estimands: ratios, NNT,
+        lift, interaction terms, or any custom utility function.
+
+        Contrast with contrasts(), which forms a *linear combination on
+        the inference scale*:
+
+            contrasts() :  φ( Σᵢ wᵢ · φ⁻¹(pᵢ) )
+            evaluate()  :  φ( φ⁻¹( compose(p) ) )
+
+        For linear combinations (risk differences, log-ratios, etc.)
+        prefer contrasts() — it is clearer and uses a faster path.
+
+        Example 1: Risk ratio via evaluate() on a linear-scale session
+            m = Margins.linear_scale(fitted_logit, at="overall")
+            rr = m.evaluate(
+                scenarios=[
+                    {"atexog": {"treatment": 1}},
+                    {"atexog": {"treatment": 0}},
+                ],
+                compose=lambda p: p[0] / p[1],
+            )
+            # rr.estimate is P(Y=1 | treated) / P(Y=1 | control)
+
+        Example 2: Number needed to treat (NNT)
+            m = Margins.linear_scale(fitted_logit, at="overall")
+            nnt = m.evaluate(
+                scenarios=[
+                    {"atexog": {"treatment": 1}},
+                    {"atexog": {"treatment": 0}},
+                ],
+                compose=lambda p: 1.0 / (p[0] - p[1]),
+            )
+            # nnt.estimate is 1 / (P_treated − P_control)
+
+        Example 3: Lift (relative effect)
+            lift = m.evaluate(
+                scenarios=[
+                    {"atexog": {"treatment": 1}},
+                    {"atexog": {"treatment": 0}},
+                ],
+                compose=lambda p: (p[0] - p[1]) / p[1],
+            )
+            # lift.estimate is (P_treated − P_control) / P_control
         """
         h = self._build_evaluate_estimand(scenarios, compose)
         config = self._inference_config()
