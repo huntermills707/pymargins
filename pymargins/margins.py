@@ -1180,7 +1180,8 @@ class Margins:
             df, meta = expand_scenario(
                 sub_scenario, group_df, resolver, var_meta,
             )
-            X = adapter.design_matrix_from_df(df)
+            from ._tabular import to_pandas_if_needed
+            X = adapter.design_matrix_from_df(to_pandas_if_needed(df))
             n_grid = meta.get("n_grid_points", 1)
             rows_per = meta.get("rows_per_grid_point", len(df))
 
@@ -1412,7 +1413,8 @@ class Margins:
                 ),
                 variable_metadata=adapter.variable_metadata(),
             )
-            scenarios_X.append(adapter.design_matrix_from_df(df))
+            from ._tabular import to_pandas_if_needed
+            scenarios_X.append(adapter.design_matrix_from_df(to_pandas_if_needed(df)))
 
         return make_linear_combination_estimand(
             adapter,
@@ -1441,7 +1443,8 @@ class Margins:
                 ),
                 variable_metadata=adapter.variable_metadata(),
             )
-            scenarios_X.append(adapter.design_matrix_from_df(df))
+            from ._tabular import to_pandas_if_needed
+            scenarios_X.append(adapter.design_matrix_from_df(to_pandas_if_needed(df)))
 
         return make_evaluate_estimand(
             adapter,

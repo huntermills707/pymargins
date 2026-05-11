@@ -198,14 +198,12 @@ def make_slope_estimand(
     -------
     h : callable (beta) -> scalar or vector
     """
-    import pandas as pd  # local to keep the module's hard deps minimal
-
     if var_name not in df.columns:
         raise ValueError(
             f"Variable {var_name!r} not in df.columns: {list(df.columns)}"
         )
 
-    v = pd.to_numeric(df[var_name], errors="coerce").to_numpy()
+    v = np.asarray(df[var_name], dtype=float)
     if not np.all(np.isfinite(v)):
         raise ValueError(
             f"Variable {var_name!r} has non-numeric or NaN values; "
@@ -217,13 +215,19 @@ def make_slope_estimand(
 
     eps = fd_step * np.maximum(1.0, np.abs(v))  # shape (n_rows,)
 
-    df_plus = df.copy()
-    df_minus = df.copy()
-    df_plus[var_name] = v + eps
-    df_minus[var_name] = v - eps
+    # Use TabularData.with_column if available, otherwise pandas copy
+    if hasattr(df, "with_column"):
+        df_plus = df.with_column(var_name, v + eps)
+        df_minus = df.with_column(var_name, v - eps)
+    else:
+        df_plus = df.copy()
+        df_minus = df.copy()
+        df_plus[var_name] = v + eps
+        df_minus[var_name] = v - eps
 
-    Xp = adapter.design_matrix_from_df(df_plus)
-    Xm = adapter.design_matrix_from_df(df_minus)
+    from ._tabular import to_pandas_if_needed
+    Xp = adapter.design_matrix_from_df(to_pandas_if_needed(df_plus))
+    Xm = adapter.design_matrix_from_df(to_pandas_if_needed(df_minus))
     eps_jax = jnp.asarray(eps)
 
     def h(beta):

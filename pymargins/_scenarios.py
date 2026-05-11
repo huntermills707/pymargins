@@ -8,7 +8,7 @@ do I want to evaluate" and the model's "design matrix to plug in".
 A scenario specification is a dict with optional keys:
   'atexog' : {variable: value | list_of_values}  — values for exogenous variables
   'over'   : str | list[str]                     — subgroup variable(s)
-  'data'   : pd.DataFrame                        — explicit row(s) to use
+  'data'   : pd.DataFrame | TabularData          — explicit row(s) to use
   'label'  : str                                  — output identifier
 
 When unspecified variables exist: filled per the session's `at` setting
@@ -32,6 +32,8 @@ from itertools import product
 import numpy as np
 import pandas as pd
 
+from ._tabular import TabularData, PandasTabular, as_tabular, concat_tables
+
 
 # ---------------------------------------------------------------------------
 # Scenario expansion
@@ -39,13 +41,13 @@ import pandas as pd
 
 def expand_scenario(
     scenario: dict,
-    base_data: pd.DataFrame,
+    base_data: Union[pd.DataFrame, TabularData],
     aggregation_resolver,
     variable_metadata: dict,
-) -> tuple[pd.DataFrame, dict]:
-    """Expand a scenario specification into a concrete DataFrame of rows.
+) -> tuple[TabularData, dict]:
+    """Expand a scenario specification into a concrete TabularData of rows.
 
-    The output DataFrame has one row per evaluation point. The exact row
+    The output has one row per evaluation point. The exact row
     structure depends on the scenario:
 
     - Empty scenario, overall: returns base_data unchanged
@@ -64,11 +66,11 @@ def expand_scenario(
     scenario : dict
         The user's scenario spec.
 
-    base_data : pd.DataFrame
+    base_data : pd.DataFrame or TabularData
         The training data (or representative point dataframe) used to fill
         variables not specified in atexog.
 
-    aggregation_resolver : callable (data, variable_metadata) -> dict | DataFrame
+    aggregation_resolver : callable (data, variable_metadata) -> TabularData
         Resolves the session's `at` setting into either:
           - "overall": returns base_data (all observed rows)
           - "typical" / "mean" / etc.: returns a 1-row DataFrame
@@ -79,7 +81,7 @@ def expand_scenario(
 
     Returns
     -------
-    expanded : pd.DataFrame
+    expanded : TabularData
         Concrete rows for evaluation.
 
     metadata : dict
@@ -91,9 +93,13 @@ def expand_scenario(
     ValueError
         If a variable in atexog is not recognized by the model.
     """
+    # Normalize to TabularData
+    if isinstance(base_data, pd.DataFrame):
+        base_data = as_tabular(base_data)
+
     if "data" in scenario:
         # Explicit override: use the provided DataFrame directly
-        return scenario["data"].copy(), {"strategy": "explicit"}
+        return as_tabular(scenario["data"]).copy(), {"strategy": "explicit"}
 
     atexog = scenario.get("atexog", {}) or {}
 
@@ -121,12 +127,12 @@ def expand_scenario(
     # For each grid row, build a copy of background with atexog applied
     pieces = []
     for grid_row in grid_rows:
-        block = background.copy()
+        block = background
         for k, v in zip(grid_keys, grid_row):
-            block[k] = v
+            block = block.with_column(k, v)
         pieces.append(block)
 
-    expanded = pd.concat(pieces, ignore_index=True)
+    expanded = concat_tables(pieces)
 
     metadata = {
         "strategy": "expanded",
@@ -157,7 +163,7 @@ def make_aggregation_resolver(at, weights=None):
           - "median"    : median of all
           - "mode"      : mode of all (errors on continuous)
           - dict          : per-variable specification
-          - callable      : (data) -> 1-row DataFrame
+          - callable      : (data) -> 1-row representative DataFrame
 
     weights : array-like, optional
         Weights for computing weighted means/medians/modes. If None,
@@ -165,7 +171,7 @@ def make_aggregation_resolver(at, weights=None):
 
     Returns
     -------
-    resolver : callable (data, variable_metadata) -> DataFrame
+    resolver : callable (data, variable_metadata) -> TabularData
         Accepts the data and metadata, returns either the original data
         (overall) or a 1-row DataFrame at the representative point.
     """
@@ -173,21 +179,22 @@ def make_aggregation_resolver(at, weights=None):
         return lambda data, meta: data
 
     if callable(at):
-        return lambda data, meta: at(data)
+        return lambda data, meta: as_tabular(at(data))
 
     def resolver(data, meta):
-        missing = [var_name for var_name in meta.keys() if var_name not in data.columns]
+        columns = data.columns
+        missing = [var_name for var_name in meta.keys() if var_name not in columns]
         if missing:
             raise ValueError(
                 f"Missing column(s) in data: {sorted(missing)}. "
-                f"Available: {sorted(data.columns)}."
+                f"Available: {sorted(columns)}."
             )
         result = {}
         for var_name, info in meta.items():
             col = data[var_name]
             spec = _resolve_var_spec(at, var_name, info)
             result[var_name] = _summarize_column(col, spec, info, weights)
-        return pd.DataFrame([result])
+        return as_tabular(pd.DataFrame([result]))
 
     return resolver
 
@@ -230,14 +237,14 @@ def _summarize_column(col, spec, info, weights):
                 "or specify a value via at=."
             )
         return _weighted_mode(col, weights)
-    elif spec.startswith("p") and spec[1:].isdigit():
+    elif isinstance(spec, str) and spec.startswith("p") and spec[1:].isdigit():
         # Percentile: "p25", "p75", etc.
         q = int(spec[1:]) / 100.0
         return _weighted_quantile(col, q, weights)
     elif spec == "min":
-        return col.min()
+        return float(np.min(col))
     elif spec == "max":
-        return col.max()
+        return float(np.max(col))
     elif callable(spec):
         return spec(col)
     else:
@@ -250,7 +257,7 @@ def _summarize_column(col, spec, info, weights):
 
 def _weighted_mean(col, weights):
     if weights is None:
-        return float(col.mean())
+        return float(np.mean(col))
     return float(np.average(np.asarray(col), weights=np.asarray(weights)))
 
 
@@ -272,12 +279,30 @@ def _weighted_quantile(col, q, weights):
 
 
 def _weighted_mode(col, weights):
+    """Compute the mode of a column.
+
+    Parameters
+    ----------
+    col : array-like
+        Column values (numpy array, pandas Series, or similar).
+    weights : array-like, optional
+        Weights for weighted mode.
+
+    Returns
+    -------
+    mode_value
+        The most frequent value (or the value with the highest weight).
+    """
+    arr = np.asarray(col)
     if weights is None:
-        return col.mode().iloc[0]
-    # Weighted mode: sum weights per unique value, return argmax
-    df = pd.DataFrame({"v": col, "w": weights})
-    sums = df.groupby("v")["w"].sum()
-    return sums.idxmax()
+        # Use np.unique with return_counts for numpy arrays
+        unique_vals, counts = np.unique(arr, return_counts=True)
+        return unique_vals[np.argmax(counts)]
+    # Weighted mode: sum weights per unique value
+    w = np.asarray(weights)
+    unique_vals = np.unique(arr)
+    weighted_counts = np.array([w[arr == uv].sum() for uv in unique_vals])
+    return unique_vals[np.argmax(weighted_counts)]
 
 
 # ---------------------------------------------------------------------------
@@ -296,65 +321,3 @@ def _auto_label_from_atexog(atexog: Optional[dict]) -> Optional[str]:
     if not atexog:
         return None
     return ", ".join(f"{k}={v}" for k, v in atexog.items())
-
-
-# ---------------------------------------------------------------------------
-# Expected usage
-# ---------------------------------------------------------------------------
-"""
-Example 1: Empirical scenario expansion
----------------------------------------
-
-    from pymargins._scenarios import expand_scenario, make_aggregation_resolver
-
-    resolver = make_aggregation_resolver("overall")
-
-    # No counterfactual values: use observed data row-wise
-    df, meta = expand_scenario(
-        scenario={},
-        base_data=training_data,
-        aggregation_resolver=resolver,
-        variable_metadata=adapter.variable_metadata(),
-    )
-    # df is training_data unchanged
-
-
-Example 2: Counterfactual at a single value
--------------------------------------------
-
-    df, meta = expand_scenario(
-        scenario={"atexog": {"treatment": 1}},
-        base_data=training_data,
-        aggregation_resolver=resolver,
-        variable_metadata=...,
-    )
-    # df has every observed row, but treatment column is set to 1
-
-
-Example 3: Grid of counterfactual values
-----------------------------------------
-
-    df, meta = expand_scenario(
-        scenario={"atexog": {"age": [30, 50, 70]}},
-        base_data=training_data,
-        aggregation_resolver=resolver,
-        variable_metadata=...,
-    )
-    # df has 3 * len(training_data) rows; age column varies
-
-
-Example 4: At typical with discrete control variables
------------------------------------------------------
-
-    resolver = make_aggregation_resolver("typical")
-
-    df, meta = expand_scenario(
-        scenario={"atexog": {"treatment": 1}},
-        base_data=training_data,
-        aggregation_resolver=resolver,
-        variable_metadata=...,
-    )
-    # df has 1 row: treatment=1, other vars at their typical values
-    # (median continuous, mode discrete/binary/categorical)
-
-"""

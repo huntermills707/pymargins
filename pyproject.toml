@@ -40,6 +40,7 @@ statsmodels = ["statsmodels>=0.14", "patsy>=0.5"]
 linearmodels = ["linearmodels>=5.0"]
 lifelines = ["lifelines>=0.30"]
 sklearn = ["scikit-learn>=1.3"]
+polars = ["polars>=1.0"]
 
 # Development / testing
 test = [
