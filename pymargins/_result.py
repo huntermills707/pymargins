@@ -474,29 +474,89 @@ class MarginsResult:
 
         One row per estimand component. Columns include estimate, SE, CI
         bounds, κ (if available), and any labels from estimand_metadata.
+
+        Scenario columns (e.g. ``x1``, ``group``) are unpacked from
+        ``estimand_metadata["scenarios"]`` when available, making the
+        DataFrame ready for plotting without string parsing.
         """
         est = np.atleast_1d(self.estimate)
         se = np.atleast_1d(self.std_error)
         lo = np.atleast_1d(self.conf_int_lower)
         hi = np.atleast_1d(self.conf_int_upper)
+        n = est.size
 
-        data = {
+        # Core estimate columns
+        data: dict[str, Any] = {
             "estimate": est,
-            "estimate_scale": np.repeat("reporting", est.size),
             "std_error": se,
-            "se_scale": np.repeat("inference", se.size),
             "ci_lower": lo,
             "ci_upper": hi,
-            "ci_scale": np.repeat("reporting", est.size),
+            "conf_level": np.repeat(self.level, n),
+            "n_obs": np.repeat(self.n_obs, n),
+            "method": np.repeat(self.method, n),
         }
+
+        # Term: what this estimand is about
+        kind = self.estimand_metadata.get("kind", "")
+        variables = self.estimand_metadata.get("variables")
+        labels = self.estimand_metadata.get("labels")
+        if variables is not None:
+            data["term"] = [list(variables)] * n
+        elif labels is not None and len(labels) == n:
+            data["term"] = labels
+        else:
+            data["term"] = np.repeat("", n)
+
+        data["kind"] = np.repeat(kind, n)
+
+        # Labels
+        if labels is not None and len(labels) == n:
+            data["label"] = labels
+
+        # Statistics and p-values (try to compute if not cached)
+        try:
+            tr = self.test(value=0.0, null_scale="inference")
+            z_vals = np.atleast_1d(tr.statistic)
+            p_vals = np.atleast_1d(tr.pvalue)
+            if z_vals.size == n:
+                data["statistic"] = z_vals
+                data["p_value"] = p_vals
+        except Exception:
+            pass
+
+        # Over info
+        over = self.estimand_metadata.get("over")
+        if over is not None:
+            data["over"] = np.repeat(",".join(over), n)
+            # Try to parse over values from labels or scenarios
+            if labels is not None and len(labels) == n:
+                over_values = []
+                for lab in labels:
+                    vals = []
+                    for o in over:
+                        import re
+                        m = re.search(rf"{o}=([^,]+)", lab)
+                        if m:
+                            vals.append(m.group(1).strip())
+                    over_values.append(", ".join(vals) if vals else "")
+                data["over_value"] = over_values
+
+        # Diagnostics
         if self.kappa is not None:
             kvals = np.atleast_1d(self.kappa)
-            if kvals.size == est.size:
+            if kvals.size == n:
                 data["kappa"] = kvals
+        data["fallback_triggered"] = np.repeat(self.fallback_triggered, n)
+        if self.fallback_reason:
+            data["fallback_reason"] = np.repeat(self.fallback_reason, n)
 
-        labels = self.estimand_metadata.get("labels")
-        if labels and len(labels) == est.size:
-            data["label"] = labels
+        # Scenario columns
+        scenarios = self.estimand_metadata.get("scenarios")
+        if scenarios is not None and len(scenarios) == n:
+            all_keys = sorted(set().union(*(s.keys() for s in scenarios)))
+            for key in all_keys:
+                col_values = [s.get(key, np.nan) for s in scenarios]
+                data[key] = col_values
 
         return pd.DataFrame(data)
 

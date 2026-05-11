@@ -452,7 +452,7 @@ class Margins:
             scenario = {"data": atexog, "over": over, "label": label}
         else:
             scenario = {"atexog": atexog, "over": over, "label": label}
-        h, labels = self._build_prediction_estimand(scenario, transform)
+        h, labels, scenarios = self._build_prediction_estimand(scenario, transform)
         config = self._inference_config()
         meta = {"kind": "prediction"}
         if label is not None:
@@ -467,6 +467,8 @@ class Margins:
                 )
         if labels is not None:
             meta["labels"] = labels
+        if scenarios:
+            meta["scenarios"] = scenarios
         if over is not None:
             meta["over"] = [over] if isinstance(over, str) else list(over)
         h_factory = None
@@ -534,7 +536,7 @@ class Margins:
             scenario = {"data": atexog, "over": over, "label": label}
         else:
             scenario = {"atexog": atexog, "over": over, "label": label}
-        h, labels = self._build_slope_estimand(scenario, var_list, transform)
+        h, labels, scenarios = self._build_slope_estimand(scenario, var_list, transform)
         config = self._inference_config()
         meta = {"kind": "slope", "variables": var_list}
         if label is not None:
@@ -549,6 +551,8 @@ class Margins:
                 )
         if labels is not None:
             meta["labels"] = labels
+        if scenarios:
+            meta["scenarios"] = scenarios
         if over is not None:
             meta["over"] = [over] if isinstance(over, str) else list(over)
         h_factory = None
@@ -696,7 +700,7 @@ class Margins:
             )
         result_data = run_inference(
             h, self.adapter, config,
-            estimand_metadata={"kind": "contrasts", "labels": labels},
+            estimand_metadata={"kind": "contrasts", "labels": labels, "scenarios": scenarios},
             h_factory=h_factory,
         )
         if outcome is not None and self.adapter.n_outcomes > 1:
@@ -804,7 +808,7 @@ class Margins:
             )
         result_data = run_inference(
             h, self.adapter, config,
-            estimand_metadata={"kind": "evaluate", "labels": labels},
+            estimand_metadata={"kind": "evaluate", "labels": labels, "scenarios": scenarios},
             h_factory=h_factory,
         )
         if outcome is not None and self.adapter.n_outcomes > 1:
@@ -1123,7 +1127,7 @@ class Margins:
         scenario: dict,
         transform: Optional[Callable],
         adapter: Optional[ModelAdapter] = None,
-    ) -> tuple[Callable, Optional[list[str]]]:
+    ) -> tuple[Callable, Optional[list[str]], list[dict]]:
         """Construct the prediction estimand for predict() calls.
 
         Resolves the scenario into a design matrix using the session's
@@ -1134,6 +1138,9 @@ class Margins:
         atexog grid, or both), returns a stacked vector estimand with one
         component per (group × grid point) and the corresponding labels.
         Returns ``(h, None)`` for the single-atom case.
+
+        Also returns a list of scenario dicts, one per atom, containing the
+        atexog and over values for plot-ready DataFrame construction.
         """
         adapter = adapter if adapter is not None else self.adapter
         base_data = self._get_base_data(adapter)
@@ -1143,6 +1150,7 @@ class Margins:
 
         sub_scenario = {k: v for k, v in scenario.items() if k != "over"}
         atoms: list[tuple[Optional[str], Callable]] = []
+        scenarios: list[dict] = []
 
         for group_label, group_df in groups:
             df, meta = expand_scenario(
@@ -1185,7 +1193,27 @@ class Margins:
                 label = self._format_atom_label(group_label, over_keys, grid_suffix)
                 atoms.append((label, h_atom))
 
-        return self._finalize_atoms(atoms)
+                # Build scenario dict for this atom
+                scen = {}
+                if over_keys is not None:
+                    gl = group_label if isinstance(group_label, tuple) else (group_label,)
+                    for k, v in zip(over_keys, gl):
+                        scen[k] = v
+                if n_grid > 1:
+                    grid_row = meta.get("grid_rows", [])[i] if i < len(meta.get("grid_rows", [])) else ()
+                    grid_keys = meta.get("atexog_keys", [])
+                    for k, v in zip(grid_keys, grid_row):
+                        scen[k] = v
+                else:
+                    atexog = sub_scenario.get("atexog", {})
+                    if atexog:
+                        for k, v in atexog.items():
+                            if not isinstance(v, list):
+                                scen[k] = v
+                scenarios.append(scen)
+
+        h, labels = self._finalize_atoms(atoms)
+        return h, labels, scenarios
 
     def _enumerate_groups(
         self,
@@ -1275,12 +1303,14 @@ class Margins:
         var_list: list[str],
         transform: Optional[Callable],
         adapter: Optional[ModelAdapter] = None,
-    ) -> tuple[Callable, Optional[list[str]]]:
+    ) -> tuple[Callable, Optional[list[str]], list[dict]]:
         """Construct the slope estimand for dydx() calls.
 
         Produces one atom per (over-group × variable). With a single
         variable and no ``over``, returns a scalar estimand. Otherwise
         returns a stacked vector estimand with one component per atom.
+
+        Also returns a list of scenario dicts, one per atom.
         """
         adapter = adapter if adapter is not None else self.adapter
         base_data = self._get_base_data(adapter)
@@ -1297,15 +1327,28 @@ class Margins:
 
         sub_scenario = {k: v for k, v in scenario.items() if k != "over"}
         atoms: list[tuple[Optional[str], Callable]] = []
+        scenarios: list[dict] = []
 
         for group_label, group_df in groups:
-            df, _ = expand_scenario(
+            df, meta = expand_scenario(
                 sub_scenario, group_df, resolver, var_meta,
             )
             if self.at == "overall":
                 agg_kind = "overall"
             else:
                 agg_kind = "none" if len(df) == 1 else "overall"
+
+            # Build base scenario dict for this group (shared across variables)
+            base_scen = {}
+            if over_keys is not None:
+                gl = group_label if isinstance(group_label, tuple) else (group_label,)
+                for k, v in zip(over_keys, gl):
+                    base_scen[k] = v
+            atexog = sub_scenario.get("atexog", {})
+            if atexog and meta.get("n_grid_points", 1) == 1:
+                for k, v in atexog.items():
+                    if not isinstance(v, list):
+                        base_scen[k] = v
 
             for var_name in var_list:
                 h_atom = make_slope_estimand(
@@ -1320,8 +1363,10 @@ class Margins:
                 suffix = f"{atexog_label}, {var_name}" if atexog_label else var_name
                 label = self._format_atom_label(group_label, over_keys, suffix)
                 atoms.append((label, h_atom))
+                scenarios.append(base_scen.copy())
 
-        return self._finalize_atoms(atoms)
+        h, labels = self._finalize_atoms(atoms)
+        return h, labels, scenarios
 
     def _build_contrast_estimand(
         self,
