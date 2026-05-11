@@ -258,6 +258,16 @@ class Margins:
                 "phi and phi_inv must be provided together (or neither)."
             )
 
+        # Validation: numeric session parameters
+        if not (0.0 < level < 1.0):
+            raise ValueError(f"level must be in (0, 1), got {level}")
+        if not isinstance(n_sim, int) or n_sim < 1:
+            raise ValueError(f"n_sim must be a positive integer, got {n_sim}")
+        if not isinstance(n_boot, int) or n_boot < 1:
+            raise ValueError(f"n_boot must be a positive integer, got {n_boot}")
+        if fd_step <= 0 or not np.isfinite(fd_step):
+            raise ValueError(f"fd_step must be a positive finite float, got {fd_step}")
+
         self.model = model
         self.phi = phi
         self.phi_inv = phi_inv
@@ -282,6 +292,14 @@ class Margins:
         self.adapter = adapter if adapter is not None else auto_detect_adapter(model)
         self.adapter.attach(self)
 
+        # Validate weights
+        if self.weights is not None:
+            w_arr = np.asarray(self.weights)
+            if not np.all(np.isfinite(w_arr)):
+                raise ValueError("weights must be finite (no NaN or Inf).")
+            if np.any(w_arr < 0):
+                raise ValueError("weights must be non-negative.")
+
         # Validate cluster IDs against training data length
         if self.cluster is not None:
             cluster_arr = np.asarray(self.cluster)
@@ -289,7 +307,7 @@ class Margins:
                 raise ValueError("cluster IDs must not contain NaN values.")
             try:
                 n_data = len(self.adapter.training_data)
-            except Exception:
+            except (NotImplementedError, AttributeError, TypeError):
                 n_data = None
             if n_data is not None and len(cluster_arr) != n_data:
                 raise ValueError(
@@ -310,7 +328,7 @@ class Margins:
                 raise ValueError("block_size must be a positive integer.")
             try:
                 n_data = len(self.adapter.training_data)
-            except Exception:
+            except (NotImplementedError, AttributeError, TypeError):
                 n_data = None
             if n_data is not None and self.block_size > n_data:
                 raise ValueError(
@@ -448,6 +466,8 @@ class Margins:
             ``over=`` variables, a vector over the Cartesian product of
             observed level combinations.
         """
+        if transform is not None and not callable(transform):
+            raise TypeError(f"transform must be callable, got {type(transform).__name__}")
         if atexog is not None and hasattr(atexog, "iloc"):
             scenario = {"data": atexog, "over": over, "label": label}
         else:
@@ -521,6 +541,8 @@ class Margins:
         -------
         result : MarginsResult
         """
+        if transform is not None and not callable(transform):
+            raise TypeError(f"transform must be callable, got {type(transform).__name__}")
         var_list = [variables] if isinstance(variables, str) else list(variables)
         for v in var_list:
             info = self.adapter.variable_metadata().get(v)
@@ -794,6 +816,8 @@ class Margins:
             )
             # lift.estimate is (P_treated − P_control) / P_control
         """
+        if not callable(compose):
+            raise TypeError(f"compose must be callable, got {type(compose).__name__}")
         h = self._build_evaluate_estimand(scenarios, compose)
         config = self._inference_config()
 
@@ -1079,7 +1103,7 @@ class Margins:
         n_obs = 0
         try:
             n_obs = len(self.adapter.training_data)
-        except Exception:
+        except (NotImplementedError, AttributeError, TypeError):
             pass
 
         # Expand labels with outcome suffixes for multi-outcome models

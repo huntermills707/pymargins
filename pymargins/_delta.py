@@ -360,7 +360,7 @@ def joint_wald_test(
     try:
         solved = jnp.linalg.solve(Sigma_g, diff)
         chi2 = float(diff @ solved)
-    except Exception:
+    except (jnp.linalg.LinAlgError, ValueError):
         chi2 = float('nan')
     regularized = False
     if not np.isfinite(chi2):

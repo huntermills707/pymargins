@@ -308,7 +308,7 @@ class MarginsResult:
             tr = self.test(value=0.0, null_scale="inference")
             z_vals = np.atleast_1d(tr.statistic)
             p_vals = np.atleast_1d(tr.pvalue)
-        except Exception:
+        except (ValueError, TypeError, np.linalg.LinAlgError):
             pass
 
         rows = []
@@ -521,7 +521,7 @@ class MarginsResult:
             if z_vals.size == n:
                 data["statistic"] = z_vals
                 data["p_value"] = p_vals
-        except Exception:
+        except (ValueError, TypeError, np.linalg.LinAlgError):
             pass
 
         # Over info
@@ -902,18 +902,6 @@ class MarginsResult:
         -------
         result : TestResult
         """
-        if self.gradient is None:
-            raise NotImplementedError(
-                "Joint test currently requires a delta-method result with "
-                "gradients. For simulation/bootstrap, use the empirical "
-                "joint distribution from result.draws."
-            )
-        if self.cov_params is None:
-            raise ValueError(
-                "Joint test requires Σ̂ on the result; this result has no "
-                "frozen cov_params (likely materialized without it)."
-            )
-
         if value is None:
             # Default null = zero on the inference scale (the universal
             # "no effect" point regardless of phi).
@@ -931,14 +919,49 @@ class MarginsResult:
             )
 
         est_inf = self.phi_inv(self.estimate) if self.phi_inv is not None else self.estimate
-        cov = jnp.asarray(self.cov_params)
 
-        chi2, p, df = joint_wald_test(
-            jnp.asarray(est_inf),
-            jnp.asarray(self.gradient),
-            cov,
-            null_value=value_inf,
-        )
+        if self.gradient is not None and self.cov_params is not None:
+            # Delta-method joint Wald test
+            cov = jnp.asarray(self.cov_params)
+            chi2, p, df = joint_wald_test(
+                jnp.asarray(est_inf),
+                jnp.asarray(self.gradient),
+                cov,
+                null_value=value_inf,
+            )
+        elif self.draws_inf is not None:
+            # Empirical joint test from simulation/bootstrap draws
+            draws = np.asarray(self.draws_inf)
+            if draws.ndim == 1:
+                draws = draws[:, None]
+            est_arr = np.asarray(est_inf)
+            if est_arr.ndim == 0:
+                est_arr = np.array([est_arr])
+            diff_arr = est_arr - np.asarray(value_inf)
+            # Center draws and compute empirical covariance
+            centered = draws - est_arr
+            emp_cov = np.cov(centered, rowvar=False)
+            if emp_cov.ndim == 0:
+                emp_cov = np.array([[emp_cov]])
+            # Regularize if singular
+            try:
+                solved = np.linalg.solve(emp_cov, diff_arr)
+                chi2 = float(diff_arr @ solved)
+            except np.linalg.LinAlgError:
+                ridge = 1e-12 * float(np.trace(emp_cov)) / emp_cov.shape[0]
+                ridge = max(ridge, float(np.finfo(emp_cov.dtype).eps))
+                emp_cov_reg = emp_cov + ridge * np.eye(emp_cov.shape[0])
+                solved = np.linalg.solve(emp_cov_reg, diff_arr)
+                chi2 = float(diff_arr @ solved)
+            df = int(diff_arr.shape[0])
+            p = float(1.0 - stats.chi2.cdf(chi2, df))
+        else:
+            raise ValueError(
+                "Joint test requires either (a) a delta-method result with "
+                "gradients and cov_params, or (b) simulation/bootstrap draws. "
+                "This result has neither."
+            )
+
         return TestResult(
             statistic=np.asarray(chi2),
             pvalue=np.asarray(p),

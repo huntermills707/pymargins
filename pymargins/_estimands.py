@@ -100,6 +100,10 @@ def make_prediction_estimand(
                 # For multi-output, average over rows (axis=0), keeping outputs
                 value = jnp.mean(mu, axis=0) if mu.ndim > 1 else jnp.mean(mu)
             else:
+                if not jnp.all(jnp.isfinite(weights)):
+                    raise ValueError("weights must be finite (no NaN or Inf)")
+                if jnp.any(weights < 0):
+                    raise ValueError("weights must be non-negative")
                 if jnp.sum(weights) == 0:
                     raise ValueError("weights must not sum to zero")
                 if mu.ndim > 1:
@@ -111,6 +115,10 @@ def make_prediction_estimand(
             if weights is None:
                 value = jnp.mean(mu, axis=0) if mu.ndim > 1 else jnp.mean(mu)
             else:
+                if not jnp.all(jnp.isfinite(weights)):
+                    raise ValueError("weights must be finite (no NaN or Inf)")
+                if jnp.any(weights < 0):
+                    raise ValueError("weights must be non-negative")
                 if jnp.sum(weights) == 0:
                     raise ValueError("weights must not sum to zero")
                 if mu.ndim > 1:
@@ -231,6 +239,10 @@ def make_slope_estimand(
             if weights is None:
                 value = jnp.mean(slopes, axis=0) if slopes.ndim > 1 else jnp.mean(slopes)
             else:
+                if not jnp.all(jnp.isfinite(weights)):
+                    raise ValueError("weights must be finite (no NaN or Inf)")
+                if jnp.any(weights < 0):
+                    raise ValueError("weights must be non-negative")
                 if jnp.sum(weights) == 0:
                     raise ValueError("weights must not sum to zero")
                 if slopes.ndim > 1:
@@ -241,6 +253,10 @@ def make_slope_estimand(
             if weights is None:
                 value = jnp.mean(slopes, axis=0) if slopes.ndim > 1 else jnp.mean(slopes)
             else:
+                if not jnp.all(jnp.isfinite(weights)):
+                    raise ValueError("weights must be finite (no NaN or Inf)")
+                if jnp.any(weights < 0):
+                    raise ValueError("weights must be non-negative")
                 if jnp.sum(weights) == 0:
                     raise ValueError("weights must not sum to zero")
                 if slopes.ndim > 1:

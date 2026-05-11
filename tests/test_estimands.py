@@ -44,9 +44,19 @@ def test_prediction_estimand_zero_weights_raises():
     """Zero-sum weights must raise ValueError."""
     adapter = DummyAdapter()
     X = jnp.array([[1.0, 2.0], [3.0, 4.0]])
-    h = make_prediction_estimand(adapter, X, aggregate="overall", weights=jnp.array([1.0, -1.0]))
+    h = make_prediction_estimand(adapter, X, aggregate="overall", weights=jnp.array([0.0, 0.0]))
     beta = jnp.array([0.5, -0.3])
     with pytest.raises(ValueError, match="weights must not sum to zero"):
+        h(beta)
+
+
+def test_prediction_estimand_negative_weights_raises():
+    """Negative weights must raise ValueError."""
+    adapter = DummyAdapter()
+    X = jnp.array([[1.0, 2.0], [3.0, 4.0]])
+    h = make_prediction_estimand(adapter, X, aggregate="overall", weights=jnp.array([1.0, -1.0]))
+    beta = jnp.array([0.5, -0.3])
+    with pytest.raises(ValueError, match="weights must be non-negative"):
         h(beta)
 
 
@@ -79,9 +89,19 @@ def test_slope_estimand_zero_weights_raises():
     """Zero-sum weights in slope estimand must raise ValueError."""
     adapter = DummyAdapter()
     df = pd.DataFrame({"x": [1.0, 2.0], "y": [3.0, 4.0]})
-    h = make_slope_estimand(adapter, df, "x", aggregate="overall", weights=jnp.array([1.0, -1.0]))
+    h = make_slope_estimand(adapter, df, "x", aggregate="overall", weights=jnp.array([0.0, 0.0]))
     beta = jnp.array([0.5, -0.3])
     with pytest.raises(ValueError, match="weights must not sum to zero"):
+        h(beta)
+
+
+def test_slope_estimand_negative_weights_raises():
+    """Negative weights in slope estimand must raise ValueError."""
+    adapter = DummyAdapter()
+    df = pd.DataFrame({"x": [1.0, 2.0], "y": [3.0, 4.0]})
+    h = make_slope_estimand(adapter, df, "x", aggregate="overall", weights=jnp.array([1.0, -1.0]))
+    beta = jnp.array([0.5, -0.3])
+    with pytest.raises(ValueError, match="weights must be non-negative"):
         h(beta)
 
 

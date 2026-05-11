@@ -272,7 +272,7 @@ def _run_delta(h, adapter, config, estimand_metadata):
                 rng_seed=config.rng_seed,
                 phi=config.phi,
             )
-        except Exception:
+        except (ValueError, TypeError, jax.errors.JAXTypeError):
             pass  # Diagnostic is best-effort
 
     estimate_report = config.phi(estimate) if config.phi is not None else estimate
@@ -311,6 +311,11 @@ def _run_simulation(h, adapter, config, estimand_metadata, *, fallback_reason=No
     Sigma_np = np.asarray(Sigma)
     beta_np = np.asarray(beta)
     draws_beta = rng.multivariate_normal(beta_np, Sigma_np, size=config.n_sim)
+    if not np.all(np.isfinite(draws_beta)):
+        raise ValueError(
+            "Simulation draws contain NaN or Inf. The covariance matrix may be "
+            "singular or numerically unstable."
+        )
 
     estimate = h(beta)
     try:
@@ -342,7 +347,7 @@ def _run_simulation(h, adapter, config, estimand_metadata, *, fallback_reason=No
             else:
                 k = kappa_vector(h, beta, Sigma,
                                  backend=config.gradient_backend, fd_step=config.fd_step)
-        except Exception:
+        except (ValueError, TypeError, jax.errors.JAXTypeError):
             pass  # Best-effort diagnostic
 
     # Apply phi to draws and estimate for reporting
@@ -620,8 +625,17 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
             idx = rng.integers(0, n_obs, size=n_obs)
         all_idx.append(idx)
 
-    # Worker function for a single replicate
-    def _single_replicate(args):
+    # Pre-compute JAX differentiability once to avoid per-replicate
+    # recompilation from is_jax_differentiable probes.
+    jax_diffable = None
+    if ci_method == "studentized":
+        beta_hat = adapter.coefficients()
+        jax_diffable = is_jax_differentiable(h, beta_hat)
+
+    # Step 1: Parallel refit (pure statsmodels/numpy, no JAX).
+    # JAX compilation is not thread-safe on CPU; we parallelize only the
+    # model refitting and do all JAX evaluation serially in the main thread.
+    def _refit_replicate(args):
         b, idx = args
         if hasattr(data, "iloc"):
             resampled = data.iloc[idx]
@@ -629,31 +643,15 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
             resampled = data[idx]
         try:
             new_adapter = adapter.refit(resampled, index=idx)
-            h_b = h_factory(new_adapter)
-            beta_b = new_adapter.coefficients()
-            theta_b = np.asarray(h_b(beta_b))
-
-            se_b = None
-            if ci_method == "studentized":
-                try:
-                    Sigma_b = new_adapter.covariance()
-                    if is_jax_differentiable(h_b, beta_b):
-                        grad_b = gradient(
-                            h_b, beta_b,
-                            backend=config.gradient_backend,
-                            fd_step=config.fd_step,
-                        )
-                        se_b = np.asarray(delta_se(grad_b, Sigma_b))
-                    else:
-                        se_b = None
-                except Exception:
-                    se_b = None
-
-            return (theta_b, se_b)
+            return b, new_adapter, None
         except Exception as exc:
-            return exc
+            # Broad catch is intentional: bootstrap resampling can trigger
+            # many model-fitting failure modes (perfect separation, missing
+            # data, singular Hessians, convergence failures). These are
+            # expected and counted against the 10% failure threshold.
+            # Programming errors in adapters are caught during testing.
+            return b, None, exc
 
-    # Execute replicates
     n_jobs = config.n_jobs
     if n_jobs == -1:
         import os
@@ -662,9 +660,37 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
     if n_jobs != 1:
         with threadpoolctl.threadpool_limits(limits=1):
             with ThreadPoolExecutor(max_workers=n_jobs) as executor:
-                raw_results = list(executor.map(_single_replicate, enumerate(all_idx)))
+                refitted = list(executor.map(_refit_replicate, enumerate(all_idx)))
     else:
-        raw_results = list(map(_single_replicate, enumerate(all_idx)))
+        refitted = list(map(_refit_replicate, enumerate(all_idx)))
+
+    # Step 2: Serial JAX evaluation (thread-safe, compilation cache friendly).
+    raw_results = []
+    for b, new_adapter, refit_exc in refitted:
+        if refit_exc is not None:
+            raw_results.append(refit_exc)
+            continue
+        try:
+            h_b = h_factory(new_adapter)
+            beta_b = new_adapter.coefficients()
+            theta_b = np.asarray(h_b(beta_b))
+
+            se_b = None
+            if ci_method == "studentized" and jax_diffable:
+                try:
+                    Sigma_b = new_adapter.covariance()
+                    grad_b = gradient(
+                        h_b, beta_b,
+                        backend=config.gradient_backend,
+                        fd_step=config.fd_step,
+                    )
+                    se_b = np.asarray(delta_se(grad_b, Sigma_b))
+                except (ValueError, TypeError, jax.errors.JAXTypeError, np.linalg.LinAlgError):
+                    se_b = None
+
+            raw_results.append((theta_b, se_b))
+        except (ValueError, RuntimeError, np.linalg.LinAlgError) as exc:
+            raw_results.append(exc)
 
     # Collect results
     h_draws_inf = []
@@ -780,7 +806,7 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
                     fd_step=config.fd_step,
                 )
                 se_hat = np.asarray(delta_se(grad_hat, Sigma_hat))
-            except Exception:
+            except (ValueError, TypeError, jax.errors.JAXTypeError, np.linalg.LinAlgError):
                 se_hat = np.std(h_draws_inf, axis=0, ddof=1)
         else:
             se_hat = np.std(h_draws_inf, axis=0, ddof=1)
@@ -804,7 +830,7 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
             else:
                 k = kappa_vector(h, beta_hat, Sigma_hat,
                                  backend=config.gradient_backend, fd_step=config.fd_step)
-        except Exception:
+        except (ValueError, TypeError, jax.errors.JAXTypeError):
             pass  # Best-effort diagnostic
 
     bootstrap_extras = {}
