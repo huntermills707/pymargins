@@ -214,3 +214,65 @@ def test_column_index_of_variable(zi_data):
     # In the concatenated design matrix [infl | count], z is at index 0, x is at index 2
     assert adapter.column_index_of_variable("z") == 0
     assert adapter.column_index_of_variable("x") == 2
+
+
+# ---------------------------------------------------------------------------
+# Custom covariance
+# ---------------------------------------------------------------------------
+
+def test_covariance_hc3(zi_data):
+    mod = ZeroInflatedPoisson.from_formula("y ~ x", exog_infl=zi_data[["z"]], data=zi_data)
+    res = mod.fit(disp=False)
+    adapter = StatsmodelsZIAdapter(res)
+    cov = adapter.covariance("HC3")
+    assert cov.shape == (len(res.params), len(res.params))
+    assert jnp.all(jnp.isfinite(cov))
+
+
+def test_attach_invalid_vcov(zi_data):
+    mod = ZeroInflatedPoisson.from_formula("y ~ x", exog_infl=zi_data[["z"]], data=zi_data)
+    res = mod.fit(disp=False)
+    with pytest.raises(ValueError, match="does not support vcov"):
+        Margins(res, vcov="HAC")
+
+
+# ---------------------------------------------------------------------------
+# Design matrix error paths
+# ---------------------------------------------------------------------------
+
+def test_design_matrix_missing_columns(zi_data):
+    mod = ZeroInflatedPoisson.from_formula("y ~ x", exog_infl=zi_data[["z"]], data=zi_data)
+    res = mod.fit(disp=False)
+    adapter = StatsmodelsZIAdapter(res)
+
+    bad_df = pd.DataFrame({"a": [1.0, 2.0]})
+    with pytest.raises(ValueError, match="Missing"):
+        adapter.design_matrix_from_df(bad_df)
+
+
+# ---------------------------------------------------------------------------
+# Array-fit refit
+# ---------------------------------------------------------------------------
+
+def test_refit_array_fit(zi_data):
+    """Array-fit refit works when DataFrame columns match statsmodels names."""
+    import statsmodels.api as sm
+    endog = zi_data["y"].values
+    # Build a DataFrame whose columns match the generic names statsmodels
+    # assigns to array-fit exog arrays (x1, x2, ...).
+    df_arr = pd.DataFrame({
+        "y": endog,
+        "const": 1.0,
+        "x1": zi_data["x"].values,
+        "z1": zi_data["z"].values,
+    })
+    exog = df_arr[["const", "x1"]].values
+    exog_infl = df_arr[["const", "z1"]].values
+    mod = ZeroInflatedPoisson(endog, exog, exog_infl=exog_infl)
+    res = mod.fit(disp=False)
+    adapter = StatsmodelsZIAdapter(res, training_data=df_arr)
+
+    resampled = df_arr.sample(n=len(df_arr), replace=True, random_state=42)
+    new_adapter = adapter.refit(resampled)
+    assert isinstance(new_adapter, StatsmodelsZIAdapter)
+    assert len(new_adapter.coefficients()) == len(adapter.coefficients())

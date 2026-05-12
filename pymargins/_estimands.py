@@ -25,9 +25,40 @@ estimand function.
 
 from __future__ import annotations
 from typing import Callable, Optional, Union, Any
+from functools import partial
 import jax
 import jax.numpy as jnp
 import numpy as np
+
+
+# ---------------------------------------------------------------------------
+# Kernel marker — used by the bootstrap path to detect module-level kernels
+# that can be differentiated with a stable function identity.
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Aggregation helper
+# ---------------------------------------------------------------------------
+
+def _aggregate(mu, aggregate, weights):
+    """Aggregate per-row predictions according to the rule."""
+    if aggregate == "overall" or aggregate == "weighted":
+        if weights is None:
+            return jnp.mean(mu, axis=0) if mu.ndim > 1 else jnp.mean(mu)
+        if not jnp.all(jnp.isfinite(weights)):
+            raise ValueError("weights must be finite (no NaN or Inf)")
+        if jnp.any(weights < 0):
+            raise ValueError("weights must be non-negative")
+        if jnp.sum(weights) == 0:
+            raise ValueError("weights must not sum to zero")
+        if mu.ndim > 1:
+            return jnp.sum(weights[:, None] * mu, axis=0) / jnp.sum(weights)
+        return jnp.sum(weights * mu) / jnp.sum(weights)
+    elif aggregate == "none":
+        return mu[0] if mu.shape[0] == 1 else mu
+    else:
+        raise ValueError(f"Unknown aggregate rule: {aggregate!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -91,51 +122,43 @@ def make_prediction_estimand(
     h : callable (beta) -> scalar or vector
         Inference-scale estimand suitable for jax.grad and the delta engine.
     """
-    def h(beta):
-        mu = adapter.predict(beta, X, offset=offset)
-        if transform is not None:
-            mu = transform(mu)
-        if aggregate == "overall":
-            if weights is None:
-                # For multi-output, average over rows (axis=0), keeping outputs
-                value = jnp.mean(mu, axis=0) if mu.ndim > 1 else jnp.mean(mu)
-            else:
-                if not jnp.all(jnp.isfinite(weights)):
-                    raise ValueError("weights must be finite (no NaN or Inf)")
-                if jnp.any(weights < 0):
-                    raise ValueError("weights must be non-negative")
-                if jnp.sum(weights) == 0:
-                    raise ValueError("weights must not sum to zero")
-                if mu.ndim > 1:
-                    # weights (n_rows,) broadcast against mu (n_rows, n_outputs)
-                    value = jnp.sum(weights[:, None] * mu, axis=0) / jnp.sum(weights)
-                else:
-                    value = jnp.sum(weights * mu) / jnp.sum(weights)
-        elif aggregate == "weighted":
-            if weights is None:
-                value = jnp.mean(mu, axis=0) if mu.ndim > 1 else jnp.mean(mu)
-            else:
-                if not jnp.all(jnp.isfinite(weights)):
-                    raise ValueError("weights must be finite (no NaN or Inf)")
-                if jnp.any(weights < 0):
-                    raise ValueError("weights must be non-negative")
-                if jnp.sum(weights) == 0:
-                    raise ValueError("weights must not sum to zero")
-                if mu.ndim > 1:
-                    # weights (n_rows,) broadcast against mu (n_rows, n_outputs)
-                    value = jnp.sum(weights[:, None] * mu, axis=0) / jnp.sum(weights)
-                else:
-                    value = jnp.sum(weights * mu) / jnp.sum(weights)
-        elif aggregate == "none":
-            # Squeeze singleton row dimension for scalar estimands
-            value = mu[0] if mu.shape[0] == 1 else mu
-        else:
-            raise ValueError(f"Unknown aggregate rule: {aggregate!r}")
-        if phi_inv is not None:
-            value = phi_inv(value)
-        return value
+    return partial(
+        prediction_kernel,
+        predict_fn=adapter.predict,
+        X=X,
+        offset=offset,
+        transform=transform,
+        aggregate=aggregate,
+        weights=weights,
+        phi_inv=phi_inv,
+    )
 
-    return h
+
+def prediction_kernel(
+    beta,
+    predict_fn,
+    X,
+    offset,
+    transform,
+    aggregate,
+    weights,
+    phi_inv,
+):
+    """Module-level kernel for prediction estimands.
+
+    Using a top-level function (rather than a closure) lets JAX cache the
+    compiled gradient across bootstrap replicates when the underlying
+    ``predict_fn`` primitive is stable (e.g. cached GLM JVP wrappers).
+    """
+    mu = predict_fn(beta, X, offset=offset)
+    if transform is not None:
+        mu = transform(mu)
+    value = _aggregate(mu, aggregate, weights)
+    if phi_inv is not None:
+        value = phi_inv(value)
+    return value
+
+prediction_kernel.__pymargins_kernel__ = True  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +199,7 @@ def make_slope_estimand(
     adapter : ModelAdapter
         Provides ``predict`` and ``design_matrix_from_df``.
 
-    df : pd.DataFrame
+    df : pd.DataFrame or TabularData
         Evaluation data. One row → slope at that row; multiple rows →
         per-row slopes aggregated per ``aggregate``. Must contain
         ``var_name`` as a column.
@@ -198,6 +221,10 @@ def make_slope_estimand(
     -------
     h : callable (beta) -> scalar or vector
     """
+    from ._tabular import as_tabular, to_pandas_if_needed
+
+    df = as_tabular(df)
+
     if var_name not in df.columns:
         raise ValueError(
             f"Variable {var_name!r} not in df.columns: {list(df.columns)}"
@@ -215,67 +242,54 @@ def make_slope_estimand(
 
     eps = fd_step * np.maximum(1.0, np.abs(v))  # shape (n_rows,)
 
-    # Use TabularData.with_column if available, otherwise pandas copy
-    if hasattr(df, "with_column"):
-        df_plus = df.with_column(var_name, v + eps)
-        df_minus = df.with_column(var_name, v - eps)
-    else:
-        df_plus = df.copy()
-        df_minus = df.copy()
-        df_plus[var_name] = v + eps
-        df_minus[var_name] = v - eps
+    df_plus = df.with_column(var_name, v + eps)
+    df_minus = df.with_column(var_name, v - eps)
 
-    from ._tabular import to_pandas_if_needed
     Xp = adapter.design_matrix_from_df(to_pandas_if_needed(df_plus))
     Xm = adapter.design_matrix_from_df(to_pandas_if_needed(df_minus))
     eps_jax = jnp.asarray(eps)
 
-    def h(beta):
-        mu_p = adapter.predict(beta, Xp, offset=offset)
-        mu_m = adapter.predict(beta, Xm, offset=offset)
-        if mu_p.ndim > 1:
-            slopes = (mu_p - mu_m) / (2.0 * eps_jax[:, None])
-        else:
-            slopes = (mu_p - mu_m) / (2.0 * eps_jax)
-        if transform is not None:
-            slopes = transform(slopes)
-        if aggregate == "overall":
-            if weights is None:
-                value = jnp.mean(slopes, axis=0) if slopes.ndim > 1 else jnp.mean(slopes)
-            else:
-                if not jnp.all(jnp.isfinite(weights)):
-                    raise ValueError("weights must be finite (no NaN or Inf)")
-                if jnp.any(weights < 0):
-                    raise ValueError("weights must be non-negative")
-                if jnp.sum(weights) == 0:
-                    raise ValueError("weights must not sum to zero")
-                if slopes.ndim > 1:
-                    value = jnp.sum(weights[:, None] * slopes, axis=0) / jnp.sum(weights)
-                else:
-                    value = jnp.sum(weights * slopes) / jnp.sum(weights)
-        elif aggregate == "weighted":
-            if weights is None:
-                value = jnp.mean(slopes, axis=0) if slopes.ndim > 1 else jnp.mean(slopes)
-            else:
-                if not jnp.all(jnp.isfinite(weights)):
-                    raise ValueError("weights must be finite (no NaN or Inf)")
-                if jnp.any(weights < 0):
-                    raise ValueError("weights must be non-negative")
-                if jnp.sum(weights) == 0:
-                    raise ValueError("weights must not sum to zero")
-                if slopes.ndim > 1:
-                    value = jnp.sum(weights[:, None] * slopes, axis=0) / jnp.sum(weights)
-                else:
-                    value = jnp.sum(weights * slopes) / jnp.sum(weights)
-        elif aggregate == "none":
-            value = slopes[0] if slopes.shape[0] == 1 else slopes
-        else:
-            raise ValueError(f"Unknown aggregate rule: {aggregate!r}")
-        if phi_inv is not None:
-            value = phi_inv(value)
-        return value
+    return partial(
+        slope_kernel,
+        predict_fn=adapter.predict,
+        Xp=Xp,
+        Xm=Xm,
+        offset=offset,
+        transform=transform,
+        aggregate=aggregate,
+        weights=weights,
+        phi_inv=phi_inv,
+        eps_jax=eps_jax,
+    )
 
-    return h
+
+def slope_kernel(
+    beta,
+    predict_fn,
+    Xp,
+    Xm,
+    offset,
+    transform,
+    aggregate,
+    weights,
+    phi_inv,
+    eps_jax,
+):
+    """Module-level kernel for slope estimands."""
+    mu_p = predict_fn(beta, Xp, offset=offset)
+    mu_m = predict_fn(beta, Xm, offset=offset)
+    if mu_p.ndim > 1:
+        slopes = (mu_p - mu_m) / (2.0 * eps_jax[:, None])
+    else:
+        slopes = (mu_p - mu_m) / (2.0 * eps_jax)
+    if transform is not None:
+        slopes = transform(slopes)
+    value = _aggregate(slopes, aggregate, weights)
+    if phi_inv is not None:
+        value = phi_inv(value)
+    return value
+
+slope_kernel.__pymargins_kernel__ = True  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------
@@ -339,43 +353,62 @@ def make_linear_combination_estimand(
     offsets = scenario_offsets if scenario_offsets is not None else [None] * n_scenarios
     sw = scenario_weights if scenario_weights is not None else [None] * n_scenarios
 
-    def per_scenario_value(beta, X, offset, w):
-        mu = adapter.predict(beta, X, offset=offset)
-        if scenario_aggregate in ("overall", "weighted"):
-            if w is None:
-                return jnp.mean(mu, axis=0) if mu.ndim > 1 else jnp.mean(mu)
-            if jnp.sum(w) == 0:
-                raise ValueError("scenario_weights must not sum to zero")
-            return jnp.sum(w * mu, axis=0) / jnp.sum(w) if mu.ndim > 1 else jnp.sum(w * mu) / jnp.sum(w)
-        elif scenario_aggregate == "none":
-            # Means a single-row scenario; just return scalar
-            return mu[0] if mu.shape[0] == 1 else mu
-        else:
-            raise ValueError(f"Unknown scenario_aggregate: {scenario_aggregate!r}")
+    return partial(
+        linear_combination_kernel,
+        predict_fn=adapter.predict,
+        scenarios_X=scenarios_X,
+        offsets=offsets,
+        sw=sw,
+        weights=weights,
+        phi_inv=phi_inv,
+        scenario_aggregate=scenario_aggregate,
+    )
 
-    def h(beta):
-        # Compute per-scenario predictions (may be scalar each)
-        scenario_values = jnp.stack([
-            per_scenario_value(beta, scenarios_X[i], offsets[i], sw[i])
-            for i in range(n_scenarios)
+
+def per_scenario_kernel(beta, predict_fn, X, offset, w, scenario_aggregate):
+    """Module-level kernel for a single scenario's aggregated prediction."""
+    mu = predict_fn(beta, X, offset=offset)
+    if scenario_aggregate in ("overall", "weighted"):
+        if w is None:
+            return jnp.mean(mu, axis=0) if mu.ndim > 1 else jnp.mean(mu)
+        if not jnp.all(jnp.isfinite(w)):
+            raise ValueError("scenario_weights must be finite (no NaN or Inf)")
+        if jnp.any(w < 0):
+            raise ValueError("scenario_weights must be non-negative")
+        if jnp.sum(w) == 0:
+            raise ValueError("scenario_weights must not sum to zero")
+        return jnp.sum(w * mu, axis=0) / jnp.sum(w) if mu.ndim > 1 else jnp.sum(w * mu) / jnp.sum(w)
+    elif scenario_aggregate == "none":
+        return mu[0] if mu.shape[0] == 1 else mu
+    else:
+        raise ValueError(f"Unknown scenario_aggregate: {scenario_aggregate!r}")
+
+
+def linear_combination_kernel(
+    beta,
+    predict_fn,
+    scenarios_X,
+    offsets,
+    sw,
+    weights,
+    phi_inv,
+    scenario_aggregate,
+):
+    """Module-level kernel for linear-combination estimands."""
+    scenario_values = jnp.stack([
+        per_scenario_kernel(beta, predict_fn, scenarios_X[i], offsets[i], sw[i], scenario_aggregate)
+        for i in range(len(scenarios_X))
+    ])
+    if phi_inv is not None:
+        scenario_values = phi_inv(scenario_values)
+    if isinstance(weights, dict):
+        weight_matrix = jnp.stack([
+            jnp.asarray(weights[name]) for name in weights
         ])
+        return weight_matrix @ scenario_values
+    return jnp.dot(jnp.asarray(weights), scenario_values)
 
-        # Apply phi_inv to per-scenario values BEFORE the linear combination
-        # (the combination is on the inference scale, so we need to be there
-        #  already). For log-scale: log(p1) - log(p0), not log(p1 - p0).
-        if phi_inv is not None:
-            scenario_values = phi_inv(scenario_values)
-
-        if isinstance(weights, dict):
-            # Multiple contrasts: stack their values
-            weight_matrix = jnp.stack([
-                jnp.asarray(weights[name]) for name in weights
-            ])
-            return weight_matrix @ scenario_values
-        else:
-            return jnp.dot(jnp.asarray(weights), scenario_values)
-
-    return h
+linear_combination_kernel.__pymargins_kernel__ = True  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------
@@ -434,30 +467,39 @@ def make_evaluate_estimand(
     offsets = scenario_offsets if scenario_offsets is not None else [None] * n_scenarios
     sw = scenario_weights if scenario_weights is not None else [None] * n_scenarios
 
-    def per_scenario_value(beta, X, offset, w):
-        mu = adapter.predict(beta, X, offset=offset)
-        if scenario_aggregate in ("overall", "weighted"):
-            if w is None:
-                return jnp.mean(mu, axis=0) if mu.ndim > 1 else jnp.mean(mu)
-            if jnp.sum(w) == 0:
-                raise ValueError("scenario_weights must not sum to zero")
-            return jnp.sum(w * mu, axis=0) / jnp.sum(w) if mu.ndim > 1 else jnp.sum(w * mu) / jnp.sum(w)
-        elif scenario_aggregate == "none":
-            return mu[0] if mu.shape[0] == 1 else mu
-        else:
-            raise ValueError(f"Unknown scenario_aggregate: {scenario_aggregate!r}")
+    return partial(
+        evaluate_kernel,
+        predict_fn=adapter.predict,
+        scenarios_X=scenarios_X,
+        offsets=offsets,
+        sw=sw,
+        compose=compose,
+        phi_inv=phi_inv,
+        scenario_aggregate=scenario_aggregate,
+    )
 
-    def h(beta):
-        scenario_values = jnp.stack([
-            per_scenario_value(beta, scenarios_X[i], offsets[i], sw[i])
-            for i in range(n_scenarios)
-        ])
-        result = compose(scenario_values)
-        if phi_inv is not None:
-            result = phi_inv(result)
-        return result
 
-    return h
+def evaluate_kernel(
+    beta,
+    predict_fn,
+    scenarios_X,
+    offsets,
+    sw,
+    compose,
+    phi_inv,
+    scenario_aggregate,
+):
+    """Module-level kernel for arbitrary nonlinear composition estimands."""
+    scenario_values = jnp.stack([
+        per_scenario_kernel(beta, predict_fn, scenarios_X[i], offsets[i], sw[i], scenario_aggregate)
+        for i in range(len(scenarios_X))
+    ])
+    result = compose(scenario_values)
+    if phi_inv is not None:
+        result = phi_inv(result)
+    return result
+
+evaluate_kernel.__pymargins_kernel__ = True  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------

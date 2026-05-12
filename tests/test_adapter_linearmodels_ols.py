@@ -44,3 +44,32 @@ def test_margins_dydx_olsresults(ols_data):
 
     slope = m.dydx("x")
     assert np.isclose(float(slope.estimate), float(res.params["x"]), rtol=2e-2)
+
+
+def test_refit_olsresults(ols_data):
+    mod = IV2SLS.from_formula("y ~ 1 + x", data=ols_data)
+    res = mod.fit()
+    adapter = LinearmodelsIVAdapter(res)
+
+    resampled = ols_data.sample(n=len(ols_data), replace=True, random_state=42)
+    new_adapter = adapter.refit(resampled)
+    assert isinstance(new_adapter, LinearmodelsIVAdapter)
+    assert len(new_adapter.coefficients()) == len(adapter.coefficients())
+
+
+def test_bootstrap_olsresults(ols_data):
+    mod = IV2SLS.from_formula("y ~ 1 + x", data=ols_data)
+    res = mod.fit()
+    m = Margins(res, method="bootstrap", n_boot=20, rng_seed=42)
+    pred = m.predict()
+    assert np.isfinite(float(pred.estimate))
+    assert np.isfinite(float(pred.std_error))
+
+
+def test_custom_vcov_olsresults(ols_data):
+    mod = IV2SLS.from_formula("y ~ 1 + x", data=ols_data)
+    res = mod.fit()
+    m = Margins(res, vcov="robust")
+    pred = m.predict()
+    assert np.isfinite(float(pred.estimate))
+    assert np.isfinite(float(pred.std_error))

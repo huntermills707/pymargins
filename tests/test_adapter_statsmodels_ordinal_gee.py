@@ -16,17 +16,18 @@ from pymargins._adapters.statsmodels_ordinal_gee import StatsmodelsOrdinalGEEAda
 @pytest.fixture
 def df_ordinal():
     np.random.seed(42)
-    n = 300
+    n = 1000
     df = pd.DataFrame({
         "x1": np.random.randn(n),
         "x2": np.random.randn(n),
-        "group": np.repeat(range(30), 10),
+        "group": np.repeat(range(50), 20),
     })
     # Ordered outcome with 3 categories
-    logit = 0.5 + 0.3 * df["x1"] - 0.4 * df["x2"]
+    # Smaller effects and wider thresholds avoid degenerate fits on random data.
+    logit = 0.2 * df["x1"] - 0.15 * df["x2"]
     u = np.random.rand(n)
-    df["y"] = (u > 1 / (1 + np.exp(-(-0.5 + logit)))).astype(int) + (
-        u > 1 / (1 + np.exp(-(0.5 + logit)))
+    df["y"] = (u > 1 / (1 + np.exp(-(-0.8 + logit)))).astype(int) + (
+        u > 1 / (1 + np.exp(-(0.8 + logit)))
     ).astype(int)
     return df
 
@@ -192,9 +193,6 @@ def test_predict_matches_fittedvalues_formula(ordinal_fit_formula):
     X = jnp.asarray(ordinal_fit_formula.model.exog_orig)
     probs = adapter.predict(beta, X)
     assert probs.shape == (len(X), adapter.n_outcomes)
-    # Skip detailed comparison if model is degenerate (NaN params on random data)
-    if not np.isfinite(np.asarray(beta)).all():
-        pytest.skip("Model fit is degenerate on random data")
     n = len(X)
     ncut = adapter._ncut
     cumprobs = np.asarray(ordinal_fit_formula.fittedvalues).reshape(n, ncut)
@@ -214,8 +212,6 @@ def test_predict_matches_fittedvalues_array(ordinal_fit_array, df_ordinal):
     probs = adapter.predict(beta, X)
     n = len(X)
     ncut = adapter._ncut
-    if not np.isfinite(np.asarray(beta)).all():
-        pytest.skip("Model fit is degenerate on random data")
     cumprobs = np.asarray(ordinal_fit_array.fittedvalues).reshape(n, ncut)
     expected = np.zeros((n, ncut + 1))
     expected[:, 0] = 1 - cumprobs[:, 0]

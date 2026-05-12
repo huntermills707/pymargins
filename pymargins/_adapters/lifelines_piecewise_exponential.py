@@ -14,6 +14,8 @@ inference is supported.
 
 from __future__ import annotations
 from typing import Optional, Any
+import copy
+
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
@@ -125,7 +127,8 @@ class LifelinesPiecewiseExponentialAdapter(WrappedFDAdapter):
     def native_predict(self, beta_np: np.ndarray, X) -> np.ndarray:
         """Compute survival probability at prediction_time."""
         df_eval = pd.DataFrame(np.asarray(X), columns=self._exog_names)
-        pred = self.results.predict_survival_function(df_eval, times=[self._prediction_time])
+        fitter = copy.copy(self.results)
+        pred = fitter.predict_survival_function(df_eval, times=[self._prediction_time])
         return pred.values.flatten()
 
     # -----------------------------------------------------------------------

@@ -263,7 +263,7 @@ def _concrete_primal(x):
         return x.primal
     try:
         return np.asarray(x)
-    except Exception:
+    except (TypeError, ValueError):
         return x
 
 
@@ -303,6 +303,15 @@ def make_predict_with_fd_jvp(
         JAX-compatible wrapper. jax.grad, jax.hessian, and jax.jvp all work
         through this function. Both β and X can be differentiated against
         (the latter is needed for dydx slopes).
+
+    Notes
+    -----
+    **Offset handling:** If the model uses an offset (e.g. exposure in Poisson
+    models), the offset must be baked into ``predict_native`` at the call site
+    where this factory is invoked. The wrapped function signature is
+    ``(beta, X)``; there is no ``offset`` argument because JAX traces both
+    arguments and an offset would need to be a traced array (not a static
+    ``nondiff_argnum``) to support differentiation through it.
     """
     @jax.custom_jvp
     def predict_wrapped(beta, X):
@@ -479,6 +488,22 @@ def _jax_link_inverse_deriv(link):
     raise NotImplementedError(f"No JAX mapping for link derivative {name!r}")
 
 
+# Module-level cache for GLM JVP wrappers.  Caching by link identity
+# eliminates per-adapter-instance primitive creation, which in turn lets
+# JAX's compilation cache hit across bootstrap replicates.
+_glm_jvp_cache: dict[tuple[str, Any, Any], Callable] = {}
+
+
+def _glm_jvp_cache_key(link) -> tuple[str, Any, Any]:
+    """Hashable key that captures every link attribute used by
+    _jax_link_inverse and _jax_link_inverse_deriv."""
+    return (
+        type(link).__name__,
+        getattr(link, "power", None),
+        getattr(link, "alpha", None),
+    )
+
+
 def make_glm_jvp_wrapper(
     family,
 ) -> Callable:
@@ -507,6 +532,10 @@ def make_glm_jvp_wrapper(
         require baking offset usage into the factory call site.
     """
     link = family.link
+    cache_key = _glm_jvp_cache_key(link)
+    if cache_key in _glm_jvp_cache:
+        return _glm_jvp_cache[cache_key]
+
     link_inv = _jax_link_inverse(link)
     link_inv_deriv = _jax_link_inverse_deriv(link)
 
@@ -545,6 +574,7 @@ def make_glm_jvp_wrapper(
 
         return mu, mu_dot
 
+    _glm_jvp_cache[cache_key] = predict_wrapped
     return predict_wrapped
 
 

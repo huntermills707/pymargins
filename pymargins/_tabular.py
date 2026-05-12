@@ -14,6 +14,22 @@ import numpy as np
 
 ArrayLike = Union[np.ndarray, Any]  # Any = jnp.ndarray when jax is available
 
+# Hoist optional polars import to module level so that individual methods
+# do not pay the import lookup cost on every call.
+try:
+    import polars as _pl  # type: ignore[import-untyped]
+except ImportError:
+    _pl = None  # type: ignore[misc]
+
+__all__ = [
+    "TabularData",
+    "PandasTabular",
+    "PolarsTabular",
+    "as_tabular",
+    "concat_tables",
+    "to_pandas_if_needed",
+]
+
 
 # ---------------------------------------------------------------------------
 # Protocol
@@ -58,7 +74,13 @@ class TabularData(Protocol):
 # ---------------------------------------------------------------------------
 
 class PandasTabular:
-    """TabularData backend backed by pandas. Zero user-visible change."""
+    """TabularData backend backed by pandas. Zero user-visible change.
+
+    .. note::
+       The index is reset (``reset_index(drop=True)``) on construction.
+       Users who pass a DataFrame with a meaningful index should be aware
+       that the index is discarded and downstream alignment is positional.
+    """
 
     def __init__(self, df: "pd.DataFrame"):
         import pandas as pd
@@ -147,9 +169,10 @@ class PolarsTabular:
     """
 
     def __init__(self, df: "pl.DataFrame"):
-        import polars as pl
+        if _pl is None:
+            raise RuntimeError("polars is not installed")
 
-        if not isinstance(df, pl.DataFrame):
+        if not isinstance(df, _pl.DataFrame):
             raise TypeError(f"PolarsTabular expects pl.DataFrame, got {type(df).__name__}")
         self._df = df
 
@@ -170,29 +193,41 @@ class PolarsTabular:
         return self._df[key].to_numpy()
 
     def with_column(self, name: str, values: ArrayLike) -> "PolarsTabular":
-        import polars as pl
+        if _pl is None:
+            raise RuntimeError("polars is not installed")
 
         # Normalize values to a polars Series
         if hasattr(values, "__len__") and not isinstance(values, (str, bytes)):
             # array-like: numpy, jax, list, etc.
-            series = pl.Series(name, np.asarray(values))
+            # Avoid np.asarray for plain lists/tuples (polars accepts them
+            # directly); for JAX arrays the device-to-host transfer is
+            # unavoidable because polars lives on host memory.
+            if isinstance(values, (list, tuple)):
+                series = _pl.Series(name, values)
+            else:
+                series = _pl.Series(name, np.asarray(values))
         else:
             # scalar
-            series = pl.lit(values).alias(name)
+            series = _pl.lit(values).alias(name)
         return PolarsTabular(self._df.with_columns(series))
 
     # --- row slicing ---
     def iloc(self, idx: Any) -> "PolarsTabular":
-        import polars as pl
+        if _pl is None:
+            raise RuntimeError("polars is not installed")
 
         if hasattr(idx, "dtype") and idx.dtype == bool:
             # boolean mask
-            mask = pl.Series("mask", np.asarray(idx))
+            mask = _pl.Series("mask", np.asarray(idx))
             return PolarsTabular(self._df.filter(mask))
         # integer index (single or list)
         if np.ndim(idx) == 0:
             idx = [idx]
-        return PolarsTabular(self._df[np.asarray(idx).tolist()])
+        idx_arr = np.asarray(idx)
+        # Polars does not support negative indices; normalize them.
+        if np.issubdtype(idx_arr.dtype, np.integer) and np.any(idx_arr < 0):
+            idx_arr = np.where(idx_arr < 0, idx_arr + len(self), idx_arr)
+        return PolarsTabular(self._df[idx_arr.tolist()])
 
     # --- grouping ---
     def groupby(self, keys: list[str]) -> Iterable[tuple[Any, "PolarsTabular"]]:
@@ -205,10 +240,11 @@ class PolarsTabular:
     # --- combination ---
     @staticmethod
     def concat(tables: list["PolarsTabular"]) -> "PolarsTabular":
-        import polars as pl
+        if _pl is None:
+            raise RuntimeError("polars is not installed")
 
         dfs = [t._df for t in tables]
-        return PolarsTabular(pl.concat(dfs))
+        return PolarsTabular(_pl.concat(dfs))
 
     # --- conversion ---
     def to_pandas(self) -> "pd.DataFrame":
@@ -252,13 +288,9 @@ def as_tabular(data) -> Union[PandasTabular, PolarsTabular]:
     if isinstance(data, pd.DataFrame):
         return PandasTabular(data)
 
-    # Lazy import polars — it's an optional dependency
-    try:
-        import polars as pl
-        if isinstance(data, pl.DataFrame):
-            return PolarsTabular(data)
-    except ImportError:
-        pass
+    # Use the module-level optional polars import
+    if _pl is not None and isinstance(data, _pl.DataFrame):
+        return PolarsTabular(data)
 
     raise TypeError(
         f"Cannot convert {type(data).__name__} to TabularData. "

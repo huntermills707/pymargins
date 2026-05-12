@@ -51,3 +51,32 @@ def test_margins_dydx(panel_df):
 
     slope = m.dydx("x1")
     assert np.isclose(float(slope.estimate), float(res.params["x1"]), rtol=2e-2)
+
+
+def test_refit_famamacbeth(panel_df):
+    mod = FamaMacBeth.from_formula("y ~ x1", data=panel_df)
+    res = mod.fit()
+    adapter = LinearmodelsPanelAdapter(res)
+
+    resampled = panel_df.sample(n=len(panel_df), replace=True, random_state=42)
+    new_adapter = adapter.refit(resampled)
+    assert isinstance(new_adapter, LinearmodelsPanelAdapter)
+    assert len(new_adapter.coefficients()) == len(adapter.coefficients())
+
+
+def test_bootstrap_famamacbeth(panel_df):
+    mod = FamaMacBeth.from_formula("y ~ x1", data=panel_df)
+    res = mod.fit()
+    m = Margins(res, method="bootstrap", n_boot=20, rng_seed=42)
+    pred = m.predict()
+    assert np.isfinite(float(pred.estimate))
+    assert np.isfinite(float(pred.std_error))
+
+
+def test_custom_vcov_famamacbeth(panel_df):
+    mod = FamaMacBeth.from_formula("y ~ x1", data=panel_df)
+    res = mod.fit()
+    m = Margins(res, vcov="robust")
+    pred = m.predict()
+    assert np.isfinite(float(pred.estimate))
+    assert np.isfinite(float(pred.std_error))

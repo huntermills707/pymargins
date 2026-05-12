@@ -16,6 +16,8 @@ Delta-method SEs are INVALID. Only bootstrap inference is supported.
 
 from __future__ import annotations
 from typing import Optional, Any
+import copy
+
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
@@ -132,7 +134,8 @@ class LifelinesAalenAdditiveAdapter(WrappedFDAdapter):
         ensures the model state is updated.
         """
         df_eval = pd.DataFrame(np.asarray(X), columns=self._exog_names)
-        pred = self.results.predict_survival_function(df_eval, times=[self._prediction_time])
+        fitter = copy.copy(self.results)
+        pred = fitter.predict_survival_function(df_eval, times=[self._prediction_time])
         # Extract the row closest to prediction_time
         idx = pred.index.get_indexer([self._prediction_time], method="nearest")[0]
         values = pred.iloc[idx].values

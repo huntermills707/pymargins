@@ -91,7 +91,7 @@ class LinearmodelsIVAdapter(LinearPredictionAdapter):
                     instr_df = pd.DataFrame(instr.ndarray, columns=instr.cols)
                     df = pd.concat([df, instr_df], axis=1)
             return df
-        except Exception:
+        except (AttributeError, TypeError, ValueError):
             return None
 
     @property

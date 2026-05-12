@@ -70,7 +70,7 @@ class LinearmodelsPanelAdapter(LinearPredictionAdapter):
             # Drop duplicate columns (e.g. intercept already in exog)
             reconstructed = reconstructed.loc[:, ~reconstructed.columns.duplicated()]
             return reconstructed
-        except Exception as exc:
+        except (AttributeError, TypeError, ValueError) as exc:
             raise ValueError(
                 "training_data must be provided for this linearmodels fit; "
                 "automatic reconstruction from model components failed: "

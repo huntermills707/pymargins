@@ -308,8 +308,8 @@ class MarginsResult:
             tr = self.test(value=0.0, null_scale="inference")
             z_vals = np.atleast_1d(tr.statistic)
             p_vals = np.atleast_1d(tr.pvalue)
-        except (ValueError, TypeError, np.linalg.LinAlgError):
-            pass
+        except (ValueError, TypeError, np.linalg.LinAlgError) as exc:
+            warnings.warn(f"Test statistics omitted from summary: {exc}", stacklevel=2)
 
         rows = []
         for i in range(est.size):
@@ -501,7 +501,7 @@ class MarginsResult:
         variables = self.estimand_metadata.get("variables")
         labels = self.estimand_metadata.get("labels")
         if variables is not None:
-            data["term"] = [list(variables)] * n
+            data["term"] = [list(variables) for _ in range(n)]
         elif labels is not None and len(labels) == n:
             data["term"] = labels
         else:
@@ -521,15 +521,20 @@ class MarginsResult:
             if z_vals.size == n:
                 data["statistic"] = z_vals
                 data["p_value"] = p_vals
-        except (ValueError, TypeError, np.linalg.LinAlgError):
-            pass
+        except (ValueError, TypeError, np.linalg.LinAlgError) as exc:
+            warnings.warn(f"Test statistics omitted from to_frame: {exc}", stacklevel=2)
 
         # Over info
         over = self.estimand_metadata.get("over")
         if over is not None:
             data["over"] = np.repeat(",".join(over), n)
-            # Try to parse over values from labels or scenarios
-            if labels is not None and len(labels) == n:
+            # Try to read over values from explicit metadata first
+            over_values_meta = self.estimand_metadata.get("_over_values")
+            if over_values_meta is not None and len(over_values_meta) == n:
+                data["over_value"] = [
+                    ", ".join(str(ov[o]) for o in over) for ov in over_values_meta
+                ]
+            elif labels is not None and len(labels) == n:
                 over_values = []
                 for lab in labels:
                     vals = []
@@ -552,7 +557,8 @@ class MarginsResult:
 
         # Scenario columns
         scenarios = self.estimand_metadata.get("scenarios")
-        if scenarios is not None and len(scenarios) == n:
+        kind = self.estimand_metadata.get("kind")
+        if scenarios is not None and len(scenarios) == n and kind in ("prediction", "slope", None):
             all_keys = sorted(set().union(*(s.keys() for s in scenarios)))
             for key in all_keys:
                 col_values = [s.get(key, np.nan) for s in scenarios]
@@ -828,6 +834,8 @@ class MarginsResult:
         -------
         result : TestResult
         """
+        if not np.isfinite(value):
+            raise ValueError(f"test value must be finite, got {value}")
         if null_scale == "inference" or self.phi_inv is None:
             null_inf = value
         elif null_scale == "reporting":
@@ -918,6 +926,15 @@ class MarginsResult:
                 f"null_scale must be 'reporting' or 'inference', got {null_scale!r}"
             )
 
+        estimate = np.asarray(self.estimate)
+        value_arr = np.asarray(value_inf)
+        if value_arr.shape != estimate.shape:
+            raise ValueError(
+                f"value shape {value_arr.shape} does not match estimate shape {estimate.shape}"
+            )
+        if not np.all(np.isfinite(value_arr)):
+            raise ValueError("value must be finite (no NaN or Inf)")
+
         est_inf = self.phi_inv(self.estimate) if self.phi_inv is not None else self.estimate
 
         if self.gradient is not None and self.cov_params is not None:
@@ -1006,6 +1023,7 @@ class MarginsResult:
         )
 
     def __add__(self, other: "MarginsResult") -> "MarginsResult":
+        """Add two estimands with proper joint inference via the delta method."""
         self._check_compatible(other)
         return _combine_results(
             self, other, lambda a, b: a + b,
@@ -1014,8 +1032,9 @@ class MarginsResult:
         )
 
     def __mul__(self, other) -> "MarginsResult":
+        """Scale the estimand by a scalar, with inference-aware transforms."""
         if isinstance(other, MarginsResult):
-            raise NotImplementedError(
+            raise ValueError(
                 "Product of two MarginsResults is nonlinear; use evaluate() "
                 "with a custom compose function instead."
             )
@@ -1075,8 +1094,9 @@ class MarginsResult:
         )
 
     def __truediv__(self, other) -> "MarginsResult":
+        """Scale the estimand by the reciprocal of a scalar."""
         if isinstance(other, MarginsResult):
-            raise NotImplementedError(
+            raise ValueError(
                 "Ratio of two MarginsResults is nonlinear; use evaluate() "
                 "with a custom compose function (e.g., compose=lambda p: p[0]/p[1]) "
                 "for proper inference."
@@ -1239,6 +1259,13 @@ class MarginsResult:
         results. Useful for storing many results long-term where you don't
         need to combine them further. Reporting (summary, to_frame, conf_int
         at the stored level) still works.
+
+        Warnings
+        --------
+        After calling ``materialize()``, ``test()`` and ``conf_int(level=...)``
+        will raise ``ValueError`` because ``cov_params`` and ``gradient`` are
+        cleared. Only the confidence level stored at construction remains
+        available without error.
         """
         return MarginsResult(
             estimate=self.estimate,
@@ -1291,10 +1318,11 @@ def _combine_results(
     combined_inf = estimate_combine(a_inf, b_inf)
 
     if a.gradient is None or b.gradient is None:
-        raise NotImplementedError(
+        raise ValueError(
             "Composition currently requires delta-method results (with "
             "gradients). Simulation/bootstrap composition would require "
-            "matched draws; not yet implemented."
+            "matched draws; use the draws array manually or re-run with "
+            "method='delta'."
         )
 
     new_grad = grad_combine(a.gradient, b.gradient)

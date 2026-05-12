@@ -160,7 +160,7 @@ def test_linear_combination_zero_scenario_weights_raises():
     h = make_linear_combination_estimand(
         adapter, [X1, X2], weights,
         scenario_aggregate="weighted",
-        scenario_weights=[jnp.array([1.0, -1.0]), jnp.array([1.0, 1.0])],
+        scenario_weights=[jnp.array([0.0, 0.0]), jnp.array([1.0, 1.0])],
     )
     beta = jnp.array([0.5, -0.3])
     with pytest.raises(ValueError, match="scenario_weights must not sum to zero"):

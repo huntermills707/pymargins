@@ -398,6 +398,23 @@ def test_prediction_grid_blocks_sliced_correctly(fit_logit):
     assert np.all(np.isfinite(pred.estimate))
 
 
+def test_grid_block_slicing_defensive_check(fit_logit):
+    """If an adapter drops rows, the grid block check should raise a clear error."""
+    m = Margins.linear_scale(fit_logit, at="typical")
+    from unittest.mock import patch
+
+    def drop_rows(self, df):
+        # Drop one row to break the grid layout
+        X = self._original_design_matrix_from_df(df)
+        return X[:-1]
+
+    adapter = m.adapter
+    adapter._original_design_matrix_from_df = adapter.design_matrix_from_df
+    with patch.object(adapter, "design_matrix_from_df", lambda df: drop_rows(adapter, df)):
+        with pytest.raises(ValueError, match="Design matrix rows .* do not match expected grid layout"):
+            m.predict(atexog={"treatment": [0, 1]})
+
+
 # ---------------------------------------------------------------------------
 # 16. h_factory passed unconditionally
 # ---------------------------------------------------------------------------
@@ -633,3 +650,67 @@ def test_bootstrap_refit_resamples_offset():
         assert len(off) == n
         # Values should be a subset of 0..n-1 (the original offset values)
         assert np.all((off >= 0) & (off < n))
+
+
+def test_bootstrap_perfect_separation_counts_failure():
+    """Bootstrap with near-perfect separation should count failures and emit a warning."""
+    rng = np.random.default_rng(42)
+    n = 30
+    x = np.concatenate([rng.standard_normal(12) - 2, rng.standard_normal(12) + 2, rng.standard_normal(6)])
+    y = np.array([0] * 12 + [1] * 12 + [int(xi > 0) for xi in rng.standard_normal(6)])
+    df = pd.DataFrame({"x": x, "y": y})
+    fit = smf.logit("y ~ x", data=df).fit(disp=False)
+
+    m = Margins(fit, method="bootstrap", n_boot=20, rng_seed=42)
+    with pytest.warns(UserWarning, match="Bootstrap: .* replicates failed"):
+        pred = m.predict()
+
+    assert np.isfinite(float(pred.estimate))
+    assert pred.method == "bootstrap"
+
+
+# ---------------------------------------------------------------------------
+# Bootstrap refit with dropped category level
+# ---------------------------------------------------------------------------
+
+def test_bootstrap_refit_dropped_category_counts_failure():
+    """If resampling drops a category level, patsy produces fewer columns.
+    The bootstrap should count this as a failed replicate, not crash."""
+    rng = np.random.default_rng(42)
+    n = 200
+    df = pd.DataFrame({
+        "x": rng.standard_normal(n),
+        # Rare category: 3 observations (~1.5%). Expected drop rate ≈ 5%,
+        # so a few replicates out of 50 will fail, but not enough to
+        # exceed the 10% threshold.
+        "group": ["A"] * 197 + ["B"] * 3,
+        "y": rng.standard_normal(n) + 2.0 * rng.standard_normal(n),
+    })
+    fit = smf.ols("y ~ x + C(group)", data=df).fit()
+
+    m = Margins(fit, method="bootstrap", n_boot=50, rng_seed=42)
+    # Some resamples will drop the rare category. The bootstrap engine
+    # should emit a warning about failed replicates but still produce
+    # a valid result from the successful ones.
+    with pytest.warns(UserWarning, match="Bootstrap: .* replicates failed"):
+        pred = m.predict()
+
+    assert np.isfinite(float(pred.estimate))
+    assert pred.method == "bootstrap"
+
+
+def test_bootstrap_refit_dropped_category_raises_when_too_many_fail():
+    """If >10% of replicates have dropped categories, bootstrap should raise."""
+    rng = np.random.default_rng(42)
+    n = 100
+    df = pd.DataFrame({
+        "x": rng.standard_normal(n),
+        # Very rare category: 1 observation. Drop rate ≈ 37%, well above 10%.
+        "group": ["A"] * 95 + ["B"] * 4 + ["C"],
+        "y": rng.standard_normal(n) + 2.0 * rng.standard_normal(n),
+    })
+    fit = smf.ols("y ~ x + C(group)", data=df).fit()
+
+    m = Margins(fit, method="bootstrap", n_boot=50, rng_seed=42)
+    with pytest.raises(RuntimeError, match="Bootstrap failed on .* replicates"):
+        m.predict()

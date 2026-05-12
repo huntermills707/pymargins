@@ -12,6 +12,14 @@ where π(z) = logistic(z' γ) and μ(x) = exp(x' β).
 
 Extra parameters (alpha, p) are present in the coefficient vector but do
 not enter the mean prediction.
+
+Limitations
+-----------
+Patsy transformations (e.g. ``C(z)``, ``I(z**2)``, splines) on the
+**inflation side** are not supported in ``design_matrix_from_df``.  The
+count side supports patsy via ``_build_count_matrix``, but
+``_build_infl_matrix`` uses raw column-name alignment
+(``df.reindex(columns=names)``).
 """
 
 from __future__ import annotations
@@ -31,6 +39,22 @@ from ._common import (
 
 
 _EXTRA_PARAM_NAMES = {"alpha", "p", "theta"}
+
+
+def _zi_model_cls(model_cls_name: str):
+    from statsmodels.discrete.count_model import (
+        ZeroInflatedPoisson,
+        ZeroInflatedNegativeBinomialP,
+        ZeroInflatedGeneralizedPoisson,
+    )
+    dispatch = {
+        "ZeroInflatedPoisson": ZeroInflatedPoisson,
+        "ZeroInflatedNegativeBinomialP": ZeroInflatedNegativeBinomialP,
+        "ZeroInflatedGeneralizedPoisson": ZeroInflatedGeneralizedPoisson,
+    }
+    if model_cls_name not in dispatch:
+        raise ValueError(f"Unknown ZI model class: {model_cls_name}")
+    return dispatch[model_cls_name]
 
 
 class StatsmodelsZIAdapter(ModelAdapter):
@@ -60,7 +84,15 @@ class StatsmodelsZIAdapter(ModelAdapter):
         self._k_count = mod.exog.shape[1]
 
         # Full parameter names (inflation + count + extra)
-        all_names = list(results.params.index)
+        if hasattr(results.params, "index"):
+            all_names = list(results.params.index)
+        else:
+            # Array-fit: synthesize names to match formula-fit convention
+            infl_names = [f"inflate_{n}" for n in mod.model_infl.exog_names]
+            count_names = list(mod.exog_names)
+            n_extra = len(results.params) - len(infl_names) - len(count_names)
+            extra_names = [f"extra_{i}" for i in range(n_extra)]
+            all_names = infl_names + count_names + extra_names
         # Inflation params are first in the vector and prefixed with "inflate_"
         self._infl_param_names = [
             n for n in all_names if n.startswith("inflate_")
@@ -100,6 +132,8 @@ class StatsmodelsZIAdapter(ModelAdapter):
     def attach(self, session) -> None:
         vcov = getattr(session, "vcov_spec", None)
         validate_vcov_spec(vcov, adapter_name="StatsmodelsZIAdapter")
+        # Cluster-robust and non-default HC covariances require a refit,
+        # which needs training_data. extract_training_data raises if unavailable.
         super().attach(session)
 
     # -----------------------------------------------------------------------
@@ -246,12 +280,6 @@ class StatsmodelsZIAdapter(ModelAdapter):
                         f"length ({len(self._training_data)})."
                     )
 
-            from statsmodels.discrete.count_model import (
-                ZeroInflatedPoisson,
-                ZeroInflatedNegativeBinomialP,
-                ZeroInflatedGeneralizedPoisson,
-            )
-
             infl_cols = self._infl_names.copy()
             if "Intercept" in infl_cols:
                 infl_cols.remove("Intercept")
@@ -261,40 +289,18 @@ class StatsmodelsZIAdapter(ModelAdapter):
             exog_infl = self._training_data[infl_cols] if infl_cols else None
             kwargs = {"exog_infl": exog_infl, **fit_kwargs}
 
-            if model_cls_name == "ZeroInflatedPoisson":
-                new_results = ZeroInflatedPoisson.from_formula(
-                    formula, data=self._training_data, **kwargs,
-                ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False)
-            elif model_cls_name == "ZeroInflatedNegativeBinomialP":
-                new_results = ZeroInflatedNegativeBinomialP.from_formula(
-                    formula, data=self._training_data, **kwargs,
-                ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False)
-            elif model_cls_name == "ZeroInflatedGeneralizedPoisson":
-                new_results = ZeroInflatedGeneralizedPoisson.from_formula(
-                    formula, data=self._training_data, **kwargs,
-                ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False)
-            else:
-                raise ValueError(f"Unknown ZI model class: {model_cls_name}")
+            new_results = _zi_model_cls(model_cls_name).from_formula(
+                formula, data=self._training_data, **kwargs,
+            ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False)
             return jnp.asarray(new_results.cov_params())
 
         # Array-fit refit
         endog = self.results.model.endog
         exog = self.results.model.exog
         exog_infl = self.results.model.exog_infl
-        if model_cls_name == "ZeroInflatedPoisson":
-            new_results = sm.ZeroInflatedPoisson(
-                endog, exog, exog_infl=exog_infl, **fit_kwargs,
-            ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False)
-        elif model_cls_name == "ZeroInflatedNegativeBinomialP":
-            new_results = sm.ZeroInflatedNegativeBinomialP(
-                endog, exog, exog_infl=exog_infl, **fit_kwargs,
-            ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False)
-        elif model_cls_name == "ZeroInflatedGeneralizedPoisson":
-            new_results = sm.ZeroInflatedGeneralizedPoisson(
-                endog, exog, exog_infl=exog_infl, **fit_kwargs,
-            ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False)
-        else:
-            raise ValueError(f"Unknown ZI model class: {model_cls_name}")
+        new_results = _zi_model_cls(model_cls_name)(
+            endog, exog, exog_infl=exog_infl, **fit_kwargs,
+        ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False)
         return jnp.asarray(new_results.cov_params())
 
     def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "StatsmodelsZIAdapter":
@@ -308,12 +314,6 @@ class StatsmodelsZIAdapter(ModelAdapter):
         model_cls_name = type(self.results.model).__name__
 
         if formula is not None:
-            from statsmodels.discrete.count_model import (
-                ZeroInflatedPoisson,
-                ZeroInflatedNegativeBinomialP,
-                ZeroInflatedGeneralizedPoisson,
-            )
-
             infl_cols = self._infl_names.copy()
             if "Intercept" in infl_cols:
                 infl_cols.remove("Intercept")
@@ -323,20 +323,9 @@ class StatsmodelsZIAdapter(ModelAdapter):
             exog_infl = resampled_data[infl_cols] if infl_cols else None
             kwargs = {"exog_infl": exog_infl, **fit_kwargs}
 
-            if model_cls_name == "ZeroInflatedPoisson":
-                new_results = ZeroInflatedPoisson.from_formula(
-                    formula, data=resampled_data, **kwargs,
-                ).fit(disp=False)
-            elif model_cls_name == "ZeroInflatedNegativeBinomialP":
-                new_results = ZeroInflatedNegativeBinomialP.from_formula(
-                    formula, data=resampled_data, **kwargs,
-                ).fit(disp=False)
-            elif model_cls_name == "ZeroInflatedGeneralizedPoisson":
-                new_results = ZeroInflatedGeneralizedPoisson.from_formula(
-                    formula, data=resampled_data, **kwargs,
-                ).fit(disp=False)
-            else:
-                raise ValueError(f"Unknown ZI model class: {model_cls_name}")
+            new_results = _zi_model_cls(model_cls_name).from_formula(
+                formula, data=resampled_data, **kwargs,
+            ).fit(disp=False)
             return StatsmodelsZIAdapter(new_results, training_data=resampled_data)
 
         # Array-fit refit
@@ -380,24 +369,17 @@ class StatsmodelsZIAdapter(ModelAdapter):
                 exog_infl_df.insert(0, "const", 1.0)
 
         endog = resampled_data[endog_name].values
-        if model_cls_name == "ZeroInflatedPoisson":
-            new_results = sm.ZeroInflatedPoisson(
-                endog, exog_df, exog_infl=exog_infl_df, **fit_kwargs,
-            ).fit(disp=False)
-        elif model_cls_name == "ZeroInflatedNegativeBinomialP":
-            new_results = sm.ZeroInflatedNegativeBinomialP(
-                endog, exog_df, exog_infl=exog_infl_df, **fit_kwargs,
-            ).fit(disp=False)
-        elif model_cls_name == "ZeroInflatedGeneralizedPoisson":
-            new_results = sm.ZeroInflatedGeneralizedPoisson(
-                endog, exog_df, exog_infl=exog_infl_df, **fit_kwargs,
-            ).fit(disp=False)
-        else:
-            raise ValueError(f"Unknown ZI model class: {model_cls_name}")
+        new_results = _zi_model_cls(model_cls_name)(
+            endog, exog_df, exog_infl=exog_infl_df, **fit_kwargs,
+        ).fit(disp=False)
         return StatsmodelsZIAdapter(new_results, training_data=resampled_data)
 
     def _collect_original_fit_kwargs(self) -> dict:
-        """Capture model-specific kwargs from the original fit for refit."""
+        """Capture model-specific kwargs from the original fit for refit.
+
+        Preserves: offset, exposure, p, inflation.
+        Does not preserve: disp (not exposed by statsmodels ZI API).
+        """
         kwargs = {}
         for attr in ("offset", "exposure"):
             val = getattr(self.results.model, attr, None)

@@ -125,11 +125,11 @@ def test_design_matrix_from_df_auto_injects_intercept():
 
 
 def test_auto_detect_adapter_failure():
-    """auto_detect_adapter should raise NotImplementedError for unsupported models."""
+    """auto_detect_adapter should raise TypeError for unsupported models."""
     from pymargins._adapter import auto_detect_adapter
     class UnsupportedModel:
         pass
-    with pytest.raises(NotImplementedError) as exc_info:
+    with pytest.raises(TypeError) as exc_info:
         auto_detect_adapter(UnsupportedModel())
     msg = str(exc_info.value)
     assert "No adapter registered" in msg
@@ -150,7 +150,7 @@ def test_auto_detect_adapter_failure_suggests_closest():
     FakeStatsmodelsResult.__module__ = "statsmodels.something"
     FakeStatsmodelsResult.__name__ = "SomeResult"
 
-    with pytest.raises(NotImplementedError) as exc_info:
+    with pytest.raises(TypeError) as exc_info:
         auto_detect_adapter(FakeStatsmodelsResult())
     msg = str(exc_info.value)
     assert "StatsmodelsGLMAdapter" in msg or "StatsmodelsOLSAdapter" in msg
@@ -166,7 +166,7 @@ def test_auto_detect_adapter_failure_suggests_ols():
     FakeWLSResult.__module__ = "statsmodels.regression"
     FakeWLSResult.__name__ = "WLSResults"
 
-    with pytest.raises(NotImplementedError) as exc_info:
+    with pytest.raises(TypeError) as exc_info:
         auto_detect_adapter(FakeWLSResult())
     msg = str(exc_info.value)
     assert "Did you mean" in msg
@@ -183,7 +183,7 @@ def test_auto_detect_adapter_failure_cls_only_weak_match():
     FakeGLMResult.__module__ = "sklearn.something"
     FakeGLMResult.__name__ = "FakeGLMResult"
 
-    with pytest.raises(NotImplementedError) as exc_info:
+    with pytest.raises(TypeError) as exc_info:
         auto_detect_adapter(FakeGLMResult())
     msg = str(exc_info.value)
     assert "Possibly related adapters" in msg
@@ -303,7 +303,7 @@ def test_wrapped_fd_adapter_rejects_offset():
             return {}
 
     adapter = DummyAdapter()
-    with pytest.raises(NotImplementedError, match="offset"):
+    with pytest.raises(ValueError, match="offset"):
         adapter.predict(np.array([1.0]), np.array([[1.0]]), offset=np.array([0.5]))
 
 

@@ -587,7 +587,7 @@ def _detect_adapter_class(model):
 
     # Fall through with a clear error that suggests the closest adapter
     suggestion = _suggest_adapters(cls_name, module)
-    raise NotImplementedError(
+    raise TypeError(
         f"No adapter registered for {module}.{cls_name}.\n"
         f"{suggestion}\n"
         "Alternatively, pass an explicit `adapter=` to Margins()."
@@ -601,6 +601,11 @@ def auto_detect_adapter(model):
     constructor takes only `model` (and optional training_data); subclasses
     that need more arguments should be instantiated explicitly by the user
     and passed to Margins via the `adapter=` keyword.
+
+    Raises
+    ------
+    TypeError
+        If no adapter is registered for the model class.
     """
     cls = _detect_adapter_class(model)
     return cls(model)

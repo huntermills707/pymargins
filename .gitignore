@@ -4,7 +4,7 @@ __pycache__/
 *$py.class
 
 # pyenv
-.python-version
+# .python-version is intentionally tracked for reproducibility
 
 # Environments
 .env

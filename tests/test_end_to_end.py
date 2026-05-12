@@ -305,3 +305,78 @@ def test_result_composition_preserves_fallback_triggered(fit_logit):
     scaled = pred_treat * 2.0
     assert scaled.fallback_triggered is True
     assert scaled.fallback_reason == pred_treat.fallback_reason
+
+
+def test_scaled_transforms_result(fit_logit):
+    """scaled() should multiply estimate and CI bounds by the given factor."""
+    m = Margins.linear_scale(fit_logit, at="overall")
+    pred = m.predict(atexog={"age": [40, 60]})
+    scaled = pred.scaled(by=100, units="%")
+    np.testing.assert_allclose(scaled.estimate, pred.estimate * 100)
+    np.testing.assert_allclose(scaled.conf_int_lower, pred.conf_int_lower * 100)
+    np.testing.assert_allclose(scaled.conf_int_upper, pred.conf_int_upper * 100)
+    assert scaled.estimand_metadata.get("units") == "%"
+
+
+def test_test_one_sided_alternatives():
+    """One-sided test alternatives should produce valid p-values that differ from two-sided."""
+    rng = np.random.default_rng(42)
+    n = 100
+    df = pd.DataFrame({"x": rng.standard_normal(n), "y": rng.standard_normal(n)})
+    fit = smf.ols("y ~ x", data=df).fit()
+    m = Margins.linear_scale(fit, at="overall")
+    pred = m.predict(atexog={"x": [0.0]})
+
+    test_two = pred.test(alternative="two-sided")
+    test_greater = pred.test(alternative="greater")
+    test_less = pred.test(alternative="less")
+
+    assert 0.0 <= float(test_greater.pvalue) <= 1.0
+    assert 0.0 <= float(test_less.pvalue) <= 1.0
+    # For a near-zero estimate, the one-sided p-values should sum to 1.0
+    np.testing.assert_allclose(
+        float(test_greater.pvalue) + float(test_less.pvalue), 1.0, rtol=1e-5
+    )
+
+
+def test_evaluate_non_differentiable_fallback(fit_logit):
+    """Non-differentiable compose should trigger fallback with a UserWarning."""
+    m = Margins.linear_scale(fit_logit, at="typical", method="delta")
+    with pytest.warns(UserWarning, match="not JAX-differentiable"):
+        result = m.evaluate(
+            scenarios=[
+                {"atexog": {"treatment": 0}},
+                {"atexog": {"treatment": 1}},
+            ],
+            compose=lambda p: np.where(p[0] > 0.5, p[0], 0.5),
+        )
+    assert result.method == "simulation"
+    assert result.fallback_triggered is True
+
+
+def test_dydx_with_over(fit_logit):
+    """dydx with over= should produce one row per group."""
+    m = Margins.linear_scale(fit_logit, at="overall")
+    result = m.dydx("age", over="sex")
+    assert result.estimate.shape == (2,)
+
+
+def test_empty_training_data_raises():
+    """Empty training data should raise a clear error during model fitting or in pymargins."""
+    df_empty = pd.DataFrame({
+        "x": pd.Series([], dtype=float),
+        "y": pd.Series([], dtype=float),
+    })
+    with pytest.raises(ValueError):
+        smf.glm("y ~ x", data=df_empty, family=sm.families.Binomial()).fit()
+
+
+def test_single_observation_ci_collapses():
+    """With a single observation, bootstrap should produce zero SE and collapsed CIs."""
+    df_one = pd.DataFrame({"x": [1.0], "y": [2]})
+    fit = smf.glm("y ~ x", data=df_one, family=sm.families.Poisson()).fit()
+    m = Margins(fit, method="bootstrap", n_boot=20, rng_seed=42)
+    pred = m.predict()
+    assert np.isclose(float(pred.std_error), 0.0, atol=1e-12)
+    assert np.isclose(float(pred.conf_int_lower), float(pred.estimate))
+    assert np.isclose(float(pred.conf_int_upper), float(pred.estimate))

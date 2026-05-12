@@ -105,3 +105,108 @@ def test_parallel_contrasts(fit):
     assert np.isfinite(res.estimate)
     assert np.isfinite(res.conf_int_lower)
     assert np.isfinite(res.conf_int_upper)
+
+
+# ---------------------------------------------------------------------------
+# Smoke test: n_jobs > 1 with threadpool_limits
+# ---------------------------------------------------------------------------
+
+def test_n_jobs_two_respects_threadpool_limits(fit):
+    """Bootstrap with n_jobs=2 should complete and return finite results."""
+    m = Margins(fit, method="bootstrap", n_boot=50, rng_seed=42, n_jobs=2)
+    res = m.dydx("x1")
+    assert np.isfinite(res.estimate)
+    assert np.isfinite(res.std_error)
+    assert np.isfinite(res.conf_int_lower)
+    assert np.isfinite(res.conf_int_upper)
+
+
+# ---------------------------------------------------------------------------
+# ProcessPoolExecutor pickle fallback
+# ---------------------------------------------------------------------------
+
+def test_parallel_fallback_when_unpicklable():
+    """If the adapter cannot be pickled, parallel bootstrap should fall back
+    to ThreadPoolExecutor with a RuntimeWarning."""
+    import pickle
+    import warnings
+    import numpy as np
+    import pandas as pd
+    import statsmodels.formula.api as smf
+    from pymargins._inference import _run_bootstrap, InferenceConfig
+    from pymargins._adapter import ModelAdapter
+
+    rng = np.random.default_rng(42)
+    n = 50
+    df = pd.DataFrame({
+        "x": rng.normal(size=n),
+        "y": rng.normal(size=n),
+    })
+    fit = smf.ols("y ~ x", data=df).fit()
+
+    class UnpicklableAdapter(ModelAdapter):
+        def __init__(self, wrapped):
+            self._wrapped = wrapped
+        @property
+        def supports_jax_autodiff(self):
+            return True
+        @property
+        def supported_inference_methods(self):
+            return {"delta", "simulation", "bootstrap"}
+        @property
+        def gradient_backend_recommendation(self):
+            return "autodiff"
+        def coefficients(self):
+            return np.asarray(self._wrapped.params)
+        def covariance(self, vcov_spec=None):
+            return np.asarray(self._wrapped.cov_params())
+        def predict(self, beta, X, offset=None):
+            import jax.numpy as jnp
+            return jnp.asarray(X) @ jnp.asarray(beta)
+        def design_matrix_from_df(self, df):
+            return np.asarray(df[["x"]])
+        def variable_metadata(self):
+            return {"x": {"type": "continuous"}}
+        def column_index_of_variable(self, name):
+            return 0
+        def refit(self, data, index=None):
+            return self
+        @property
+        def training_data(self):
+            return df
+        def __reduce__(self):
+            raise TypeError("Cannot pickle mock adapter")
+
+    adapter = UnpicklableAdapter(fit)
+
+    config = InferenceConfig(
+        method="bootstrap",
+        level=0.95,
+        phi=None,
+        phi_inv=None,
+        kappa_threshold=float("inf"),
+        gradient_backend="autodiff",
+        fd_step=1e-6,
+        n_sim=4000,
+        n_boot=10,
+        n_jobs=2,
+        rng_seed=42,
+        diagnostics=False,
+        cov_params=adapter.covariance(),
+    )
+
+    def h(beta):
+        import jax.numpy as jnp
+        X = jnp.ones((1, 1))
+        return jnp.sum(beta)
+
+    def h_factory(new_adapter):
+        return h
+
+    with pytest.warns(RuntimeWarning, match="cannot be pickled"):
+        result = _run_bootstrap(
+            h, adapter, config, {"kind": "prediction"},
+            h_factory=h_factory,
+        )
+    assert result is not None
+    assert len(result["draws"]) == 10

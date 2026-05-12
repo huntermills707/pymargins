@@ -195,7 +195,7 @@ class ModelAdapter(abc.ABC):
             test_val = jnp.array(0.5)
             try:
                 recon = float(phi(phi_inv(test_val)))
-            except Exception as exc:
+            except (TypeError, ValueError) as exc:
                 raise ValueError(
                     f"phi/phi_inv validation failed at test point {float(test_val)}: {exc}"
                 ) from exc
@@ -452,15 +452,18 @@ class GLMAdapter(ModelAdapter):
 
     @property
     def supports_jax_autodiff(self) -> bool:
+        """GLM adapters typically use JAX-native link inverses or analytical JVP."""
         return True  # Either native JAX or analytical-derivative JVP both
                      # appear as autodiff to downstream consumers
 
     @property
     def supported_inference_methods(self) -> Set[InferenceMethod]:
+        """GLM adapters support delta, simulation, and bootstrap inference."""
         return {"delta", "simulation", "bootstrap"}
 
     @property
     def gradient_backend_recommendation(self) -> GradientBackend:
+        """Recommend pure autodiff for GLM adapters."""
         return "autodiff"
 
 
@@ -478,14 +481,17 @@ class LinearPredictionAdapter(ModelAdapter):
 
     @property
     def supports_jax_autodiff(self) -> bool:
+        """Linear prediction is trivially JAX-differentiable (X @ beta)."""
         return True
 
     @property
     def supported_inference_methods(self) -> Set[InferenceMethod]:
+        """Linear adapters support delta, simulation, and bootstrap inference."""
         return {"delta", "simulation", "bootstrap"}
 
     @property
     def gradient_backend_recommendation(self) -> GradientBackend:
+        """Recommend pure autodiff for linear adapters."""
         return "autodiff"
 
     def predict(
@@ -494,6 +500,7 @@ class LinearPredictionAdapter(ModelAdapter):
         X: jnp.ndarray,
         offset: Optional[jnp.ndarray] = None,
     ) -> jnp.ndarray:
+        """Linear prediction: X @ beta + offset."""
         eta = X @ beta
         if offset is not None:
             eta = eta + offset
@@ -513,14 +520,17 @@ class WrappedFDAdapter(ModelAdapter):
 
     @property
     def supports_jax_autodiff(self) -> bool:
+        """FD-based JVP is not native autodiff; flag for diagnostics."""
         return False  # The JVP uses FD; flag this for diagnostic context
 
     @property
     def supported_inference_methods(self) -> Set[InferenceMethod]:
+        """Wrapped-FD adapters support delta, simulation, and bootstrap."""
         return {"delta", "simulation", "bootstrap"}
 
     @property
     def gradient_backend_recommendation(self) -> GradientBackend:
+        """Recommend wrapped_fd because predict uses finite-difference JVP."""
         return "wrapped_fd"
 
     def native_predict(self, beta_np: np.ndarray, X) -> np.ndarray:
@@ -535,19 +545,31 @@ class WrappedFDAdapter(ModelAdapter):
         X: jnp.ndarray,
         offset: Optional[jnp.ndarray] = None,
     ) -> jnp.ndarray:
+        """FD-wrapped predict. Thread-safe lazy construction of JAX primitive."""
         if offset is not None:
-            raise NotImplementedError(
+            raise ValueError(
                 "WrappedFDAdapter does not support offset in the base "
                 "implementation. Subclasses should override predict() to "
                 "handle offset."
             )
-        # Lazily build the wrapped predict on first call
+        # Thread-safe lazy build: double-checked locking with a per-instance
+        # lock created on demand. The wrapper is functionally pure (same
+        # native_predict and fd_step), so even if two threads race, both
+        # produce identical wrappers; the lock merely prevents redundant work.
         if not hasattr(self, "_predict_wrapped"):
-            from ._gradients import make_predict_with_fd_jvp
-            fd_step = getattr(self, "_fd_step", 1e-6)
-            self._predict_wrapped = make_predict_with_fd_jvp(
-                self.native_predict, fd_step=fd_step,
-            )
+            import threading
+
+            lock = getattr(self, "_predict_wrapped_lock", None)
+            if lock is None:
+                lock = threading.Lock()
+                self._predict_wrapped_lock = lock
+            with lock:
+                if not hasattr(self, "_predict_wrapped"):
+                    from ._gradients import make_predict_with_fd_jvp
+                    fd_step = getattr(self, "_fd_step", 1e-6)
+                    self._predict_wrapped = make_predict_with_fd_jvp(
+                        self.native_predict, fd_step=fd_step,
+                    )
         return self._predict_wrapped(beta, X)
 
 
@@ -563,29 +585,35 @@ class BootstrapOnlyAdapter(ModelAdapter):
 
     @property
     def supports_jax_autodiff(self) -> bool:
+        """Bootstrap-only adapters have no parametric predict; no autodiff."""
         return False
 
     @property
     def supported_inference_methods(self) -> Set[InferenceMethod]:
+        """Bootstrap-only adapters declare only bootstrap support."""
         return {"bootstrap"}
 
     @property
     def gradient_backend_recommendation(self) -> GradientBackend:
-        return "fd"  # Not used (no delta path); declared for completeness
+        """Not used (no delta path); declared for completeness."""
+        return "fd"
 
     def coefficients(self) -> jnp.ndarray:
+        """Raise: bootstrap-only models have no meaningful coefficient vector."""
         raise NotImplementedError(
             "BootstrapOnlyAdapter has no meaningful coefficient vector; "
             "use refit-based bootstrap inference instead."
         )
 
     def covariance(self, vcov_spec=None) -> jnp.ndarray:
+        """Raise: bootstrap-only models have no meaningful covariance."""
         raise NotImplementedError(
             "BootstrapOnlyAdapter has no meaningful covariance; "
             "use refit-based bootstrap inference instead."
         )
 
     def predict(self, beta, X, offset=None) -> jnp.ndarray:
+        """Raise: bootstrap-only models do not provide parametric predict."""
         raise NotImplementedError(
             "BootstrapOnlyAdapter does not provide a parametric predict; "
             "use refit-based bootstrap inference instead."

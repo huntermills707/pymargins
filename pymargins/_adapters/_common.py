@@ -145,11 +145,16 @@ def validate_vcov_spec(vcov_spec, adapter_name: str = "Adapter") -> None:
 
     if isinstance(vcov_spec, str):
         spec_lower = vcov_spec.lower()
+        # Statsmodels-style HC codes
         if spec_lower in ("hc0", "hc1", "hc2", "hc3"):
+            return
+        # linearmodels-style covariance types
+        if spec_lower in ("unadjusted", "robust", "clustered", "kernel"):
             return
         raise ValueError(
             f"{adapter_name} does not support vcov={vcov_spec!r}. "
-            f"Supported strings: 'HC0', 'HC1', 'HC2', 'HC3'."
+            f"Supported strings depend on the adapter (e.g. 'HC0'-'HC3', "
+            f"'robust', 'unadjusted', 'clustered', 'kernel')."
         )
 
     if isinstance(vcov_spec, dict):

@@ -222,3 +222,20 @@ def test_summary_custom_float_fmt(fit_ols):
     import re
     matches = re.findall(r"\d+\.\d{2}", s)
     assert len(matches) > 0
+
+
+def test_materialized_to_frame_has_no_p_value(fit_ols):
+    m = Margins.linear_scale(fit_ols, at="typical")
+    pred = m.predict(atexog={"treatment": [0, 1]})
+    mat = pred.materialize()
+    frame = mat.to_frame()
+    assert "statistic" not in frame.columns
+    assert "p_value" not in frame.columns
+
+
+def test_materialized_test_raises(fit_ols):
+    m = Margins.linear_scale(fit_ols, at="typical")
+    pred = m.predict(atexog={"treatment": [0, 1]})
+    mat = pred.materialize()
+    with pytest.raises(ValueError):
+        mat.test()

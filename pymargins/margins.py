@@ -159,6 +159,7 @@ class Margins:
         Cluster IDs for cluster bootstrap. When provided and ``method='bootstrap'``,
         resamples clusters with replacement instead of individual rows.
         Must be the same length as the training data and must not contain NaN.
+        Any hashable type is accepted (strings, integers, tuples, etc.).
         Mutually exclusive with ``block_size``.
 
     block_size : int, optional
@@ -245,6 +246,10 @@ class Margins:
         n_sim = 4000 if n_sim is _NOT_GIVEN else n_sim
         n_boot = 1000 if n_boot is _NOT_GIVEN else n_boot
         n_jobs = 1 if n_jobs is _NOT_GIVEN else n_jobs
+        if not isinstance(n_jobs, int) or (n_jobs != -1 and n_jobs < 1):
+            raise ValueError(
+                f"n_jobs must be a positive integer or -1 (all CPUs), got {n_jobs}"
+            )
         gradient_backend = "auto" if gradient_backend is _NOT_GIVEN else gradient_backend
         fd_step = 1e-6 if fd_step is _NOT_GIVEN else fd_step
         diagnostics = True if diagnostics is _NOT_GIVEN else diagnostics
@@ -491,6 +496,9 @@ class Margins:
             meta["scenarios"] = scenarios
         if over is not None:
             meta["over"] = [over] if isinstance(over, str) else list(over)
+        _over_values = [s.get("_over_values") for s in scenarios]
+        if any(v is not None for v in _over_values):
+            meta["_over_values"] = _over_values
         h_factory = None
         if config.method == "bootstrap":
             h_factory = lambda new_adapter: self._build_prediction_estimand(
@@ -577,6 +585,9 @@ class Margins:
             meta["scenarios"] = scenarios
         if over is not None:
             meta["over"] = [over] if isinstance(over, str) else list(over)
+        _over_values = [s.get("_over_values") for s in scenarios]
+        if any(v is not None for v in _over_values):
+            meta["_over_values"] = _over_values
         h_factory = None
         if config.method == "bootstrap":
             h_factory = lambda new_adapter: self._build_slope_estimand(
@@ -696,8 +707,16 @@ class Margins:
             weights_arg = jnp.asarray(contrasts)
             labels = [scenarios[0].get("label", "contrast")]
 
-        # Validate weight lengths
+        # Validate scenarios element type
+        for i, s in enumerate(scenarios):
+            if not isinstance(s, dict):
+                raise TypeError(
+                    f"Each scenario must be a dict, got {type(s).__name__} at index {i}"
+                )
+
+        # Validate weight lengths and finiteness
         n_scenarios = len(scenarios)
+        _weights_to_check = []
         if isinstance(weights_arg, dict):
             for name, w in weights_arg.items():
                 if w.shape[0] != n_scenarios:
@@ -705,12 +724,18 @@ class Margins:
                         f"Contrast {name!r} has {w.shape[0]} weights but "
                         f"{n_scenarios} scenarios were provided."
                     )
+                _weights_to_check.append(w)
         else:
             if weights_arg.shape[0] != n_scenarios:
                 raise ValueError(
                     f"Contrast has {weights_arg.shape[0]} weights but "
                     f"{n_scenarios} scenarios were provided."
                 )
+            _weights_to_check.append(weights_arg)
+
+        for w in _weights_to_check:
+            if not jnp.all(jnp.isfinite(w)):
+                raise ValueError("Contrast weights must be finite (no NaN or Inf)")
 
         h = self._build_contrast_estimand(scenarios, weights_arg)
         config = self._inference_config()
@@ -783,6 +808,17 @@ class Margins:
 
         For linear combinations (risk differences, log-ratios, etc.)
         prefer contrasts() — it is clearer and uses a faster path.
+
+        Auto-routing behavior
+        ---------------------
+        If ``compose`` is not JAX-differentiable (e.g. it uses Python
+        ``if`` on tracer values), the delta method cannot compute a
+        gradient and the engine **auto-routes** to simulation or
+        bootstrap, depending on the session's ``method``. A
+        ``UserWarning`` is emitted when this fallback occurs. The
+        fallback uses ``n_sim`` (simulation) or ``n_boot`` (bootstrap)
+        draws from the session config. This is correct but slower than
+        the delta-method path.
 
         Example 1: Risk ratio via evaluate() on a linear-scale session
             m = Margins.linear_scale(fitted_logit, at="overall")
@@ -949,7 +985,7 @@ class Margins:
         rng = np.random.default_rng(rng_seed)
         base = self._base_data
         if not hasattr(base, "iloc"):
-            raise NotImplementedError(
+            raise TypeError(
                 "diagnose() currently requires base data to be a pandas "
                 "DataFrame. Adapters using non-pandas data should override "
                 "or supply alternative sampling."
@@ -1184,6 +1220,11 @@ class Margins:
             X = adapter.design_matrix_from_df(to_pandas_if_needed(df))
             n_grid = meta.get("n_grid_points", 1)
             rows_per = meta.get("rows_per_grid_point", len(df))
+            if n_grid > 1 and X.shape[0] != n_grid * rows_per:
+                raise ValueError(
+                    f"Design matrix rows ({X.shape[0]}) do not match expected grid layout "
+                    f"({n_grid} × {rows_per} = {n_grid * rows_per}). The adapter may have dropped rows."
+                )
 
             for i in range(n_grid):
                 start = i * rows_per
@@ -1224,6 +1265,7 @@ class Margins:
                     gl = group_label if isinstance(group_label, tuple) else (group_label,)
                     for k, v in zip(over_keys, gl):
                         scen[k] = v
+                    scen["_over_values"] = {ok: gl[i] for i, ok in enumerate(over_keys)}
                 if n_grid > 1:
                     grid_row = meta.get("grid_rows", [])[i] if i < len(meta.get("grid_rows", [])) else ()
                     grid_keys = meta.get("atexog_keys", [])
@@ -1301,6 +1343,13 @@ class Margins:
 
         Single atom: return its h directly with no labels. Multiple atoms:
         stack into a vector estimand and return the labels list.
+
+        .. note:: Performance
+           The current implementation uses a Python list comprehension
+           inside ``jnp.stack``. For many atoms (>50), a ``jax.vmap`` over
+           a single parametrized function would be faster because it avoids
+           per-atom Python overhead and enables XLA fusion. This is a known
+           optimization opportunity tracked in CODE_AUDIT §3.4.
         """
         if len(atoms) == 1:
             label = atoms[0][0]
@@ -1369,6 +1418,7 @@ class Margins:
                 gl = group_label if isinstance(group_label, tuple) else (group_label,)
                 for k, v in zip(over_keys, gl):
                     base_scen[k] = v
+                base_scen["_over_values"] = {ok: gl[i] for i, ok in enumerate(over_keys)}
             atexog = sub_scenario.get("atexog", {})
             if atexog and meta.get("n_grid_points", 1) == 1:
                 for k, v in atexog.items():

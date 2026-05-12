@@ -30,9 +30,8 @@ from __future__ import annotations
 from typing import Optional, Union, Any
 from itertools import product
 import numpy as np
-import pandas as pd
 
-from ._tabular import TabularData, PandasTabular, as_tabular, concat_tables
+from ._tabular import TabularData, PandasTabular, PolarsTabular, as_tabular, concat_tables
 
 
 # ---------------------------------------------------------------------------
@@ -94,8 +93,10 @@ def expand_scenario(
         If a variable in atexog is not recognized by the model.
     """
     # Normalize to TabularData
-    if isinstance(base_data, pd.DataFrame):
-        base_data = as_tabular(base_data)
+    base_data = as_tabular(base_data)
+
+    if len(base_data) == 0:
+        raise ValueError("Cannot expand scenarios on empty training data (0 rows).")
 
     if "data" in scenario:
         # Explicit override: use the provided DataFrame directly
@@ -124,15 +125,46 @@ def expand_scenario(
         grid_keys = []
         grid_rows = [()]  # single empty tuple → no expansion
 
-    # For each grid row, build a copy of background with atexog applied
-    pieces = []
-    for grid_row in grid_rows:
-        block = background
-        for k, v in zip(grid_keys, grid_row):
-            block = block.with_column(k, v)
-        pieces.append(block)
-
-    expanded = concat_tables(pieces)
+    # Build the expanded table.  For known backends we tile vertically and
+    # broadcast grid values, avoiding O(n_grid) full DataFrame copies.
+    n_grid = len(grid_rows)
+    if isinstance(background, PandasTabular):
+        import pandas as pd
+        bg_df = background._df
+        n_bg = len(bg_df)
+        if n_grid == 1 and not grid_keys:
+            expanded = PandasTabular(bg_df.copy())
+        else:
+            tiled = pd.concat([bg_df] * n_grid, ignore_index=True)
+            for k in grid_keys:
+                col_idx = grid_keys.index(k)
+                values = np.repeat([row[col_idx] for row in grid_rows], n_bg)
+                tiled[k] = values
+            expanded = PandasTabular(tiled)
+    elif isinstance(background, PolarsTabular):
+        from ._tabular import _pl
+        bg_df = background._df
+        n_bg = len(bg_df)
+        if n_grid == 1 and not grid_keys:
+            expanded = PolarsTabular(bg_df.clone())
+        else:
+            tiled = _pl.concat([bg_df] * n_grid)
+            for k in grid_keys:
+                col_idx = grid_keys.index(k)
+                values = []
+                for row in grid_rows:
+                    values.extend([row[col_idx]] * n_bg)
+                tiled = tiled.with_columns(_pl.Series(k, values))
+            expanded = PolarsTabular(tiled)
+    else:
+        # Fallback for unknown TabularData backends
+        pieces = []
+        for grid_row in grid_rows:
+            block = background
+            for k, v in zip(grid_keys, grid_row):
+                block = block.with_column(k, v)
+            pieces.append(block)
+        expanded = concat_tables(pieces)
 
     metadata = {
         "strategy": "expanded",
@@ -194,6 +226,7 @@ def make_aggregation_resolver(at, weights=None):
             col = data[var_name]
             spec = _resolve_var_spec(at, var_name, info)
             result[var_name] = _summarize_column(col, spec, info, weights)
+        import pandas as pd
         return as_tabular(pd.DataFrame([result]))
 
     return resolver
@@ -256,9 +289,15 @@ def _summarize_column(col, spec, info, weights):
 # ---------------------------------------------------------------------------
 
 def _weighted_mean(col, weights):
+    arr = np.asarray(col)
+    if not np.all(np.isfinite(arr)):
+        raise ValueError("Input data contains NaN or Inf values")
     if weights is None:
-        return float(np.mean(col))
-    return float(np.average(np.asarray(col), weights=np.asarray(weights)))
+        return float(np.mean(arr))
+    w = np.asarray(weights)
+    if not np.all(np.isfinite(w)):
+        raise ValueError("Weights contain NaN or Inf values")
+    return float(np.average(arr, weights=w))
 
 
 def _weighted_median(col, weights):
@@ -267,9 +306,19 @@ def _weighted_median(col, weights):
 
 def _weighted_quantile(col, q, weights):
     arr = np.asarray(col)
+    if not np.all(np.isfinite(arr)):
+        raise ValueError("Input data contains NaN or Inf values")
     if weights is None:
         return float(np.quantile(arr, q))
     w = np.asarray(weights)
+    if not np.all(np.isfinite(w)):
+        raise ValueError("Weights contain NaN or Inf values")
+    if np.sum(w) == 0:
+        raise ValueError("Weights must not sum to zero")
+    # If weights are uniform, delegate to np.quantile so that weighted and
+    # unweighted paths agree on the same linear-interpolation estimator.
+    if np.allclose(w, w[0]):
+        return float(np.quantile(arr, q))
     order = np.argsort(arr)
     arr_s = arr[order]
     w_s = w[order]
@@ -294,12 +343,22 @@ def _weighted_mode(col, weights):
         The most frequent value (or the value with the highest weight).
     """
     arr = np.asarray(col)
+    if np.issubdtype(arr.dtype, np.number):
+        if not np.all(np.isfinite(arr)):
+            raise ValueError("Input data contains NaN or Inf values")
+    else:
+        # String / object columns: check for None or NaN without requiring pandas
+        for val in arr:
+            if val is None or val is np.nan or (isinstance(val, float) and np.isnan(val)):
+                raise ValueError("Input data contains NaN or Inf values")
     if weights is None:
         # Use np.unique with return_counts for numpy arrays
         unique_vals, counts = np.unique(arr, return_counts=True)
         return unique_vals[np.argmax(counts)]
     # Weighted mode: sum weights per unique value
     w = np.asarray(weights)
+    if not np.all(np.isfinite(w)):
+        raise ValueError("Weights contain NaN or Inf values")
     unique_vals = np.unique(arr)
     weighted_counts = np.array([w[arr == uv].sum() for uv in unique_vals])
     return unique_vals[np.argmax(weighted_counts)]
@@ -311,7 +370,7 @@ def _weighted_mode(col, weights):
 
 def _to_list(value):
     """Normalize a value or list-of-values to a list."""
-    if isinstance(value, (list, tuple, np.ndarray, pd.Series)):
+    if isinstance(value, (list, tuple, np.ndarray)):
         return list(value)
     return [value]
 

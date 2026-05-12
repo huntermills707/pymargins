@@ -57,7 +57,7 @@ class StatsmodelsOrderedAdapter(WrappedFDAdapter):
                     self._outcome_labels = [str(u) for u in uniq]
                 else:
                     self._outcome_labels = [str(i) for i in range(self._n_outcomes)]
-            except Exception:
+            except (TypeError, ValueError):
                 self._outcome_labels = [str(i) for i in range(self._n_outcomes)]
         else:
             self._outcome_labels = [str(i) for i in range(self._n_outcomes)]

@@ -14,6 +14,7 @@ method, how to handle non-differentiable estimands.
 from __future__ import annotations
 from typing import Callable, Optional, Literal, Any
 from dataclasses import dataclass
+from functools import partial
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 
@@ -272,8 +273,8 @@ def _run_delta(h, adapter, config, estimand_metadata):
                 rng_seed=config.rng_seed,
                 phi=config.phi,
             )
-        except (ValueError, TypeError, jax.errors.JAXTypeError):
-            pass  # Diagnostic is best-effort
+        except (ValueError, TypeError, jax.errors.JAXTypeError) as exc:
+            warnings.warn(f"delta-simulation diagnostic failed: {exc}", RuntimeWarning)
 
     estimate_report = config.phi(estimate) if config.phi is not None else estimate
 
@@ -310,6 +311,14 @@ def _run_simulation(h, adapter, config, estimand_metadata, *, fallback_reason=No
     rng = np.random.default_rng(config.rng_seed)
     Sigma_np = np.asarray(Sigma)
     beta_np = np.asarray(beta)
+    eigvals = np.linalg.eigvalsh(Sigma_np)
+    if np.any(eigvals < -1e-8):
+        raise ValueError(
+            "Covariance matrix (vcov) is not positive semi-definite. "
+            "Simulation draws would produce NaN. "
+            f"Minimum eigenvalue: {np.min(eigvals):.3e}. "
+            "Check your vcov specification or use a different inference method."
+        )
     draws_beta = rng.multivariate_normal(beta_np, Sigma_np, size=config.n_sim)
     if not np.all(np.isfinite(draws_beta)):
         raise ValueError(
@@ -347,8 +356,8 @@ def _run_simulation(h, adapter, config, estimand_metadata, *, fallback_reason=No
             else:
                 k = kappa_vector(h, beta, Sigma,
                                  backend=config.gradient_backend, fd_step=config.fd_step)
-        except (ValueError, TypeError, jax.errors.JAXTypeError):
-            pass  # Best-effort diagnostic
+        except (ValueError, TypeError, jax.errors.JAXTypeError) as exc:
+            warnings.warn(f"kappa diagnostic failed: {exc}", RuntimeWarning)
 
     # Apply phi to draws and estimate for reporting
     if config.phi is not None:
@@ -443,6 +452,11 @@ def _compute_acceleration_jackknife(adapter, h_factory, data, cluster_ids, block
 def _compute_bca_params(h_draws_inf, estimate, adapter, h_factory, data,
                         cluster_ids, block_size, bootstrap_config):
     """Compute BCa bias correction (z0) and acceleration (a)."""
+    if not np.all(np.isfinite(estimate)):
+        raise ValueError(
+            "BCa confidence intervals require a finite estimate, "
+            f"got non-finite value(s): {estimate}"
+        )
     prop = np.mean(h_draws_inf < np.asarray(estimate), axis=0)
     prop = np.clip(prop, 1e-10, 1 - 1e-10)
     z0 = stats.norm.ppf(prop)
@@ -508,6 +522,37 @@ def _bca_confint(h_draws_inf, estimate, level, z0, a, phi):
 # Bootstrap path
 # ---------------------------------------------------------------------------
 
+def _refit_replicate_task(args, adapter, data):
+    """Module-level helper for bootstrap refit parallelism.
+
+    Must be defined at module level so it can be pickled for
+    ProcessPoolExecutor.
+    """
+    b, idx = args
+    if hasattr(data, "iloc"):
+        resampled = data.iloc[idx]
+    else:
+        resampled = data[idx]
+    try:
+        new_adapter = adapter.refit(resampled, index=idx)
+        if len(new_adapter.coefficients()) != len(adapter.coefficients()):
+            raise ValueError(
+                f"Parameter count mismatch after refit: "
+                f"{len(new_adapter.coefficients())} vs {len(adapter.coefficients())}"
+            )
+        return b, new_adapter, None
+    except Exception as exc:
+        # Broad catch is intentional: bootstrap resampling can trigger
+        # many model-fitting failure modes (perfect separation, missing
+        # data, singular Hessians, convergence failures). These are
+        # expected and counted against the 10% failure threshold.
+        # Serious errors (assertions, memory exhaustion, recursion limits,
+        # interrupts) propagate immediately so they are not silently lost.
+        if isinstance(exc, (AssertionError, MemoryError, RecursionError, KeyboardInterrupt)):
+            raise
+        return b, None, exc
+
+
 def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=None, h_factory=None):
     """Nonparametric bootstrap: refit the model on resampled data, recompute
     h, take quantiles.
@@ -522,6 +567,15 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
     BLAS threads limited to 1 per worker to avoid oversubscription).
     Supports alternative CI methods: percentile (default), basic, bca,
     and studentized.
+
+    Failure handling
+    ----------------
+    Replicates that fail to refit (e.g. perfect separation, convergence
+    failure, singular Hessian) are **silently dropped** and counted against
+    a 10 % tolerance threshold. If more than 10 % of replicates fail, a
+    ``UserWarning`` is raised and the CI is computed from the successful
+    replicates only. Serious errors (``AssertionError``, ``MemoryError``,
+    ``RecursionError``, ``KeyboardInterrupt``) propagate immediately.
     """
     if h_factory is None:
         raise ValueError(
@@ -585,6 +639,10 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
                 f"Supported: 'moving', 'nonoverlapping', 'circular'."
             )
 
+    # NOTE: bootstrap and simulation paths intentionally share the same
+    # rng_seed source so that reproducibility is straightforward for users.
+    # If you need independent streams when comparing methods, supply
+    # distinct rng_seed values to each call.
     rng = np.random.default_rng(config.rng_seed)
 
     # Pre-generate all resampling indices
@@ -633,38 +691,74 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
         jax_diffable = is_jax_differentiable(h, beta_hat)
 
     # Step 1: Parallel refit (pure statsmodels/numpy, no JAX).
-    # JAX compilation is not thread-safe on CPU; we parallelize only the
-    # model refitting and do all JAX evaluation serially in the main thread.
-    def _refit_replicate(args):
-        b, idx = args
-        if hasattr(data, "iloc"):
-            resampled = data.iloc[idx]
-        else:
-            resampled = data[idx]
-        try:
-            new_adapter = adapter.refit(resampled, index=idx)
-            return b, new_adapter, None
-        except Exception as exc:
-            # Broad catch is intentional: bootstrap resampling can trigger
-            # many model-fitting failure modes (perfect separation, missing
-            # data, singular Hessians, convergence failures). These are
-            # expected and counted against the 10% failure threshold.
-            # Programming errors in adapters are caught during testing.
-            return b, None, exc
-
     n_jobs = config.n_jobs
     if n_jobs == -1:
         import os
         n_jobs = os.cpu_count() or 1
 
+    if n_jobs > 1:
+        warnings.warn(
+            f"Parallel bootstrap (n_jobs={n_jobs}) is experimental. "
+            "Process-based execution is used when pickling succeeds; "
+            "otherwise it falls back to thread-based execution.",
+            RuntimeWarning,
+            stacklevel=3,
+        )
+
     if n_jobs != 1:
-        with threadpoolctl.threadpool_limits(limits=1):
-            with ThreadPoolExecutor(max_workers=n_jobs) as executor:
-                refitted = list(executor.map(_refit_replicate, enumerate(all_idx)))
+        import pickle
+        try:
+            pickle.dumps(adapter)
+            pickle.dumps(data)
+            use_processes = True
+        except (TypeError, pickle.PicklingError):
+            warnings.warn(
+                "Adapter or data cannot be pickled; falling back to thread-based "
+                "parallel bootstrap. Consider setting n_jobs=1 for stability.",
+                RuntimeWarning,
+                stacklevel=3,
+            )
+            use_processes = False
+
+        if use_processes:
+            import multiprocessing as _mp
+            from concurrent.futures import ProcessPoolExecutor
+            # Use 'spawn' to avoid deadlocks with JAX's background threads.
+            _ctx = _mp.get_context("spawn")
+            with ProcessPoolExecutor(max_workers=n_jobs, mp_context=_ctx) as executor:
+                refitted = list(executor.map(
+                    _refit_replicate_task,
+                    enumerate(all_idx),
+                    [adapter] * len(all_idx),
+                    [data] * len(all_idx),
+                ))
+        else:
+            with threadpoolctl.threadpool_limits(limits=1):
+                with ThreadPoolExecutor(max_workers=n_jobs) as executor:
+                    refitted = list(executor.map(
+                        _refit_replicate_task,
+                        enumerate(all_idx),
+                        [adapter] * len(all_idx),
+                        [data] * len(all_idx),
+                    ))
     else:
-        refitted = list(map(_refit_replicate, enumerate(all_idx)))
+        refitted = list(map(
+            _refit_replicate_task,
+            enumerate(all_idx),
+            [adapter] * len(all_idx),
+            [data] * len(all_idx),
+        ))
 
     # Step 2: Serial JAX evaluation (thread-safe, compilation cache friendly).
+    # For studentized bootstrap, if the estimand is a module-level kernel
+    # partial, pre-build a stable gradient function so JAX can cache the
+    # compilation across replicates (see CODE_AUDIT §5.1).
+    _kernel_grad_fn = None
+    if ci_method == "studentized" and jax_diffable:
+        h_probe = h_factory(adapter)
+        if isinstance(h_probe, partial) and getattr(h_probe.func, "__pymargins_kernel__", False):
+            _kernel_grad_fn = jax.grad(h_probe.func, argnums=0)
+
     raw_results = []
     for b, new_adapter, refit_exc in refitted:
         if refit_exc is not None:
@@ -679,11 +773,14 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
             if ci_method == "studentized" and jax_diffable:
                 try:
                     Sigma_b = new_adapter.covariance()
-                    grad_b = gradient(
-                        h_b, beta_b,
-                        backend=config.gradient_backend,
-                        fd_step=config.fd_step,
-                    )
+                    if _kernel_grad_fn is not None and isinstance(h_b, partial):
+                        grad_b = _kernel_grad_fn(beta_b, *h_b.args, **h_b.keywords)
+                    else:
+                        grad_b = gradient(
+                            h_b, beta_b,
+                            backend=config.gradient_backend,
+                            fd_step=config.fd_step,
+                        )
                     se_b = np.asarray(delta_se(grad_b, Sigma_b))
                 except (ValueError, TypeError, jax.errors.JAXTypeError, np.linalg.LinAlgError):
                     se_b = None
@@ -830,8 +927,8 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
             else:
                 k = kappa_vector(h, beta_hat, Sigma_hat,
                                  backend=config.gradient_backend, fd_step=config.fd_step)
-        except (ValueError, TypeError, jax.errors.JAXTypeError):
-            pass  # Best-effort diagnostic
+        except (ValueError, TypeError, jax.errors.JAXTypeError) as exc:
+            warnings.warn(f"Bootstrap kappa diagnostic failed: {exc}", RuntimeWarning)
 
     bootstrap_extras = {}
     if bca_z0 is not None:

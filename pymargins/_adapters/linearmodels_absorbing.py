@@ -75,7 +75,7 @@ class LinearmodelsAbsorbingAdapter(LinearPredictionAdapter):
             reconstructed = pd.concat(parts, axis=1)
             reconstructed = reconstructed.loc[:, ~reconstructed.columns.duplicated()]
             return reconstructed
-        except Exception as exc:
+        except (AttributeError, TypeError, ValueError) as exc:
             raise ValueError(
                 "training_data must be provided for this AbsorbingLS fit; "
                 "automatic reconstruction from model components failed: "
