@@ -202,6 +202,39 @@ def test_pysmatch_client_rematch(pysmatch_matcher):
 
 
 # ---------------------------------------------------------------------------
+# Regression: matched predictions must differ from unmatched
+# ---------------------------------------------------------------------------
+
+def test_matched_predictions_differ_from_unmatched(df_matching, pysmatch_matcher):
+    """Matched analysis on matched data should differ from analysis on full data."""
+    # Fit model on FULL data, no matching
+    full_model = smf.glm(
+        "y ~ x1 + x2 + treated",
+        data=df_matching,
+        family=sm.families.Binomial(),
+    ).fit()
+    m_full = Margins(full_model)
+    pred_full = m_full.predict(atexog={"treated": 1})
+
+    # Fit model on MATCHED data, with matching
+    matched_df = pysmatch_matcher.matched_data
+    matched_model = smf.glm(
+        "y ~ x1 + x2 + treated",
+        data=matched_df,
+        family=sm.families.Binomial(),
+    ).fit(cov_type="cluster", cov_kwds={"groups": matched_df["match_id"]})
+    client = PysmatchClient(pysmatch_matcher, treatment_col="treated")
+    m_matched = Margins(matched_model, matching=client)
+    pred_matched = m_matched.predict(atexog={"treated": 1})
+
+    # Predictions should differ because the base data differs
+    assert not np.isclose(pred_full.estimate, pred_matched.estimate, atol=1e-8), (
+        "Matched and unmatched predictions should differ when the matched "
+        "sample has a different covariate distribution than the full sample."
+    )
+
+
+# ---------------------------------------------------------------------------
 # End-to-end: delta inference on matched data
 # ---------------------------------------------------------------------------
 

@@ -77,9 +77,9 @@ class PandasTabular:
     """TabularData backend backed by pandas. Zero user-visible change.
 
     .. note::
-       The index is reset (``reset_index(drop=True)``) on construction.
-       Users who pass a DataFrame with a meaningful index should be aware
-       that the index is discarded and downstream alignment is positional.
+       The original DataFrame index is preserved. Downstream positional
+       slicing uses ``.iloc``, so non-default indexes (e.g. MultiIndex
+       for panel data) are handled correctly.
     """
 
     def __init__(self, df: "pd.DataFrame"):
@@ -87,7 +87,7 @@ class PandasTabular:
 
         if not isinstance(df, pd.DataFrame):
             raise TypeError(f"PandasTabular expects pd.DataFrame, got {type(df).__name__}")
-        self._df = df.reset_index(drop=True)
+        self._df = df
 
     # --- introspection ---
     @property

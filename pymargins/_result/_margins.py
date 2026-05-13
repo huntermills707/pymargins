@@ -24,135 +24,13 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from ._inference import run_test
-from ._delta import delta_confint_from_se, joint_wald_test
+from ._test import TestResult
+from .._inference import run_test
+from .._delta import delta_confint_from_se, joint_wald_test
 
 
 # ---------------------------------------------------------------------------
 # Hypothesis test result
-# ---------------------------------------------------------------------------
-
-@dataclass
-class TestResult:
-    """Output of a hypothesis test on a MarginsResult.
-
-    Attributes
-    ----------
-    statistic : array
-        Test statistic (z for Wald, χ² for joint Wald). Per-component for
-        vector estimands.
-
-    pvalue : array
-        P-value(s).
-
-    df : int, optional
-        Degrees of freedom (for χ² tests).
-
-    null_value : array
-        The hypothesized value(s) being tested against.
-
-    alternative : str
-        "two-sided", "greater", or "less".
-
-    method : str
-        Test type ("wald", "joint_wald", "empirical").
-
-    estimand_metadata : dict
-        Carried over from the source MarginsResult for output formatting.
-    """
-    statistic: np.ndarray
-    pvalue: np.ndarray
-    df: Optional[int] = None
-    null_value: Union[np.ndarray, float] = 0.0
-    alternative: str = "two-sided"
-    method: str = "wald"
-    estimand_metadata: dict = field(default_factory=dict)
-
-    def summary(self) -> str:
-        """Human-readable summary of the test."""
-        lines = [
-            f"Hypothesis test ({self.method})",
-            f"  H0: estimand = {self.null_value}",
-            f"  Alternative: {self.alternative}",
-        ]
-        stat = np.atleast_1d(self.statistic)
-        p = np.atleast_1d(self.pvalue)
-        if stat.size == 1:
-            lines.append(f"  Statistic: {float(stat[0]):.4f}")
-            lines.append(f"  P-value:   {float(p[0]):.4g}")
-        else:
-            for i, (s, pv) in enumerate(zip(stat, p)):
-                lines.append(f"  [{i}] stat={s:.4f}, p={pv:.4g}")
-        if self.df is not None:
-            lines.append(f"  df: {self.df}")
-        return "\n".join(lines)
-
-    def to_frame(self) -> pd.DataFrame:
-        """Return as a tidy DataFrame, one row per estimand component."""
-        stat = np.atleast_1d(self.statistic)
-        p = np.atleast_1d(self.pvalue)
-        return pd.DataFrame({
-            "statistic": stat,
-            "p_value": p,
-        })
-
-
-# ---------------------------------------------------------------------------
-# Diagnostic result (from session_kappa)
-# ---------------------------------------------------------------------------
-
-@dataclass
-class DiagnosticResult:
-    """Output of session-level kappa diagnostic.
-
-    Returned by Margins.diagnose() to summarize delta-method validity
-    across the design space before any specific estimand is computed.
-
-    Attributes
-    ----------
-    kappa_min, kappa_median, kappa_max : float
-        Summary stats of κ across sampled covariate vectors.
-
-    kappa_distribution : array
-        All sampled κ values, for inspection.
-
-    verdict : str
-        Classification: "delta_reliable", "delta_borderline", or
-        "delta_unreliable", driven by max κ vs configured thresholds.
-
-    n_samples : int
-        How many design points were sampled.
-
-    recommendation : str
-        Human-readable advice based on verdict.
-
-    session_summary : str
-        One-line summary of the session's analytical posture (scale, vcov,
-        method) for context in audit logs.
-    """
-    kappa_min: float
-    kappa_median: float
-    kappa_max: float
-    kappa_distribution: np.ndarray
-    verdict: str
-    n_samples: int
-    recommendation: str
-    session_summary: str = ""
-
-    def summary(self) -> str:
-        return (
-            f"Session diagnostic ({self.n_samples} design points)\n"
-            f"  Session: {self.session_summary}\n"
-            f"  κ min:    {self.kappa_min:.3f}\n"
-            f"  κ median: {self.kappa_median:.3f}\n"
-            f"  κ max:    {self.kappa_max:.3f}\n"
-            f"  Verdict:  {self.verdict}\n"
-            f"  {self.recommendation}"
-        )
-
-
-# ---------------------------------------------------------------------------
-# MarginsResult
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -748,7 +626,7 @@ class MarginsResult:
                 z0 = self.bootstrap_extras.get("z0")
                 a = self.bootstrap_extras.get("a")
                 if z0 is not None:
-                    from ._inference import _bca_confint
+                    from .._inference import _bca_confint
                     lower, upper = _bca_confint(
                         self.draws_inf, est_inf, level, z0, a, self.phi,
                     )
@@ -1390,47 +1268,3 @@ def _combine_results(
 # ---------------------------------------------------------------------------
 # Expected usage
 # ---------------------------------------------------------------------------
-"""
-Example 1: Basic reporting
---------------------------
-
-    result = m.predict(at={"treatment": 1})
-    print(result.summary())
-    df = result.to_frame()
-
-
-Example 2: Hypothesis test
---------------------------
-
-    result = m.contrasts(...)  # returns a MarginsResult
-    test = result.test(value=0.0)
-    print(test.summary())
-    print(f"p = {float(test.pvalue):.4f}")
-
-
-Example 3: Inter-call composability
------------------------------------
-
-    ame_overall = m.dydx("treatment")
-    ame_old     = m.dydx("treatment", atexog={"age_group": "65+"})
-    ame_young   = m.dydx("treatment", atexog={"age_group": "18-44"})
-
-    # Joint inference computed using shared Σ̂
-    deviation = ame_old - ame_overall
-    test = deviation.test(value=0.0)
-
-
-Example 4: Cosmetic rescaling for reporting
--------------------------------------------
-
-    result = m.predict()                  # estimate in proportion units
-    pct = result.scaled(by=100, units="%")
-    print(pct.summary())                   # estimate now in percentage points
-
-
-Example 5: Recompute CI at different level
-------------------------------------------
-
-    result = m.contrasts(...)              # default 95% CI
-    lo90, hi90 = result.conf_int(level=0.90)
-"""

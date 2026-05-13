@@ -55,8 +55,8 @@ test = [
 
 [project.urls]
 Homepage = "https://github.com/huntermill707/pymargins"
-Documentation = "https://github.com/huntermills707/pymargins#readme"
-Repository = "https://github.com/huntermills707/pymargins"
+Documentation = "https://github.com/huntermill707/pymargins#readme"
+Repository = "https://github.com/huntermill707/pymargins"
 
 [tool.hatch.build.targets.wheel]
 packages = ["pymargins"]

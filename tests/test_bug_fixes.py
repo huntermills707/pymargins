@@ -425,14 +425,14 @@ def test_h_factory_not_passed_for_delta_method(fit_logit, monkeypatch):
     captured = {}
     original_run_inference = m.__class__._wrap_result.__wrapped__ if hasattr(m.__class__._wrap_result, '__wrapped__') else None
 
-    import pymargins.margins as margins_mod
-    original_run_inference = margins_mod.run_inference
+    import pymargins.margins._session as _session_mod
+    original_run_inference = _session_mod.run_inference
 
     def capturing_run_inference(h, adapter, config, *, estimand_metadata=None, h_factory=None):
         captured["h_factory"] = h_factory
         return original_run_inference(h, adapter, config, estimand_metadata=estimand_metadata, h_factory=h_factory)
 
-    monkeypatch.setattr(margins_mod, "run_inference", capturing_run_inference)
+    monkeypatch.setattr(_session_mod, "run_inference", capturing_run_inference)
 
     m.predict()
     assert captured.get("h_factory") is None
@@ -443,14 +443,14 @@ def test_h_factory_passed_for_bootstrap_method(fit_logit, monkeypatch):
     m = Margins.linear_scale(fit_logit, at="typical", method="bootstrap", n_boot=5)
     captured = {}
 
-    import pymargins.margins as margins_mod
-    original_run_inference = margins_mod.run_inference
+    import pymargins.margins._session as _session_mod
+    original_run_inference = _session_mod.run_inference
 
     def capturing_run_inference(h, adapter, config, *, estimand_metadata=None, h_factory=None):
         captured["h_factory"] = h_factory
         return original_run_inference(h, adapter, config, estimand_metadata=estimand_metadata, h_factory=h_factory)
 
-    monkeypatch.setattr(margins_mod, "run_inference", capturing_run_inference)
+    monkeypatch.setattr(_session_mod, "run_inference", capturing_run_inference)
 
     m.predict()
     assert captured.get("h_factory") is not None

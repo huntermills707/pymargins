@@ -58,6 +58,7 @@ from .scenarios import (
     diff,
     all_pairwise,
 )
+from .matching import PysmatchClient
 
 __all__ = [
     # Main entry point
@@ -88,6 +89,8 @@ __all__ = [
     "did",
     "diff",
     "all_pairwise",
+    # Matching support
+    "PysmatchClient",
 ]
 
 __version__ = "0.0.1"

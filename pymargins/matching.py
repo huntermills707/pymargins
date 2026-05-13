@@ -21,13 +21,7 @@ from typing import Optional, Any
 import numpy as np
 import pandas as pd
 
-
-def _has_pysmatch() -> bool:
-    try:
-        import pysmatch  # noqa: F401
-        return True
-    except ImportError:
-        return False
+from ._tabular import to_pandas_if_needed
 
 
 class PysmatchClient:
@@ -82,11 +76,13 @@ class PysmatchClient:
         fit_scores_kwds: Optional[dict] = None,
         match_kwds: Optional[dict] = None,
     ):
-        if not _has_pysmatch():
+        try:
+            import pysmatch  # noqa: F401
+        except ImportError as exc:
             raise ImportError(
                 "PysmatchClient requires 'pysmatch'. "
                 "Install it with: pip install pysmatch"
-            )
+            ) from exc
 
         if not hasattr(matcher, "matched_data"):
             raise ValueError(
@@ -154,6 +150,7 @@ class PysmatchClient:
         """
         from pysmatch.Matcher import Matcher
 
+        data = to_pandas_if_needed(data)
         # Reconstruct test / control from the treatment indicator
         mask_treat = data[self._treatment_col] == 1
         test = data[mask_treat].copy()

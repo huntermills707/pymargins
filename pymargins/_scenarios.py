@@ -319,12 +319,18 @@ def _weighted_quantile(col, q, weights):
     # unweighted paths agree on the same linear-interpolation estimator.
     if np.allclose(w, w[0]):
         return float(np.quantile(arr, q))
-    order = np.argsort(arr)
-    arr_s = arr[order]
-    w_s = w[order]
-    cum = np.cumsum(w_s) / np.sum(w_s)
-    idx = np.searchsorted(cum, q)
-    return float(arr_s[min(idx, len(arr_s) - 1)])
+    # Non-uniform weights: use inverted-CDF (Hyndman-Fan type-1).
+    # numpy >= 2.0 supports weights directly; fall back to manual
+    # implementation on older numpy versions.
+    try:
+        return float(np.quantile(arr, q, weights=w, method="inverted_cdf"))
+    except TypeError:
+        order = np.argsort(arr)
+        arr_s = arr[order]
+        w_s = w[order]
+        cum = np.cumsum(w_s) / np.sum(w_s)
+        idx = np.searchsorted(cum, q)
+        return float(arr_s[min(idx, len(arr_s) - 1)])
 
 
 def _weighted_mode(col, weights):
