@@ -29,6 +29,8 @@ from __future__ import annotations
 from typing import Callable, Optional, Union, Any
 import weakref
 
+import warnings
+
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
@@ -208,6 +210,7 @@ class Margins:
         cluster: Optional[Any] = _NOT_GIVEN,
         block_size: Optional[int] = _NOT_GIVEN,
         bootstrap_config: Optional[dict] = _NOT_GIVEN,
+        matching: Optional[Any] = _NOT_GIVEN,
         strict: bool = False,
         adapter: Optional[ModelAdapter] = None,
     ):
@@ -222,6 +225,7 @@ class Margins:
                 ("fd_step", fd_step), ("diagnostics", diagnostics),
                 ("cluster", cluster), ("block_size", block_size),
                 ("bootstrap_config", bootstrap_config),
+                ("matching", matching),
             ]:
                 if value is _NOT_GIVEN:
                     raise ValueError(
@@ -256,6 +260,7 @@ class Margins:
         cluster = None if cluster is _NOT_GIVEN else cluster
         block_size = None if block_size is _NOT_GIVEN else block_size
         bootstrap_config = None if bootstrap_config is _NOT_GIVEN else bootstrap_config
+        matching = None if matching is _NOT_GIVEN else matching
 
         # Validation: phi/phi_inv must come as a pair
         if (phi is None) != (phi_inv is None):
@@ -291,6 +296,7 @@ class Margins:
         self.cluster = cluster
         self.block_size = block_size
         self.bootstrap_config = bootstrap_config
+        self.matching = matching
         self.strict = strict
 
         # Adapter setup
@@ -304,6 +310,68 @@ class Margins:
                 raise ValueError("weights must be finite (no NaN or Inf).")
             if np.any(w_arr < 0):
                 raise ValueError("weights must be non-negative.")
+
+        # Validate matching object
+        if self.matching is not None:
+            if not hasattr(self.matching, "matched_data"):
+                raise ValueError("matching object must have a 'matched_data' attribute.")
+            if not hasattr(self.matching, "cluster_ids"):
+                raise ValueError("matching object must have a 'cluster_ids' attribute.")
+
+            n_train = len(self.adapter.training_data)
+            n_matched = len(self.matching.matched_data)
+            if n_matched != n_train:
+                raise ValueError(
+                    f"matched_data length ({n_matched}) must equal training_data "
+                    f"length ({n_train}). Fit the model on the matched sample, not "
+                    f"the full sample."
+                )
+
+            cluster_arr = np.asarray(self.matching.cluster_ids)
+            if len(cluster_arr) != n_matched:
+                raise ValueError(
+                    f"cluster_ids length ({len(cluster_arr)}) must equal "
+                    f"matched_data length ({n_matched})."
+                )
+            if np.any(pd.isna(cluster_arr)):
+                raise ValueError("cluster_ids must not contain NaN values.")
+
+            # Auto-derive cluster for bootstrap if user did not supply one
+            if self.cluster is None:
+                self.cluster = cluster_arr
+
+            # Auto-derive vcov if user did not supply one
+            if self.vcov_spec is None:
+                self.vcov_spec = {"type": "cluster", "groups": cluster_arr}
+
+            # Warn if user supplied a non-cluster vcov
+            if isinstance(self.vcov_spec, str):
+                if self.vcov_spec.upper() not in {"CLUSTER", "CLUSTERED"}:
+                    warnings.warn(
+                        "matching was provided but vcov is not cluster-robust. "
+                        "Standard errors may be anti-conservative because matched-set "
+                        "dependence is ignored. Consider vcov='cluster' or omitting "
+                        "vcov to use the matching object's cluster_ids.",
+                        UserWarning, stacklevel=2,
+                    )
+
+            # Validate that bootstrap users have rematch()
+            if self.method == "bootstrap" and not callable(
+                getattr(self.matching, "rematch", None)
+            ):
+                raise ValueError(
+                    "method='bootstrap' with matching requires the matching object "
+                    "to implement a 'rematch(data) -> DataFrame' method."
+                )
+
+            # Validate weights align with matched data
+            if self.weights is not None:
+                w_arr = np.asarray(self.weights)
+                if len(w_arr) != n_matched:
+                    raise ValueError(
+                        f"weights length ({len(w_arr)}) must equal matched_data "
+                        f"length ({n_matched}) when matching is provided."
+                    )
 
         # Validate cluster IDs against training data length
         if self.cluster is not None:
@@ -484,7 +552,6 @@ class Margins:
             if labels is None or (isinstance(labels, list) and len(labels) == 1):
                 labels = [label]
             else:
-                import warnings
                 warnings.warn(
                     "label= is ignored when atexog or over produces multiple estimands",
                     UserWarning,
@@ -573,7 +640,6 @@ class Margins:
             if labels is None or (isinstance(labels, list) and len(labels) == 1):
                 labels = [label]
             else:
-                import warnings
                 warnings.warn(
                     "label= is ignored when atexog or over produces multiple estimands",
                     UserWarning,
@@ -1082,13 +1148,25 @@ class Margins:
         that cannot expose training data should raise NotImplementedError
         from that property, which propagates here with context.
         """
+        return self._get_base_data(self.adapter)
+
+    def _get_base_data(self, adapter: Optional[ModelAdapter] = None):
+        """Get base data from an adapter, applying matching if active.
+
+        For the original session adapter, ``matching.matched_data`` is used
+        when a matching object was provided. For bootstrap replicates, the
+        adapter's ``training_data`` already reflects the rematched subset
+        (set during ``refit()``), so we return it verbatim.
+        """
+        adapter = adapter if adapter is not None else self.adapter
+        if self.matching is not None and adapter is self.adapter:
+            return self.matching.matched_data
         try:
-            return self.adapter.training_data
+            return adapter.training_data
         except NotImplementedError as exc:
             raise NotImplementedError(
-                "Base data extraction not implemented for this adapter. "
-                "Adapters should set self.training_data in __init__, or "
-                "override Margins._base_data."
+                f"Adapter {type(adapter).__name__} does not expose training_data. "
+                "Bootstrap inference and scenario expansion require it."
             ) from exc
 
     def _inference_config(self) -> InferenceConfig:
@@ -1114,6 +1192,7 @@ class Margins:
             cov_params=self._frozen_cov(),
             cluster=self.cluster,
             block_size=self.block_size,
+            matching=self.matching,
             bootstrap_config=self.bootstrap_config,
         )
 

@@ -126,6 +126,9 @@ class InferenceConfig:
     cov_params: Optional[jnp.ndarray] = None
     cluster: Optional[Any] = None
     block_size: Optional[int] = None
+    matching: Optional[Any] = None
+    """MatchingClient for bootstrap rematching. Ignored by delta and K–R."""
+
     bootstrap_config: Optional[dict] = None
 
 
@@ -522,7 +525,7 @@ def _bca_confint(h_draws_inf, estimate, level, z0, a, phi):
 # Bootstrap path
 # ---------------------------------------------------------------------------
 
-def _refit_replicate_task(args, adapter, data):
+def _refit_replicate_task(args, adapter, data, matching=None):
     """Module-level helper for bootstrap refit parallelism.
 
     Must be defined at module level so it can be pickled for
@@ -533,8 +536,21 @@ def _refit_replicate_task(args, adapter, data):
         resampled = data.iloc[idx]
     else:
         resampled = data[idx]
+
+    # Rematch after resampling when a matching object is provided
+    if matching is not None:
+        try:
+            resampled = matching.rematch(resampled)
+        except Exception as exc:
+            if isinstance(exc, (AssertionError, MemoryError, RecursionError, KeyboardInterrupt)):
+                raise
+            return b, None, exc
+        index = None   # rematching breaks the original index mapping
+    else:
+        index = idx
+
     try:
-        new_adapter = adapter.refit(resampled, index=idx)
+        new_adapter = adapter.refit(resampled, index=index)
         if len(new_adapter.coefficients()) != len(adapter.coefficients()):
             raise ValueError(
                 f"Parameter count mismatch after refit: "
@@ -591,11 +607,17 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
             f"{type(adapter).__name__} does not implement it."
         ) from exc
 
+    # When matching is active, resample from matched_data and use its cluster_ids
+    if config.matching is not None:
+        data = config.matching.matched_data
+        cluster_ids = config.matching.cluster_ids
+    else:
+        cluster_ids = config.cluster
+
     data = np.asarray(data) if not hasattr(data, "iloc") else data
     n_obs = len(data)
 
     # Prepare resampling strategy
-    cluster_ids = config.cluster
     block_size = config.block_size
     bootstrap_config = config.bootstrap_config or {}
     block_type = bootstrap_config.get("block_type", "moving")
@@ -710,11 +732,14 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
         try:
             pickle.dumps(adapter)
             pickle.dumps(data)
+            if config.matching is not None:
+                pickle.dumps(config.matching)
             use_processes = True
         except (TypeError, pickle.PicklingError):
             warnings.warn(
-                "Adapter or data cannot be pickled; falling back to thread-based "
-                "parallel bootstrap. Consider setting n_jobs=1 for stability.",
+                "Adapter, data, or matching object cannot be pickled; falling back "
+                "to thread-based parallel bootstrap. Consider setting n_jobs=1 "
+                "for stability.",
                 RuntimeWarning,
                 stacklevel=3,
             )
@@ -731,6 +756,7 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
                     enumerate(all_idx),
                     [adapter] * len(all_idx),
                     [data] * len(all_idx),
+                    [config.matching] * len(all_idx),
                 ))
         else:
             with threadpoolctl.threadpool_limits(limits=1):
@@ -740,6 +766,7 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
                         enumerate(all_idx),
                         [adapter] * len(all_idx),
                         [data] * len(all_idx),
+                        [config.matching] * len(all_idx),
                     ))
     else:
         refitted = list(map(
@@ -747,6 +774,7 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
             enumerate(all_idx),
             [adapter] * len(all_idx),
             [data] * len(all_idx),
+            [config.matching] * len(all_idx),
         ))
 
     # Step 2: Serial JAX evaluation (thread-safe, compilation cache friendly).
