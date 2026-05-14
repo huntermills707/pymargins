@@ -1,0 +1,60 @@
+---
+jupytext:
+  text_representation:
+    extension: .md
+    format_name: myst
+    format_version: 0.13
+kernelspec:
+  display_name: Python 3
+  language: python
+  name: python3
+---
+
+# Panel data — fixed effects
+
+`linearmodels.PanelOLS` (entity, time, or two-way fixed effects),
+`RandomEffects`, `BetweenOLS`, `AbsorbingLS`, and `FamaMacBeth` are
+each handled by a dedicated adapter. The session API is unchanged.
+
+```{code-cell} python
+import numpy as np
+import pandas as pd
+from linearmodels.panel import PanelOLS
+
+from pymargins import Margins
+
+rng = np.random.default_rng(13)
+n_entities, n_periods = 200, 6
+entity = np.repeat(np.arange(n_entities), n_periods)
+period = np.tile(np.arange(n_periods), n_entities)
+df = pd.DataFrame({
+    "entity": entity, "period": period,
+    "x": rng.normal(0, 1, n_entities * n_periods),
+    "alpha_i": np.repeat(rng.normal(0, 1, n_entities), n_periods),
+}).set_index(["entity", "period"])
+df["y"] = 1.0 + 0.6 * df["x"] + df["alpha_i"] + rng.normal(0, 0.5, len(df))
+
+fit = PanelOLS(df["y"], df[["x"]], entity_effects=True).fit(
+    cov_type="clustered", cluster_entity=True
+)
+```
+
+## AME of `x` with cluster-robust SEs
+
+The fit's clustered covariance is consumed automatically — the
+session does not need a separate `vcov=` argument when the model
+already carries one.
+
+```{code-cell} python
+m = Margins.linear_scale(fit, at="overall")
+m.dydx("x").summary()
+```
+
+## Predicted `y` at representative `x`
+
+```{code-cell} python
+m.predict(atexog={"x": [-1.0, 0.0, 1.0]}).summary()
+```
+
+See [](../howto/cluster_block_bootstrap.md) for cluster-resampling
+bootstrap in panels where the analytic clustered SE is suspect.

@@ -26,3 +26,8 @@ dist/
 build/
 
 notes/
+
+# Sphinx docs
+docs/_build/
+docs/_autosummary/
+docs/jupyter_execute/

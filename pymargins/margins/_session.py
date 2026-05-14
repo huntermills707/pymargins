@@ -72,11 +72,12 @@ class Margins:
 
     phi : callable, optional
         Back-transform from inference scale to reporting scale. Applied to
-        CI endpoints. Default: None (identity scale). Common choices:
-          jnp.exp                  → log scale (ratios, RR, fold-change)
-          scipy.special.expit      → logit scale (odds ratios, probabilities)
-          jnp.expm1                → lift scale (RR - 1)
-          jnp.tanh                 → Fisher z scale (correlations)
+        CI endpoints. Default: None (identity scale). Common choices::
+
+            jnp.exp                  # log scale (ratios, RR, fold-change)
+            scipy.special.expit      # logit scale (odds ratios, probabilities)
+            jnp.expm1                # lift scale (RR - 1)
+            jnp.tanh                 # Fisher z scale (correlations)
 
     phi_inv : callable, optional
         Forward transform from reporting scale to inference scale. Required
@@ -96,14 +97,15 @@ class Margins:
 
     at : str, dict, or callable, default "overall"
         Where to evaluate predictions and marginal effects, following
-        statsmodels convention. Common values:
-          "overall"   : per-row, then average (AME / AAP)
-          "mean"      : evaluate at the mean of all variables (MEM)
-          "typical"   : type-aware: median continuous, mode discrete
-          "median"    : median of all
-          "mode"      : mode of all (errors on continuous)
-          dict        : per-variable specification with "_default" key
-          callable    : (data) -> 1-row representative DataFrame
+        statsmodels convention. Common values::
+
+            "overall"   # per-row, then average (AME / AAP)
+            "mean"      # evaluate at the mean of all variables (MEM)
+            "typical"   # type-aware: median continuous, mode discrete
+            "median"    # median of all
+            "mode"      # mode of all (errors on continuous)
+            dict        # per-variable specification with "_default" key
+            callable    # (data) -> 1-row representative DataFrame
 
     level : float, default 0.95
         Confidence level for CIs.
@@ -152,7 +154,8 @@ class Margins:
 
     bootstrap_config : dict, optional
         Advanced bootstrap options. Supported keys:
-          - "block_type": "moving" (default), "nonoverlapping", or "circular"
+
+        - ``"block_type"``: ``"moving"`` (default), ``"nonoverlapping"``, or ``"circular"``
 
     strict : bool, default False
         If True, no defaults are inferred — every analytical choice must be

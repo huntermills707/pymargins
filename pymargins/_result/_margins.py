@@ -38,15 +38,16 @@ class MarginsResult:
     """Container for marginal-effects estimates with inference and diagnostics.
 
     Carries:
-      - The numerical outputs (estimate, SE, CI, p-value)
-      - Diagnostics (κ, simulation disagreement, fallback flag)
-      - Underlying machinery (gradient, draws) for composition with other
-        results from the same session
 
-    Composability via arithmetic operators (+, -, *, /) supports building
-    derived quantities from already-computed results, with proper joint
-    inference using the shared Σ̂. Cross-session composition is forbidden;
-    raises ValueError.
+    - The numerical outputs (estimate, SE, CI, p-value)
+    - Diagnostics (κ, simulation disagreement, fallback flag)
+    - Underlying machinery (gradient, draws) for composition with other
+      results from the same session
+
+    Composability via arithmetic operators (``+``, ``-``, ``*``, ``/``)
+    supports building derived quantities from already-computed results,
+    with proper joint inference using the shared Σ̂. Cross-session
+    composition is forbidden; raises ValueError.
 
     Attributes
     ----------

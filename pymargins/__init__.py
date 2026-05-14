@@ -5,7 +5,7 @@ Quick reference
 ---------------
 Wrap a fitted model in a Margins session, declare your analytical posture
 (scale, vcov, level, at), then compute predictions, slopes, and
-contrasts via the session's methods.
+contrasts via the session's methods::
 
     from pymargins import Margins
     m = Margins.log_scale(fitted_glm, vcov="HC3")
@@ -19,12 +19,12 @@ contrasts via the session's methods.
 
 Public API
 ----------
-- Margins              : main session class
-- MarginsResult        : output of predict/dydx/contrasts/evaluate
-- TestResult           : output of result.test() and result.joint_test()
-- DiagnosticResult     : output of m.diagnose()
-- VariableInfo         : per-variable metadata used by adapters
-- register_adapter     : register a custom adapter for auto-detection
+- ``Margins`` — main session class
+- ``MarginsResult`` — output of predict/dydx/contrasts/evaluate
+- ``TestResult`` — output of result.test() and result.joint_test()
+- ``DiagnosticResult`` — output of m.diagnose()
+- ``VariableInfo`` — per-variable metadata used by adapters
+- ``register_adapter`` — register a custom adapter for auto-detection
 
 Internal modules (prefixed with _) hold the numerical kernels and engine.
 End users should not import from these directly. Adapter implementers
