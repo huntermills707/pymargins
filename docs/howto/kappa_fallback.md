@@ -28,7 +28,7 @@ for your estimand.  Three strategies, in order of preference:
 
 1. **Change the inference scale.**  Often the estimand is nearly
    linear on a different scale (log instead of identity, logit instead
-   of probability).  See [](scales_and_kappa.md).
+   of probability).  See [](../tutorials/scales_and_kappa.md).
 2. **Accept the simulation fallback.**  If the scale is already the
    most natural one, Krinsky–Robb simulation is a robust alternative.
    Just make sure `n_sim` is large enough (≥ 4000) for stable tail

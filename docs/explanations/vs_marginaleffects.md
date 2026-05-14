@@ -63,7 +63,7 @@ If you are coming from `marginaleffects`, the conceptual mapping is:
 | `comparisons()`       | `m.contrasts()`      | Linear contrasts with joint covariance |
 | `avg_predictions()`   | `m.predict(at="overall")` | AAP is the default `at` |
 | `avg_slopes()`        | `m.dydx(at="overall")` | AME is the default `at` |
-| `plot_predictions()`  | `m.predict(...)` + `to_frame()` + matplotlib | See [](plotting.md) |
+| `plot_predictions()`  | `m.predict(...)` + `to_frame()` + matplotlib | See [](../howto/plotting.md) |
 | `hypotheses()`        | `m.evaluate()`       | Nonlinear compositions |
 | `type = "link"`       | `phi_inv` scale      | `pymargins` commits to one scale per session |
 | `type = "response"`   | `phi` back-transform | CI endpoints are back-transformed automatically |

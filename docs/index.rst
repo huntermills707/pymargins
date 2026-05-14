@@ -53,6 +53,8 @@ linearmodels, and lifelines model classes.
     howto/exporting_results
     howto/plotting
     howto/evaluate
+    howto/contrasts
+    howto/contrasts_vs_evaluate
 
 .. toctree::
     :maxdepth: 2

@@ -15,7 +15,7 @@ hand:
 `scaled` is a deterministic transform — it propagates SE, CI, and
 covariance correctly under the delta method.
 
-### Computing `x_bar` and `y_bar`
+## Computing `x_bar` and `y_bar`
 
 For an **average** elasticity (`at="overall"`), `x_bar` is the sample
 mean of `x` and `y_bar` is the average predicted response at the
@@ -39,7 +39,7 @@ y_at = m.predict(atexog={"x": profile_x}).estimate.item()
 m.dydx("x", atexog={"x": profile_x}).scaled(by=profile_x / y_at)
 ```
 
-### Subgroup elasticities
+## Subgroup elasticities
 
 Because `.scaled()` propagates the joint covariance, you can compute
 elasticities for several subgroups and test differences between them:

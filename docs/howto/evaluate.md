@@ -1,13 +1,15 @@
 # Nonlinear estimands with `evaluate`
 
 `Margins.evaluate` is the escape hatch for estimands that cannot be written
-as a weighted sum of scenario predictions.  Use it for ratios, numbers
-needed to treat (NNT), custom utility functions, or any other
-JAX-differentiable composition.
+as a weighted sum of scenario predictions.  Use it for reciprocals,
+custom utility functions, ratios of differences, or any other
+JAX-differentiable composition that is not linear in the predictions.
 
-For linear combinations (risk differences, log-rate ratios, etc.) prefer
-`contrasts` — it is clearer, uses a faster code path, and the weight
-vector is explicitly visible in the audit trail.
+For simple differences, risk ratios, odds ratios, and
+difference-in-differences, `contrasts` is the better tool — it is
+faster, more transparent, and usually more accurate.  See
+[](../howto/contrasts.md) for those recipes and
+[](../howto/contrasts_vs_evaluate.md) for the full decision guide.
 
 ## How `evaluate` works
 
@@ -29,37 +31,15 @@ result = φ( φ⁻¹( compose(p₁, p₂, …, p_k) ) )
 
 where `pᵢ` is the aggregated response-scale prediction for scenario `i`.
 
-## Ratio of two predictions
+## Number needed to treat (NNT)
 
-A ratio contrast (e.g. `p_treated / p_control`) is nonlinear, so it
-must go through `evaluate`:
+NNT is the reciprocal of the absolute risk reduction.  Because it is a
+reciprocal, it cannot be written as a linear contrast and must go
+through `evaluate`:
 
 ```python
 from pymargins import Margins
-import jax.numpy as jnp
 
-m = Margins.log_scale(fit, at="overall")
-
-scenarios = [
-    {"atexog": {"treatment": 1}, "label": "treated"},
-    {"atexog": {"treatment": 0}, "label": "control"},
-]
-
-# On a log-scale session the ratio is a difference on the inference
-# scale, so the delta method is exact for log(ratio).  The reported
-# point estimate is back-transformed to the raw ratio.
-res = m.evaluate(
-    scenarios=scenarios,
-    compose=lambda p: p[0] / p[1],   # treated / control
-)
-res.summary()
-```
-
-## Number needed to treat (NNT)
-
-NNT is the reciprocal of the absolute risk reduction:
-
-```python
 m = Margins.linear_scale(fit, at="overall")
 
 scenarios = [
@@ -78,31 +58,38 @@ If the risk difference crosses zero, the denominator can change sign
 and κ will be large.  In that case `pymargins` auto-falls back to
 simulation, which is the safe thing to do for a reciprocal.
 
-## Custom utility / welfare function
+## Raw ratio on the linear scale
 
-Suppose you have a utility function `u(p) = p**0.5` (a concave
-transformation of a predicted probability) and you want the
-expected utility difference between two policy regimes:
+A risk ratio is usually computed with `contrasts` on a `log_scale`
+session (`log(p₁) − log(p₀)` back-transformed with `exp`).  That is the
+preferred path because the log-ratio is linear and the delta method is
+exact.
+
+Use `evaluate` for the raw ratio `p₁ / p₀` only when your field or
+journal explicitly requires inference on the ratio scale itself:
 
 ```python
 m = Margins.linear_scale(fit, at="overall")
 
 scenarios = [
-    {"atexog": {"policy": "A"}, "label": "regime_A"},
-    {"atexog": {"policy": "B"}, "label": "regime_B"},
+    {"atexog": {"treatment": 1}, "label": "treated"},
+    {"atexog": {"treatment": 0}, "label": "control"},
 ]
 
 res = m.evaluate(
     scenarios=scenarios,
-    compose=lambda p: jnp.sqrt(p[0]) - jnp.sqrt(p[1]),
+    compose=lambda p: p[0] / p[1],
 )
 res.summary()
 ```
 
-## Multi-scenario estimands
+Because the ratio is nonlinear on the linear scale, κ is usually larger
+than for the log-scale contrast and the CI is wider.
 
-`compose` receives the predictions in the order the scenarios were
-provided.  You can use any number of scenarios:
+## Ratio of differences (Emax-style)
+
+When the estimand is a ratio in which the numerator and denominator are
+themselves differences, `evaluate` is required:
 
 ```python
 scenarios = [
@@ -116,6 +103,29 @@ res = m.evaluate(
     scenarios=scenarios,
     compose=lambda p: (p[2] - p[0]) / (p[1] - p[0]),
 )
+```
+
+## Custom utility / welfare function
+
+Suppose you have a utility function `u(p) = p**0.5` (a concave
+transformation of a predicted probability) and you want the
+expected utility difference between two policy regimes:
+
+```python
+import jax.numpy as jnp
+
+m = Margins.linear_scale(fit, at="overall")
+
+scenarios = [
+    {"atexog": {"policy": "A"}, "label": "regime_A"},
+    {"atexog": {"policy": "B"}, "label": "regime_B"},
+]
+
+res = m.evaluate(
+    scenarios=scenarios,
+    compose=lambda p: jnp.sqrt(p[0]) - jnp.sqrt(p[1]),
+)
+res.summary()
 ```
 
 ## When `evaluate` auto-routes to simulation
@@ -136,6 +146,9 @@ To avoid auto-routing, write `compose` with JAX primitives:
 
 ## See also
 
-- [](scenarios_helpers.md) for `pairwise`, `reference`, `grid`, etc.
-- [](contrasts_and_did.md) for linear contrast examples.
-- [](math.rst) for the delta-method derivation.
+- [](../howto/contrasts.md) for risk differences, log-ratios, odds
+  ratios, and DiD.
+- [](../howto/contrasts_vs_evaluate.md) for the decision flowchart.
+- [](../howto/scenarios_helpers.md) for `pairwise`, `reference`, `grid`,
+  etc.
+- [](../math.rst) for the delta-method derivation.
