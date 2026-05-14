@@ -12,6 +12,24 @@ print(res.to_latex())               # LaTeX tabular
 print(res.to_html())                # HTML <table>
 ```
 
+## Saving to CSV, Excel, or Parquet
+
+`to_frame()` returns a tidy `pandas.DataFrame`, so any pandas export
+works out of the box:
+
+```python
+df = res.to_frame()
+df.to_csv("ame_results.csv", index=False)
+df.to_excel("ame_results.xlsx", index=False)
+df.to_parquet("ame_results.parquet")
+```
+
+The DataFrame includes scenario columns (e.g. `age`, `female`) when
+available, making it ready for downstream plotting or reporting
+without string parsing.
+
+## Long-term storage with `materialize`
+
 To save a result for later analysis without keeping the session and
 gradient machinery alive, call `materialize()`:
 
@@ -22,4 +40,7 @@ joblib.dump(slim, "ame_age.joblib")
 ```
 
 Materialised results still support arithmetic (`+`, `-`, `*`, `/`,
-`.scaled(by=...)`) for post-hoc combination.
+`.scaled(by=...)`) for post-hoc combination.  The only thing you lose
+is the ability to call `.conf_int(method="sup-t")` when the original
+session used the delta method (sup-t requires draws, which are
+dropped).

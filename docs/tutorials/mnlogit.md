@@ -43,14 +43,20 @@ fit = smf.mnlogit("mode ~ age + income", data=df).fit()
 ## Predicted probability by mode at representative ages
 
 ```{code-cell} python
-m = Margins.logit_scale(fit, at="overall")
+m = Margins.linear_scale(fit, at="overall")
 preds = m.predict(atexog={"age": [25, 45, 65]})
 preds.summary()
 ```
 
+The response scale for multinomial predictions is the probability scale
+itself, so `linear_scale` is the natural default.  If you need CIs that
+are guaranteed to stay inside \[0, 1\] for a particular category, you
+could open a `logit_scale` session and then use `outcome="car"`, but
+`linear_scale` is the standard choice for tables and plots.
+
 ## AME of income on the probability of `car`
 
 ```{code-cell} python
-ame = Margins.linear_scale(fit, at="overall").dydx("income")
+ame = m.dydx("income")
 ame.outcome("car").summary()
 ```

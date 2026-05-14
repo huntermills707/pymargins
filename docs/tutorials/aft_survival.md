@@ -52,6 +52,16 @@ m.contrasts(
 ).summary()
 ```
 
+## Predicted median survival time by treatment
+
+On the linear scale, predictions are expected survival times:
+
+```{code-cell} python
+Margins.linear_scale(aft, at="overall").predict(
+    atexog={"treated": [0, 1]}
+).summary()
+```
+
 ## Marginal effect of age on expected duration
 
 ```{code-cell} python

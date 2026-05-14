@@ -52,6 +52,11 @@ m.dydx("x").summary()
 
 ## Predicted `y` at representative `x`
 
+Entity and time fixed effects are absorbed during estimation; they do
+not appear as explicit regressors in the margin calculations.
+Predictions are therefore evaluated at the **population-averaged**
+profile (or the representative profile you specify with `at=`).
+
 ```{code-cell} python
 m.predict(atexog={"x": [-1.0, 0.0, 1.0]}).summary()
 ```

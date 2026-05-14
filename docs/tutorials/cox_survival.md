@@ -57,5 +57,12 @@ m.contrasts(
 m.dydx("biomarker").summary()
 ```
 
+Because the session is on the **log scale**, `dydx` returns the
+change in `log(HR)` per unit of biomarker.  For a Cox model this is
+numerically close to the coefficient itself (the difference arises
+from the covariate centering lifelines applies internally).  If you
+want the change in the raw HR, use `Margins.linear_scale(...)` and
+interpret the AME as the absolute change in the partial hazard ratio.
+
 See [](aft_survival.md) for parametric AFT models, where the natural
 inference scale is the time scale rather than the hazard scale.

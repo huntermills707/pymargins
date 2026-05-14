@@ -49,3 +49,15 @@ m.dydx("x").summary()
 ```{code-cell} python
 m.predict(atexog={"x": [-1.0, 0.0, 1.0]}).summary()
 ```
+
+## Contrast: endogenous regressor +1 vs baseline
+
+```{code-cell} python
+m.contrasts(
+    scenarios=[
+        {"atexog": {"x": 1.0}, "label": "x=1"},
+        {"atexog": {"x": 0.0}, "label": "x=0"},
+    ],
+    contrasts=[+1, -1],
+).summary()
+```

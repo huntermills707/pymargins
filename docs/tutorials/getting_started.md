@@ -59,9 +59,11 @@ print(m.summary())
 ```
 
 `Margins.log_scale(...)` is shorthand for
-`Margins(..., phi=jnp.exp, phi_inv=jnp.log)`. See
-[](../explanations/inference_scale.md) for why scale is a session-level
-commitment.
+`Margins(..., phi=jnp.exp, phi_inv=jnp.log)`.  We use it here because
+we will compute a risk-ratio contrast below; for predicted
+probabilities `linear_scale` (identity) or `logit_scale` are also
+valid choices.  See [](../explanations/inference_scale.md) for the
+full scale menu.
 
 ## 3. Adjusted predictions
 
@@ -71,6 +73,12 @@ distribution of the *other* covariates (`at="overall"`, the AAP):
 ```{code-cell} python
 m.predict(atexog={"treated": [0, 1]}).summary()
 ```
+
+Because the session is on the log scale, the CI is asymmetric on the
+probability scale (multiplicative around the point estimate).  For a
+probability that can approach 1, `logit_scale` keeps the CI inside
+(0, 1); `linear_scale` gives a symmetric CI on the probability scale
+itself.
 
 The same predictions at the typical covariate profile (the APM —
 `at="typical"` uses median for continuous and mode for discrete):

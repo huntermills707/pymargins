@@ -52,6 +52,7 @@ linearmodels, and lifelines model classes.
     howto/matching
     howto/exporting_results
     howto/plotting
+    howto/evaluate
 
 .. toctree::
     :maxdepth: 2

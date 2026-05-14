@@ -51,8 +51,12 @@ fit = smf.glm(
 
 Stata: `margins agegrp, atmeans`.
 
+For predicted probabilities the natural reporting scale is the
+probability scale itself, so `linear_scale` is the default that
+matches Stata:
+
 ```{code-cell} python
-Margins.log_scale(fit, at="typical").predict(
+Margins.linear_scale(fit, at="typical").predict(
     atexog={"agegrp": list(range(1, 7))}
 ).summary()
 ```
@@ -62,7 +66,7 @@ Margins.log_scale(fit, at="typical").predict(
 Stata: `margins agegrp`.
 
 ```{code-cell} python
-Margins.log_scale(fit, at="overall").predict(
+Margins.linear_scale(fit, at="overall").predict(
     atexog={"agegrp": list(range(1, 7))}
 ).summary()
 ```
@@ -72,7 +76,7 @@ Margins.log_scale(fit, at="overall").predict(
 Stata: `margins, at(age=(20 50 70)) atmeans`.
 
 ```{code-cell} python
-Margins.log_scale(fit, at="typical").predict(
+Margins.linear_scale(fit, at="typical").predict(
     atexog={"age": [20, 50, 70]}
 ).summary()
 ```
@@ -103,5 +107,5 @@ Margins.linear_scale(fit, at="overall").contrasts(
 ## Robust SEs
 
 ```{code-cell} python
-Margins.log_scale(fit, vcov="HC3", at="overall").dydx("age").summary()
+Margins.linear_scale(fit, vcov="HC3", at="overall").dydx("age").summary()
 ```

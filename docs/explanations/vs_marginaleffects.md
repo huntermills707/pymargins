@@ -52,6 +52,22 @@ differentiable compositions. It does not do:
 If you need those, `marginaleffects` has broader coverage and a
 gentler learning curve, and it is the right tool.
 
+## API mapping for R users
+
+If you are coming from `marginaleffects`, the conceptual mapping is:
+
+| `marginaleffects` (R) | `pymargins` (Python) | Notes |
+|-----------------------|----------------------|-------|
+| `predictions()`       | `m.predict()`        | Adjusted predictions (AAP / APM / APR) |
+| `slopes()`            | `m.dydx()`           | Marginal effects (AME / MEM / MER) |
+| `comparisons()`       | `m.contrasts()`      | Linear contrasts with joint covariance |
+| `avg_predictions()`   | `m.predict(at="overall")` | AAP is the default `at` |
+| `avg_slopes()`        | `m.dydx(at="overall")` | AME is the default `at` |
+| `plot_predictions()`  | `m.predict(...)` + `to_frame()` + matplotlib | See [](plotting.md) |
+| `hypotheses()`        | `m.evaluate()`       | Nonlinear compositions |
+| `type = "link"`       | `phi_inv` scale      | `pymargins` commits to one scale per session |
+| `type = "response"`   | `phi` back-transform | CI endpoints are back-transformed automatically |
+
 ## When to pick which
 
 | Need                                                | Tool                |
