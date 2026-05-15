@@ -31,6 +31,7 @@ from .._scenarios import (
 )
 from .._kappa import session_kappa
 from .._result import MarginsResult, DiagnosticResult
+from .._result._text import SummaryString
 from ._estimands import (
     _get_base_data,
     _build_prediction_estimand,
@@ -1003,7 +1004,7 @@ class Margins:
         """
         scale_name = self._scale_label()
         jobs_str = f"n_jobs={self.n_jobs}" if self.method == "bootstrap" else ""
-        return (
+        return SummaryString(
             f"Margins session\n"
             f"  Model: {type(self.model).__name__}\n"
             f"  Adapter: {type(self.adapter).__name__}\n"
