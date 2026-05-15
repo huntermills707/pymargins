@@ -602,10 +602,10 @@ def test_joint_wald_test_regularization_produces_finite_statistic():
 
 
 def test_delta_variance_bad_ndim():
-    """delta_variance must raise for gradients with ndim > 2."""
-    grad = jnp.ones((2, 3, 4))
-    Sigma = jnp.eye(4)
-    with pytest.raises(ValueError, match="gradient must be 1D or 2D"):
+    """delta_variance must raise for gradients with ndim > 3."""
+    grad = jnp.ones((2, 3, 4, 5))
+    Sigma = jnp.eye(5)
+    with pytest.raises(ValueError, match="gradient must be 1D, 2D, or 3D"):
         delta_variance(grad, Sigma)
 
 
@@ -687,3 +687,24 @@ def test_joint_covariance_shape_mismatch():
     Sigma = jnp.eye(3)
     with pytest.raises(ValueError, match="same shape"):
         joint_covariance_of_results([g1, g2], Sigma)
+
+
+def test_delta_variance_3d_grad():
+    """delta_variance must handle 3D gradients from multi-outcome models."""
+    rng = np.random.default_rng(42)
+    p = 4
+    cov = jnp.eye(p) * 0.01
+    # 3D gradient: (2 atoms, 3 outcomes, 4 params)
+    grad = jnp.asarray(rng.standard_normal((2, 3, p)))
+    var = delta_variance(grad, cov)
+    assert var.shape == (6, 6)
+
+
+def test_delta_se_3d_grad():
+    """delta_se must return 2D SEs for 3D gradients."""
+    rng = np.random.default_rng(42)
+    p = 4
+    cov = jnp.eye(p) * 0.01
+    grad = jnp.asarray(rng.standard_normal((2, 3, p)))
+    se = delta_se(grad, cov)
+    assert se.shape == (2, 3)

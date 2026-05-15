@@ -73,9 +73,13 @@ def delta_variance(
         return grad @ cov_params @ grad
     elif grad.ndim == 2:
         return grad @ cov_params @ grad.T
+    elif grad.ndim == 3:
+        # Multi-outcome model with multiple scenarios: flatten to 2D
+        grad_2d = grad.reshape(-1, grad.shape[-1])
+        return grad_2d @ cov_params @ grad_2d.T
     else:
         raise ValueError(
-            f"gradient must be 1D or 2D; got ndim={grad.ndim}"
+            f"gradient must be 1D, 2D, or 3D; got ndim={grad.ndim}"
         )
 
 
@@ -124,7 +128,10 @@ def delta_se(
     if jnp.ndim(var) == 0:
         return jnp.sqrt(jnp.maximum(var, 0.0))
     else:
-        return _safe_sqrt_diag(var)
+        se = _safe_sqrt_diag(var)
+        if grad.ndim > 2:
+            return se.reshape(grad.shape[:-1])
+        return se
 
 
 # ---------------------------------------------------------------------------

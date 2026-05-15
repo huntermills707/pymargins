@@ -384,6 +384,11 @@ def all_pairwise(
     """Build all scenario combinations for a factorial design and return
     named pairwise contrasts for each stratum.
 
+    For a single variable you may pass the name directly and the levels
+    as a flat list (``all_pairwise("x", [0, 1])``); for multiple
+    variables pass lists (``all_pairwise(["x", "y"], [[0, 1], ["A", "B"]])``).
+    
+
     Parameters
     ----------
     variables : list[str]
@@ -417,6 +422,11 @@ def all_pairwise(
         ...
     }
     """
+    # Normalise single-variable shorthand to list form
+    if isinstance(variables, str):
+        variables = [variables]
+        values_list = [values_list]
+
     if len(variables) != len(values_list):
         raise ValueError(
             "variables and values_list must have the same length"

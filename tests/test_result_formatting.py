@@ -239,3 +239,13 @@ def test_materialized_test_raises(fit_ols):
     mat = pred.materialize()
     with pytest.raises(ValueError):
         mat.test()
+
+
+def test_summary_with_2d_estimate(fit_logit):
+    """Summary must work when estimate is 2D (multi-outcome x multi-scenario)."""
+    m = Margins.linear_scale(fit_logit, at="overall")
+    res = m.predict(atexog={"age": [25, 45, 65], "treatment": [0, 1]})
+    # This produces a 2D estimate (6 scenarios)
+    s = res.summary()
+    assert isinstance(s, str)
+    assert "age=25" in s or "estimate" in s

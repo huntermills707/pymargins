@@ -229,3 +229,12 @@ def test_all_pairwise_empty():
     # with an empty values list to get an empty product
     with pytest.raises(ValueError, match="at least one combination"):
         all_pairwise(["x"], [[]])
+
+
+def test_all_pairwise_single_variable_shorthand():
+    """all_pairwise should accept a single string and flat list for one variable."""
+    scenarios, contrasts = all_pairwise("region", ["N", "S", "E", "W"])
+    assert len(scenarios) == 4
+    assert scenarios[0]["atexog"] == {"region": "N"}
+    assert "region=S_vs_region=N" in contrasts
+    assert len(contrasts["region=S_vs_region=N"]) == 4

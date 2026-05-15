@@ -205,12 +205,21 @@ def kappa_vector(
     out = h(beta)
     if jnp.ndim(out) == 0:
         return jnp.array([kappa(h, beta, cov_params, **kwargs)])
-    n_outputs = int(out.shape[0])
-    kappas = []
-    for i in range(n_outputs):
-        h_i = (lambda b, i=i: h(b)[i])
-        kappas.append(kappa(h_i, beta, cov_params, **kwargs))
-    return jnp.asarray(kappas)
+    elif jnp.ndim(out) == 1:
+        n_outputs = int(out.shape[0])
+        kappas = []
+        for i in range(n_outputs):
+            h_i = (lambda b, i=i: h(b)[i])
+            kappas.append(kappa(h_i, beta, cov_params, **kwargs))
+        return jnp.asarray(kappas)
+    else:
+        # Flatten multi-dimensional output and compute per-element kappa
+        out_flat = jnp.reshape(out, (-1,))
+        kappas = []
+        for i in range(len(out_flat)):
+            h_i = (lambda b, i=i: jnp.reshape(h(b), (-1,))[i])
+            kappas.append(kappa(h_i, beta, cov_params, **kwargs))
+        return jnp.asarray(kappas).reshape(out.shape)
 
 
 # ---------------------------------------------------------------------------

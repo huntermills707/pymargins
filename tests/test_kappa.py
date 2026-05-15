@@ -428,3 +428,18 @@ def test_kappa_non_psd_negative_diagonal():
 
     k = kappa(h, beta, Sigma, backend="autodiff")
     assert np.isfinite(k), f"Expected finite κ after ridge, got {k}"
+
+
+def test_kappa_vector_2d_output():
+    """kappa_vector must handle 2D array outputs by computing per-element κ."""
+    rng = np.random.default_rng(42)
+    p = 3
+    beta = jnp.asarray(rng.standard_normal(p))
+    Sigma = jnp.eye(p) * 0.01
+
+    def h(b):
+        return jnp.array([[b[0] + b[1], b[0] - b[1]], [b[0] * b[1], b[0] / b[1]]])
+
+    k = kappa_vector(h, beta, Sigma, backend="autodiff")
+    assert k.shape == (2, 2)
+    assert np.all(np.isfinite(k))

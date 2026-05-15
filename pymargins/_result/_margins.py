@@ -170,10 +170,10 @@ class MarginsResult:
         For logit-scale predictions this means testing against p = 0.5,
         which may not be the intended null.
         """
-        est = np.atleast_1d(self.estimate)
-        se = np.atleast_1d(self.std_error)
-        lo = np.atleast_1d(self.conf_int_lower)
-        hi = np.atleast_1d(self.conf_int_upper)
+        est = np.atleast_1d(self.estimate).ravel()
+        se = np.atleast_1d(self.std_error).ravel()
+        lo = np.atleast_1d(self.conf_int_lower).ravel()
+        hi = np.atleast_1d(self.conf_int_upper).ravel()
         labels = self.estimand_metadata.get("labels")
         if labels is None:
             labels = [f"[{i}]" for i in range(est.size)]
@@ -185,8 +185,8 @@ class MarginsResult:
         # this tests H0: logit(p)=0 i.e. p=0.5, which is rarely the intended null.
         try:
             tr = self.test(value=0.0, null_scale="inference")
-            z_vals = np.atleast_1d(tr.statistic)
-            p_vals = np.atleast_1d(tr.pvalue)
+            z_vals = np.atleast_1d(tr.statistic).ravel()
+            p_vals = np.atleast_1d(tr.pvalue).ravel()
         except (ValueError, TypeError, np.linalg.LinAlgError) as exc:
             warnings.warn(f"Test statistics omitted from summary: {exc}", stacklevel=2)
 
