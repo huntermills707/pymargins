@@ -43,6 +43,25 @@ sklearn = ["scikit-learn>=1.3"]
 polars = ["polars>=1.0", "pyarrow>=10.0"]
 matching = ["pysmatch>=2.1"]
 
+# Documentation (with executable notebooks)
+docs = [
+    "sphinx>=7.0",
+    "myst-nb>=1.0",
+    "sphinx-design>=0.5",
+    "matplotlib>=3.5",
+    "openpyxl>=3.0",
+    "joblib>=1.0",
+    # Include all modeling backends so every tutorial executes
+    "statsmodels>=0.14",
+    "patsy>=0.5",
+    "linearmodels>=5.0",
+    "lifelines>=0.30",
+    "scikit-learn>=1.3",
+    "polars>=1.0",
+    "pyarrow>=10.0",
+    "pysmatch>=2.1",
+]
+
 # Development / testing
 test = [
     "pytest>=7.0",

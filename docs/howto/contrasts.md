@@ -1,3 +1,43 @@
+---
+jupytext:
+  text_representation:
+    extension: .md
+    format_name: myst
+    format_version: 0.13
+kernelspec:
+  display_name: Python 3
+  language: python
+  name: python3
+---
+
+```{code-cell} python
+import numpy as np
+import pandas as pd
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+from pymargins import Margins
+
+rng = np.random.default_rng(42)
+n = 2000
+df = pd.DataFrame({
+    "age": rng.integers(20, 75, n),
+    "female": rng.binomial(1, 0.52, n),
+    "treated": rng.binomial(1, 0.40, n),
+    "region": rng.choice(["N", "S", "E", "W"], n),
+    "group": rng.choice(["A", "B"], n),
+    "preexist": rng.binomial(1, 0.4, n),
+})
+lp = (-1.5 + 0.04 * df["age"] - 0.3 * df["female"] + 0.8 * df["treated"]
+      + 0.2 * (df["region"] == "S") + 0.4 * (df["region"] == "E")
+      - 0.1 * (df["region"] == "W")
+      + 0.6 * (df["group"] == "B") + 0.4 * df["preexist"])
+df["y"] = rng.binomial(1, 1 / (1 + np.exp(-lp)))
+
+fit = smf.glm("y ~ age + female + treated + C(region) + C(group) + preexist", data=df,
+              family=sm.families.Binomial()).fit()
+m = Margins.log_scale(fit, at="overall")
+```
+
 # Linear contrasts with `contrasts`
 
 `Margins.contrasts` forms a **weighted sum of scenario predictions on the
@@ -39,14 +79,14 @@ than `evaluate` calls.
 The simplest contrast: the arithmetic difference between two predicted
 probabilities.
 
-```python
+```{code-cell} python
 from pymargins import Margins, pairwise
 
 m = Margins.linear_scale(fit, at="overall")
 
 scen, w = pairwise("treated", [1, 0])
 res = m.contrasts(scenarios=scen, contrasts=w)
-res.summary()
+print(res.summary())
 ```
 
 On the linear scale the contrast is `p₁ − p₀`.  The CI is symmetric on
@@ -57,12 +97,12 @@ the probability scale.
 A ratio is a difference on the log scale.  The back-transform turns the
 log-ratio into a ratio with an asymmetric CI.
 
-```python
+```{code-cell} python
 m = Margins.log_scale(fit, at="overall")
 
 scen, w = pairwise("treated", [1, 0])
 res = m.contrasts(scenarios=scen, contrasts=w)
-res.summary()
+print(res.summary())
 ```
 
 The point estimate is `exp(log(p₁) − log(p₀)) = p₁ / p₀`.  Because the
@@ -74,12 +114,12 @@ small.
 For probabilities near 0 or 1, the logit scale keeps the CI inside
 (0, 1) for each arm before forming the odds ratio.
 
-```python
+```{code-cell} python
 m = Margins.logit_scale(fit, at="overall")
 
 scen, w = pairwise("treated", [1, 0])
 res = m.contrasts(scenarios=scen, contrasts=w)
-res.summary()
+print(res.summary())
 ```
 
 The back-transform is `expit(logit(p₁) − logit(p₀))`, which simplifies
@@ -90,7 +130,7 @@ to the odds ratio `(p₁/(1−p₁)) / (p₀/(1−p₀))`.
 Lift is a risk ratio minus one.  The easiest path is `log_scale` for
 the ratio, then subtract one from the estimate and CI endpoints:
 
-```python
+```{code-cell} python
 m = Margins.log_scale(fit, at="overall")
 res = m.contrasts(scenarios=scen, contrasts=w)
 
@@ -103,12 +143,12 @@ lift_ci = (float(res.conf_int_lower) - 1.0, float(res.conf_int_upper) - 1.0)
 Compare every level of a factor against a common baseline.  The weight
 matrix has one row per comparison.
 
-```python
+```{code-cell} python
 from pymargins import reference
 
 scen, W = reference("region", ["N", "S", "E", "W"], ref_level="N")
 res = m.contrasts(scenarios=scen, contrasts=W)
-res.summary()
+print(res.summary())
 ```
 
 ## All-pairs comparisons
@@ -116,39 +156,49 @@ res.summary()
 Compare every level against every other level.  The result carries a
 joint covariance, so simultaneous CIs are available.
 
-```python
+```{code-cell} python
 from pymargins import all_pairwise
 
 scen, W = all_pairwise("region", ["N", "S", "E", "W"])
 res = m.contrasts(scenarios=scen, contrasts=W)
 
-# Family-wise coverage
-res.conf_int(level=0.95, method="sup-t")
+# Joint covariance is stored in the result for post-hoc combination
+print(res.summary())
 ```
 
 ## Testing a non-zero null
 
-```python
+```{code-cell} python
 # Test whether the risk ratio exceeds 1.5
-m.log_scale(fit, at="overall").contrasts(scenarios=scen, contrasts=w).test(null=1.5)
+scen_test, w_test = pairwise("treated", [1, 0])
+print(m.log_scale(fit, at="overall").contrasts(scenarios=scen_test, contrasts=w_test).test(value=1.5).summary())
 ```
 
 The `null` value is interpreted on the **reporting scale** and lifted
 onto the inference scale via `phi_inv` automatically.
 
-## Contrasts over a grid
+## Predictions over a grid
 
-Evaluate the same contrast at several values of a moderator.  The
-result is a vector estimand with one component per grid point.
+Evaluate predictions at several values of a moderator:
 
-```python
+```{code-cell} python
+res = m.predict(atexog={"age": [25, 45, 65], "treated": [0, 1]})
+print(res.summary())
+```
+
+For a contrast at a specific moderator value, build the scenarios
+explicitly:
+
+```{code-cell} python
 scen, w = pairwise("treated", [1, 0])
 res = m.contrasts(
-    scenarios=scen,
+    scenarios=[
+        {"atexog": {"treated": 1, "age": 45}, "label": "treated@45"},
+        {"atexog": {"treated": 0, "age": 45}, "label": "control@45"},
+    ],
     contrasts=w,
-    over="age",                     # or atexog={"age": [25, 45, 65]}
 )
-res.summary()
+print(res.summary())
 ```
 
 ## 2×2 Difference-in-differences
@@ -157,12 +207,13 @@ DiD is a contrast across four cells with weights `[+1, −1, −1, +1]`.
 See [](../howto/diff_in_diff.md) for the full derivation and
 response-scale motivation (Ai & Norton, 2003).
 
-```python
+```{code-cell} python
 from pymargins import did
 
 scen, w = did("group", "preexist",
-              group_levels=["A", "B"], condition_levels=[0, 1])
-m.contrasts(scenarios=scen, contrasts=w).summary()
+              treated_level="B", control_level="A",
+              post_level=1, pre_level=0)
+print(m.contrasts(scenarios=scen, contrasts=w).summary())
 ```
 
 ## See also

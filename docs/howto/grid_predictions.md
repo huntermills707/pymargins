@@ -1,14 +1,49 @@
+---
+jupytext:
+  text_representation:
+    extension: .md
+    format_name: myst
+    format_version: 0.13
+kernelspec:
+  display_name: Python 3
+  language: python
+  name: python3
+---
+
+```{code-cell} python
+import numpy as np
+import pandas as pd
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+from pymargins import Margins
+
+rng = np.random.default_rng(42)
+n = 2000
+df = pd.DataFrame({
+    "age": rng.integers(20, 75, n),
+    "treatment": rng.binomial(1, 0.40, n),
+})
+lp = -1.5 + 0.04 * df["age"] + 0.8 * df["treatment"]
+df["y"] = rng.binomial(1, 1 / (1 + np.exp(-lp)))
+
+fit = smf.glm("y ~ age + treatment", data=df,
+              family=sm.families.Binomial()).fit()
+m = Margins.log_scale(fit, at="overall")
+```
+
 # Grid predictions
 
 For a Cartesian product of counterfactual values, use `grid` (or pass
 a list to `atexog`):
 
-```python
+```{code-cell} python
 from pymargins import grid
 
-# Equivalent ways to write the same 6-row grid
-m.predict(scenarios=grid(age=[25, 45, 65], treatment=[0, 1]))
-m.predict(atexog={"age": [25, 45, 65], "treatment": [0, 1]})
+# grid() builds scenario dicts for use in contrasts/evaluate
+print(grid(age=[25, 45, 65], treatment=[0, 1]))
+
+# For predict, pass the grid directly as atexog
+print(m.predict(atexog={"age": [25, 45, 65], "treatment": [0, 1]}).summary())
 ```
 
 Variables not mentioned in `atexog` / `grid` follow the session's

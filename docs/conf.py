@@ -38,14 +38,14 @@ myst_enable_extensions = [
 ]
 myst_heading_anchors = 3
 
-# Notebooks: scaffold ships with execution disabled so the docs build
-# does not require every model backend (statsmodels, linearmodels,
-# lifelines, JAX) to be installed. Flip to 'cache' once notebooks are
-# pinned to a known-good environment; then stale outputs become a build
-# error rather than a silent drift.
-nb_execution_mode = 'off'
+# Notebook execution: 'auto' executes notebooks that lack outputs,
+# 'cache' reuses cached outputs when inputs haven't changed (fastest
+# for CI), and 'off' disables execution entirely.  Override with the
+# PYMARGINS_DOCS_EXEC environment variable.
+nb_execution_mode = os.getenv("PYMARGINS_DOCS_EXEC", "auto")
 nb_execution_timeout = 180
 nb_execution_raise_on_error = True
+nb_execution_show_tb = True
 
 intersphinx_mapping = {
     'numpy': ('https://numpy.org/doc/stable/', None),

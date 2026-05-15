@@ -43,19 +43,19 @@ fit = smf.ols("wage ~ age + C(female) + C(education) + age:C(female)",
 
 ```{code-cell} python
 m = Margins.linear_scale(fit, vcov="HC2", at="overall")
-m.dydx("age").summary()
+print(m.dydx("age").summary())
 ```
 
 ## AME of `age` by sex
 
 ```{code-cell} python
-m.dydx("age", atexog={"female": [0, 1]}).summary()
+print(m.dydx("age", atexog={"female": [0, 1]}).summary())
 ```
 
 ## Predicted wage at representative education levels
 
 ```{code-cell} python
-m.predict(atexog={"education": ["hs", "college", "grad"]}).summary()
+print(m.predict(atexog={"education": ["hs", "college", "grad"]}).summary())
 ```
 
 ## A pairwise wage gap
@@ -64,5 +64,5 @@ m.predict(atexog={"education": ["hs", "college", "grad"]}).summary()
 from pymargins import pairwise
 
 scen, w = pairwise("education", ["grad", "hs"])
-m.contrasts(scenarios=scen, contrasts=w).summary()
+print(m.contrasts(scenarios=scen, contrasts=w).summary())
 ```

@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 
 from ._margins import MarginsResult
+from ._text import SummaryString
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +205,7 @@ def summary(
     if footers:
         out_lines.extend([""] + footers)
 
-    return "\n".join(out_lines)
+    return SummaryString("\n".join(out_lines))
 
 
 def to_frame(self: MarginsResult) -> pd.DataFrame:

@@ -1,18 +1,52 @@
+---
+jupytext:
+  text_representation:
+    extension: .md
+    format_name: myst
+    format_version: 0.13
+kernelspec:
+  display_name: Python 3
+  language: python
+  name: python3
+---
+
+```{code-cell} python
+import numpy as np
+import pandas as pd
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+from pymargins import Margins
+
+rng = np.random.default_rng(42)
+n = 2000
+df = pd.DataFrame({
+    "age": rng.integers(20, 75, n),
+    "female": rng.binomial(1, 0.52, n),
+    "treated": rng.binomial(1, 0.40, n),
+})
+lp = -1.5 + 0.04 * df["age"] - 0.3 * df["female"] + 0.8 * df["treated"]
+df["y"] = rng.binomial(1, 1 / (1 + np.exp(-lp)))
+
+fit = smf.glm("y ~ age + female + treated", data=df,
+              family=sm.families.Binomial()).fit()
+m = Margins.log_scale(fit, at="overall")
+```
+
 # Bootstrap inference
 
 Switch the session's inference method to `"bootstrap"` and pick the
 number of replicates. The default scheme is *pairs* — rows resampled
 IID with replacement.
 
-```python
+```{code-cell} python
 m = Margins.log_scale(fit, method="bootstrap", n_boot=2000, vcov="HC3")
-m.dydx("age").summary()
+print(m.dydx("age").summary())
 ```
 
 Parallelism uses thread pools; BLAS threads are pinned to 1 per worker
 to avoid oversubscription:
 
-```python
+```{code-cell} python
 m = Margins.log_scale(fit, method="bootstrap", n_boot=2000, n_jobs=-1)
 ```
 

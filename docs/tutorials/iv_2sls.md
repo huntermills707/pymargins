@@ -41,23 +41,23 @@ fit = IV2SLS(df["y"], df[["const"]], df[["x"]], df[["z"]]).fit()
 
 ```{code-cell} python
 m = Margins.linear_scale(fit, at="overall")
-m.dydx("x").summary()
+print(m.dydx("x").summary())
 ```
 
 ## Predictions at counterfactual `x`
 
 ```{code-cell} python
-m.predict(atexog={"x": [-1.0, 0.0, 1.0]}).summary()
+print(m.predict(atexog={"x": [-1.0, 0.0, 1.0]}).summary())
 ```
 
 ## Contrast: endogenous regressor +1 vs baseline
 
 ```{code-cell} python
-m.contrasts(
+print(m.contrasts(
     scenarios=[
         {"atexog": {"x": 1.0}, "label": "x=1"},
         {"atexog": {"x": 0.0}, "label": "x=0"},
     ],
     contrasts=[+1, -1],
-).summary()
+).summary())
 ```

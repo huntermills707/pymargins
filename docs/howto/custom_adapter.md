@@ -51,7 +51,9 @@ register_adapter(MyGLMAdapter())
 
 After registration, `Margins(...)` will auto-detect your model class.
 Adapters are tried in registration order; user-registered adapters are
-tried *before* built-ins.
+tried *before* built-ins, so you can override default detection if your
+fitted object subclasses one of the supported types but has different
+`predict` semantics.
 
 ## `WrappedFDAdapter` — when you have a black-box predict
 

@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
+from ._text import SummaryString
+
 
 # ---------------------------------------------------------------------------
 # Hypothesis test result
@@ -68,7 +70,7 @@ class TestResult:
                 lines.append(f"  [{i}] stat={s:.4f}, p={pv:.4g}")
         if self.df is not None:
             lines.append(f"  df: {self.df}")
-        return "\n".join(lines)
+        return SummaryString("\n".join(lines))
 
     def to_frame(self) -> pd.DataFrame:
         """Return as a tidy DataFrame, one row per estimand component."""

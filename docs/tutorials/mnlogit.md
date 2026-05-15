@@ -35,7 +35,9 @@ util_bike = 0.02 * (60 - df["age"]) + rng.normal(0, 1, n)
 util_bus = np.zeros(n)
 util = np.column_stack([util_bus, util_car, util_bike])
 util += rng.gumbel(size=util.shape)
-df["mode"] = pd.Categorical.from_codes(util.argmax(1), categories=["bus", "car", "bike"])
+df["mode"] = util.argmax(1)  # 0=bus, 1=car, 2=bike
+
+# Note: pymargins uses integer outcome indices for MNLogit.
 
 fit = smf.mnlogit("mode ~ age + income", data=df).fit()
 ```
@@ -45,7 +47,7 @@ fit = smf.mnlogit("mode ~ age + income", data=df).fit()
 ```{code-cell} python
 m = Margins.linear_scale(fit, at="overall")
 preds = m.predict(atexog={"age": [25, 45, 65]})
-preds.summary()
+print(preds.summary())
 ```
 
 The response scale for multinomial predictions is the probability scale
@@ -58,5 +60,5 @@ could open a `logit_scale` session and then use `outcome="car"`, but
 
 ```{code-cell} python
 ame = m.dydx("income")
-ame.outcome("car").summary()
+print(ame.outcome(1).summary())
 ```

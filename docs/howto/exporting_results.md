@@ -1,9 +1,42 @@
+---
+jupytext:
+  text_representation:
+    extension: .md
+    format_name: myst
+    format_version: 0.13
+kernelspec:
+  display_name: Python 3
+  language: python
+  name: python3
+---
+
+```{code-cell} python
+import numpy as np
+import pandas as pd
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+from pymargins import Margins
+
+rng = np.random.default_rng(42)
+n = 2000
+df = pd.DataFrame({
+    "age": rng.integers(20, 75, n),
+    "female": rng.binomial(1, 0.52, n),
+})
+lp = -1.5 + 0.04 * df["age"] - 0.3 * df["female"]
+df["y"] = rng.binomial(1, 1 / (1 + np.exp(-lp)))
+
+fit = smf.glm("y ~ age + female", data=df,
+              family=sm.families.Binomial()).fit()
+m = Margins.log_scale(fit, at="overall")
+```
+
 # Exporting results
 
 Every `MarginsResult` can be printed, framed, or serialized to LaTeX
 / HTML for inclusion in papers and reports.
 
-```python
+```{code-cell} python
 res = m.dydx("age", atexog={"female": [0, 1]})
 
 print(res.summary(stars=True))      # text table with significance stars
@@ -17,7 +50,7 @@ print(res.to_html())                # HTML <table>
 `to_frame()` returns a tidy `pandas.DataFrame`, so any pandas export
 works out of the box:
 
-```python
+```{code-cell} python
 df = res.to_frame()
 df.to_csv("ame_results.csv", index=False)
 df.to_excel("ame_results.xlsx", index=False)
@@ -33,10 +66,9 @@ without string parsing.
 To save a result for later analysis without keeping the session and
 gradient machinery alive, call `materialize()`:
 
-```python
+```{code-cell} python
 slim = res.materialize()           # estimates/SE/CI only; drops gradients
-import joblib
-joblib.dump(slim, "ame_age.joblib")
+print(slim.summary())
 ```
 
 Materialised results still support arithmetic (`+`, `-`, `*`, `/`,

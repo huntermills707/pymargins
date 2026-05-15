@@ -51,7 +51,7 @@ callables for custom scales.
 - The CI is symmetric on the inference scale, asymmetric on the
   reporting scale.
 - κ is recomputed per scale, so the fallback decision may change.
-- The hypothesis test in `.test(null=...)` interprets `null` on the
+- The hypothesis test in `.test(value=...)` interprets `value` on the
   reporting scale and lifts it via `phi_inv`.
 
 See [](kappa_diagnostic.md) for the curvature-fallback link.

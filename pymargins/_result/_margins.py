@@ -924,26 +924,16 @@ class MarginsResult:
                 f"MarginsResult multiplication requires a scalar, got {type(other).__name__}"
             ) from exc
 
-        # Scale-aware: SE/gradient/draws are on the inference scale;
-        # estimate and CI bounds are on the reporting scale.
-        if self.phi is not None and self.phi_inv is not None:
-            new_est = np.asarray(self.phi(scalar * self.phi_inv(self.estimate)))
-            lo = np.asarray(self.phi(scalar * self.phi_inv(self.conf_int_lower)))
-            hi = np.asarray(self.phi(scalar * self.phi_inv(self.conf_int_upper)))
-            if scalar < 0:
-                lo, hi = hi, lo
-            new_lo, new_hi = lo, hi
-            new_draws = (
-                np.asarray(self.phi(scalar * self.phi_inv(self.draws)))
-                if self.draws is not None else None
-            )
+        # Scale the reported estimate, CI bounds, and inference-scale
+        # quantities (SE, gradient, draws) linearly by the scalar.
+        new_est = self.estimate * scalar
+        if scalar >= 0:
+            new_lo = self.conf_int_lower * scalar
+            new_hi = self.conf_int_upper * scalar
         else:
-            new_est = self.estimate * scalar
-            new_lo = (self.conf_int_lower * scalar
-                      if scalar > 0 else self.conf_int_upper * scalar)
-            new_hi = (self.conf_int_upper * scalar
-                      if scalar > 0 else self.conf_int_lower * scalar)
-            new_draws = self.draws * scalar if self.draws is not None else None
+            new_lo = self.conf_int_upper * scalar
+            new_hi = self.conf_int_lower * scalar
+        new_draws = self.draws * scalar if self.draws is not None else None
 
         return MarginsResult(
             estimate=new_est,

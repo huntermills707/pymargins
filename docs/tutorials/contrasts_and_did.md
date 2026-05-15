@@ -47,7 +47,7 @@ m = Margins.linear_scale(fit, at="overall")
 
 ```{code-cell} python
 scen, w = pairwise("group", ["B", "A"])
-m.contrasts(scenarios=scen, contrasts=w).summary()
+print(m.contrasts(scenarios=scen, contrasts=w).summary())
 ```
 
 ## Reference-level contrasts for a factor
@@ -56,7 +56,7 @@ m.contrasts(scenarios=scen, contrasts=w).summary()
 scen, w_mat = reference(
     "group", levels=["A", "B"], ref_level="A"
 )
-m.contrasts(scenarios=scen, contrasts=w_mat).summary()
+print(m.contrasts(scenarios=scen, contrasts=w_mat).summary())
 ```
 
 ## 2×2 Difference-in-differences (Ai & Norton, 2003)
@@ -67,9 +67,10 @@ clinical / economic question lives — not on the log-odds scale of
 the interaction coefficient.
 
 ```{code-cell} python
-scen, w = did("group", "preexist", group_levels=["A", "B"],
-              condition_levels=[0, 1])
-m.contrasts(scenarios=scen, contrasts=w).summary()
+scen, w = did("group", "preexist",
+              treated_level="B", control_level="A",
+              post_level=1, pre_level=0)
+print(m.contrasts(scenarios=scen, contrasts=w).summary())
 ```
 
 See [](../math.rst) for why DiD must be evaluated on the response

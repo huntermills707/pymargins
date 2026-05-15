@@ -1,3 +1,40 @@
+---
+jupytext:
+  text_representation:
+    extension: .md
+    format_name: myst
+    format_version: 0.13
+kernelspec:
+  display_name: Python 3
+  language: python
+  name: python3
+---
+
+```{code-cell} python
+import numpy as np
+import pandas as pd
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+from pymargins import Margins
+
+rng = np.random.default_rng(42)
+n = 2000
+df = pd.DataFrame({
+    "age": rng.integers(20, 75, n),
+    "treatment": rng.binomial(1, 0.40, n),
+    "dose": rng.choice([0, 50, 100], n),
+    "policy": rng.choice(["A", "B"], n),
+})
+lp = (-1.5 + 0.04 * df["age"] + 0.8 * df["treatment"]
+      + 0.01 * df["dose"]
+      + 0.3 * (df["policy"] == "B"))
+df["y"] = rng.binomial(1, 1 / (1 + np.exp(-lp)))
+
+fit = smf.glm("y ~ age + treatment + dose + C(policy)", data=df,
+              family=sm.families.Binomial()).fit()
+m = Margins.linear_scale(fit, at="overall")
+```
+
 # Nonlinear estimands with `evaluate`
 
 `Margins.evaluate` is the escape hatch for estimands that cannot be written
@@ -37,7 +74,7 @@ NNT is the reciprocal of the absolute risk reduction.  Because it is a
 reciprocal, it cannot be written as a linear contrast and must go
 through `evaluate`:
 
-```python
+```{code-cell} python
 from pymargins import Margins
 
 m = Margins.linear_scale(fit, at="overall")
@@ -51,7 +88,7 @@ res = m.evaluate(
     scenarios=scenarios,
     compose=lambda p: 1.0 / (p[0] - p[1]),
 )
-res.summary()
+print(res.summary())
 ```
 
 If the risk difference crosses zero, the denominator can change sign
@@ -68,7 +105,7 @@ exact.
 Use `evaluate` for the raw ratio `p₁ / p₀` only when your field or
 journal explicitly requires inference on the ratio scale itself:
 
-```python
+```{code-cell} python
 m = Margins.linear_scale(fit, at="overall")
 
 scenarios = [
@@ -80,7 +117,7 @@ res = m.evaluate(
     scenarios=scenarios,
     compose=lambda p: p[0] / p[1],
 )
-res.summary()
+print(res.summary())
 ```
 
 Because the ratio is nonlinear on the linear scale, κ is usually larger
@@ -91,7 +128,7 @@ than for the log-scale contrast and the CI is wider.
 When the estimand is a ratio in which the numerator and denominator are
 themselves differences, `evaluate` is required:
 
-```python
+```{code-cell} python
 scenarios = [
     {"atexog": {"dose": 0}, "label": "placebo"},
     {"atexog": {"dose": 50}, "label": "low"},
@@ -111,7 +148,7 @@ Suppose you have a utility function `u(p) = p**0.5` (a concave
 transformation of a predicted probability) and you want the
 expected utility difference between two policy regimes:
 
-```python
+```{code-cell} python
 import jax.numpy as jnp
 
 m = Margins.linear_scale(fit, at="overall")
@@ -125,7 +162,7 @@ res = m.evaluate(
     scenarios=scenarios,
     compose=lambda p: jnp.sqrt(p[0]) - jnp.sqrt(p[1]),
 )
-res.summary()
+print(res.summary())
 ```
 
 ## When `evaluate` auto-routes to simulation

@@ -1,3 +1,36 @@
+---
+jupytext:
+  text_representation:
+    extension: .md
+    format_name: myst
+    format_version: 0.13
+kernelspec:
+  display_name: Python 3
+  language: python
+  name: python3
+---
+
+```{code-cell} python
+import numpy as np
+import pandas as pd
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+from pymargins import Margins
+
+rng = np.random.default_rng(42)
+n = 2000
+df = pd.DataFrame({
+    "x": rng.normal(50, 10, n),
+    "female": rng.binomial(1, 0.52, n),
+})
+lp = -1.5 + 0.03 * df["x"] - 0.3 * df["female"]
+df["y"] = rng.binomial(1, 1 / (1 + np.exp(-lp)))
+
+fit = smf.glm("y ~ x + female", data=df,
+              family=sm.families.Binomial()).fit()
+m = Margins.log_scale(fit, at="overall")
+```
+
 # Elasticities and semi-elasticities
 
 `dydx` returns the level derivative. The other three elasticity flavors
@@ -22,21 +55,21 @@ mean of `x` and `y_bar` is the average predicted response at the
 observed covariate profiles.  Both are easy to recover from the
 session:
 
-```python
+```{code-cell} python
 x_bar = df["x"].mean()                       # or median, depending on theory
 y_bar = m.predict().estimate.item()          # AAP on the response scale
 
 # eyex: full elasticity at the mean
-m.dydx("x").scaled(by=x_bar / y_bar)
+print(m.dydx("x").scaled(by=x_bar / y_bar).summary())
 ```
 
 For an elasticity **at a representative profile** (`at="typical"` or
 with `atexog`), use the values at that profile:
 
-```python
+```{code-cell} python
 profile_x = 5.0
 y_at = m.predict(atexog={"x": profile_x}).estimate.item()
-m.dydx("x", atexog={"x": profile_x}).scaled(by=profile_x / y_at)
+print(m.dydx("x", atexog={"x": profile_x}).scaled(by=profile_x / y_at).summary())
 ```
 
 ## Subgroup elasticities
@@ -44,7 +77,13 @@ m.dydx("x", atexog={"x": profile_x}).scaled(by=profile_x / y_at)
 Because `.scaled()` propagates the joint covariance, you can compute
 elasticities for several subgroups and test differences between them:
 
-```python
+```{code-cell} python
+# Subgroup means for scaling
+x_bar_0 = df.loc[df["female"] == 0, "x"].mean()
+y_bar_0 = m.predict(atexog={"female": 0}).estimate.item()
+x_bar_1 = df.loc[df["female"] == 1, "x"].mean()
+y_bar_1 = m.predict(atexog={"female": 1}).estimate.item()
+
 # Elasticity of x for female=0 and female=1
 res_0 = m.dydx("x", atexog={"female": 0}).scaled(by=x_bar_0 / y_bar_0)
 res_1 = m.dydx("x", atexog={"female": 1}).scaled(by=x_bar_1 / y_bar_1)

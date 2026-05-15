@@ -8,6 +8,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from ._text import SummaryString
+
 
 # ---------------------------------------------------------------------------
 # Diagnostic result (from session_kappa)
@@ -52,7 +54,7 @@ class DiagnosticResult:
     session_summary: str = ""
 
     def summary(self) -> str:
-        return (
+        return SummaryString(
             f"Session diagnostic ({self.n_samples} design points)\n"
             f"  Session: {self.session_summary}\n"
             f"  κ min:    {self.kappa_min:.3f}\n"

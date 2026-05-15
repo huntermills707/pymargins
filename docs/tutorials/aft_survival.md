@@ -41,15 +41,21 @@ aft = WeibullAFTFitter().fit(df, duration_col="duration", event_col="event")
 
 ## Time ratio for `treated`
 
+Because the model was fit directly on a DataFrame (not via a formula),
+we pass the training data explicitly to the adapter:
+
 ```{code-cell} python
-m = Margins.log_scale(aft, at="overall")
-m.contrasts(
+from pymargins._adapters.lifelines_weibull_aft import LifelinesWeibullAFTAdapter
+
+_adapter = LifelinesWeibullAFTAdapter(aft, training_data=df)
+m = Margins.log_scale(aft, adapter=_adapter, at="overall")
+print(m.contrasts(
     scenarios=[
         {"atexog": {"treated": 1}, "label": "treated"},
         {"atexog": {"treated": 0}, "label": "control"},
     ],
     contrasts=[+1, -1],
-).summary()
+).summary())
 ```
 
 ## Predicted median survival time by treatment
@@ -57,15 +63,15 @@ m.contrasts(
 On the linear scale, predictions are expected survival times:
 
 ```{code-cell} python
-Margins.linear_scale(aft, at="overall").predict(
+print(Margins.linear_scale(aft, adapter=_adapter, at="overall").predict(
     atexog={"treated": [0, 1]}
-).summary()
+).summary())
 ```
 
 ## Marginal effect of age on expected duration
 
 ```{code-cell} python
-Margins.linear_scale(aft, at="overall").dydx("age").summary()
+print(Margins.linear_scale(aft, adapter=_adapter, at="overall").dydx("age").summary())
 ```
 
 Other AFT families work the same way; swap the fitter:

@@ -47,7 +47,7 @@ already carries one.
 
 ```{code-cell} python
 m = Margins.linear_scale(fit, at="overall")
-m.dydx("x").summary()
+print(m.dydx("x").summary())
 ```
 
 ## Predicted `y` at representative `x`
@@ -58,7 +58,7 @@ Predictions are therefore evaluated at the **population-averaged**
 profile (or the representative profile you specify with `at=`).
 
 ```{code-cell} python
-m.predict(atexog={"x": [-1.0, 0.0, 1.0]}).summary()
+print(m.predict(atexog={"x": [-1.0, 0.0, 1.0]}).summary())
 ```
 
 See [](../howto/cluster_block_bootstrap.md) for cluster-resampling

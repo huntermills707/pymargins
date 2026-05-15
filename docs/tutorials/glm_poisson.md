@@ -49,23 +49,23 @@ the session back-transforms to a rate ratio with an asymmetric CI.
 
 ```{code-cell} python
 m = Margins.log_scale(fit, vcov="HC1", at="overall")
-m.contrasts(
+print(m.contrasts(
     scenarios=[
         {"atexog": {"treated": 1}, "label": "treated"},
         {"atexog": {"treated": 0}, "label": "control"},
     ],
     contrasts=[+1, -1],
-).summary()
+).summary())
 ```
 
 ## Predicted counts by age
 
 ```{code-cell} python
-m.predict(atexog={"age": [25, 45, 65]}).summary()
+print(m.predict(atexog={"age": [25, 45, 65]}).summary())
 ```
 
 ## Average marginal effect of `age` on rate
 
 ```{code-cell} python
-Margins.linear_scale(fit, at="overall").dydx("age").summary()
+print(Margins.linear_scale(fit, at="overall").dydx("age").summary())
 ```

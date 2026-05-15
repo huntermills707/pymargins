@@ -40,21 +40,27 @@ cph = CoxPHFitter().fit(df, duration_col="duration", event_col="event")
 
 ## Hazard ratio for `treated`
 
+Because the model was fit directly on a DataFrame (not via a formula),
+we pass the training data explicitly to the adapter:
+
 ```{code-cell} python
-m = Margins.log_scale(cph, at="overall")
-m.contrasts(
+from pymargins._adapters.lifelines_coxph import LifelinesCoxPHAdapter
+
+_adapter = LifelinesCoxPHAdapter(cph, training_data=df)
+m = Margins.log_scale(cph, adapter=_adapter, at="overall")
+print(m.contrasts(
     scenarios=[
         {"atexog": {"treated": 1}, "label": "treated"},
         {"atexog": {"treated": 0}, "label": "control"},
     ],
     contrasts=[+1, -1],
-).summary()
+).summary())
 ```
 
 ## Marginal HR per unit of `biomarker`
 
 ```{code-cell} python
-m.dydx("biomarker").summary()
+print(Margins.log_scale(cph, adapter=_adapter, at="overall").dydx("biomarker").summary())
 ```
 
 Because the session is on the **log scale**, `dydx` returns the

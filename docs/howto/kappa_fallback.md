@@ -1,18 +1,52 @@
+---
+jupytext:
+  text_representation:
+    extension: .md
+    format_name: myst
+    format_version: 0.13
+kernelspec:
+  display_name: Python 3
+  language: python
+  name: python3
+---
+
+```{code-cell} python
+import numpy as np
+import pandas as pd
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+from pymargins import Margins
+
+rng = np.random.default_rng(42)
+n = 2000
+df = pd.DataFrame({
+    "age": rng.integers(20, 75, n),
+    "female": rng.binomial(1, 0.52, n),
+    "treated": rng.binomial(1, 0.40, n),
+})
+lp = -1.5 + 0.04 * df["age"] - 0.3 * df["female"] + 0.8 * df["treated"]
+df["y"] = rng.binomial(1, 1 / (1 + np.exp(-lp)))
+
+fit = smf.glm("y ~ age + female + treated", data=df,
+              family=sm.families.Binomial()).fit()
+m = Margins.log_scale(fit, at="overall")
+```
+
 # Reading and controlling the κ fallback
 
 Every result records the inference path actually used. When the
 session's κ threshold is exceeded, delta auto-falls-back to
 simulation, and the summary annotates the fallback reason.
 
-```python
+```{code-cell} python
 m = Margins.log_scale(fit, kappa_threshold=0.3, method="delta", n_sim=4000)
-res = m.predict(atexog={"x": [-3, 0, 3]})
+res = m.predict(atexog={"age": [25, 45, 65]})
 print(res.summary())     # notes 'fallback: simulation (κ=0.42 > 0.30)'
 ```
 
 ## Pre-flight diagnostic
 
-```python
+```{code-cell} python
 print(m.diagnose().summary())
 ```
 
@@ -42,7 +76,7 @@ for your estimand.  Three strategies, in order of preference:
 Set `kappa_threshold=float("inf")` to force the chosen `method=` to
 run regardless of curvature.
 
-```python
+```{code-cell} python
 m = Margins.log_scale(fit, kappa_threshold=float("inf"))
 ```
 
@@ -50,6 +84,6 @@ m = Margins.log_scale(fit, kappa_threshold=float("inf"))
 
 In tight loops, set `diagnostics=False` to skip the κ computation:
 
-```python
+```{code-cell} python
 m = Margins.log_scale(fit, diagnostics=False)
 ```

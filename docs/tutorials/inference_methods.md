@@ -40,7 +40,7 @@ fit = smf.glm("y ~ x", data=df, family=sm.families.Binomial()).fit()
 
 ```{code-cell} python
 m = Margins.log_scale(fit, at="overall", method="delta")
-m.predict(atexog={"x": [-2, 0, 2]}).summary()
+print(m.predict(atexog={"x": [-2, 0, 2]}).summary())
 ```
 
 ## Krinsky–Robb simulation
@@ -50,7 +50,7 @@ would cross the boundary.
 
 ```{code-cell} python
 m_sim = Margins.log_scale(fit, at="overall", method="simulation", n_sim=4000)
-m_sim.predict(atexog={"x": [-2, 0, 2]}).summary()
+print(m_sim.predict(atexog={"x": [-2, 0, 2]}).summary())
 ```
 
 ## Pairs bootstrap
@@ -59,7 +59,7 @@ m_sim.predict(atexog={"x": [-2, 0, 2]}).summary()
 m_boot = Margins.log_scale(
     fit, at="overall", method="bootstrap", n_boot=500
 )
-m_boot.predict(atexog={"x": [-2, 0, 2]}).summary()
+print(m_boot.predict(atexog={"x": [-2, 0, 2]}).summary())
 ```
 
 ## Cluster bootstrap
@@ -73,7 +73,7 @@ m_clust = Margins.log_scale(
     fit, at="overall", method="bootstrap",
     n_boot=500, cluster=df["g"].values,
 )
-m_clust.predict(atexog={"x": [-2, 0, 2]}).summary()
+print(m_clust.predict(atexog={"x": [-2, 0, 2]}).summary())
 ```
 
 See [](../explanations/delta_sim_bootstrap.md) for the decision rule.

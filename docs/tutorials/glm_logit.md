@@ -36,7 +36,7 @@ lp = (-4.0 + 0.55 * black + 0.10 * female + 0.06 * age + 0.03 * bmi
       + 0.5 * (agegrp == 2) + 0.9 * (agegrp == 3)
       + 1.4 * (agegrp == 4) + 2.0 * (agegrp == 5) + 2.6 * (agegrp == 6))
 df = pd.DataFrame({
-    "diabetes": rng.binomial(1, 1 / (1 + np.exp(-lp.values))),
+    "diabetes": rng.binomial(1, 1 / (1 + np.exp(-lp))),
     "black": black, "female": female, "age": age, "agegrp": agegrp, "bmi": bmi,
 })
 
@@ -56,9 +56,9 @@ probability scale itself, so `linear_scale` is the default that
 matches Stata:
 
 ```{code-cell} python
-Margins.linear_scale(fit, at="typical").predict(
+print(Margins.linear_scale(fit, at="typical").predict(
     atexog={"agegrp": list(range(1, 7))}
-).summary()
+).summary())
 ```
 
 ## AAP — averaged over the sample
@@ -66,9 +66,9 @@ Margins.linear_scale(fit, at="typical").predict(
 Stata: `margins agegrp`.
 
 ```{code-cell} python
-Margins.linear_scale(fit, at="overall").predict(
+print(Margins.linear_scale(fit, at="overall").predict(
     atexog={"agegrp": list(range(1, 7))}
-).summary()
+).summary())
 ```
 
 ## APR — at representative values
@@ -76,9 +76,9 @@ Margins.linear_scale(fit, at="overall").predict(
 Stata: `margins, at(age=(20 50 70)) atmeans`.
 
 ```{code-cell} python
-Margins.linear_scale(fit, at="typical").predict(
+print(Margins.linear_scale(fit, at="typical").predict(
     atexog={"age": [20, 50, 70]}
-).summary()
+).summary())
 ```
 
 ## MEM and AME
@@ -87,7 +87,7 @@ Stata: `margins, dydx(age) atmeans` and `margins, dydx(age)`.
 
 ```{code-cell} python
 Margins.linear_scale(fit, at="typical").dydx("age").summary()
-Margins.linear_scale(fit, at="overall").dydx("age").summary()
+print(Margins.linear_scale(fit, at="overall").dydx("age").summary())
 ```
 
 ## Discrete change
@@ -99,13 +99,13 @@ on the response scale is a contrast across the two levels:
 from pymargins import pairwise
 
 scen, w = pairwise("black", [1, 0])
-Margins.linear_scale(fit, at="overall").contrasts(
+print(Margins.linear_scale(fit, at="overall").contrasts(
     scenarios=scen, contrasts=w
-).summary()
+).summary())
 ```
 
 ## Robust SEs
 
 ```{code-cell} python
-Margins.linear_scale(fit, vcov="HC3", at="overall").dydx("age").summary()
+print(Margins.linear_scale(fit, vcov="HC3", at="overall").dydx("age").summary())
 ```

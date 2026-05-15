@@ -1,8 +1,38 @@
+---
+jupytext:
+  text_representation:
+    extension: .md
+    format_name: myst
+    format_version: 0.13
+kernelspec:
+  display_name: Python 3
+  language: python
+  name: python3
+---
+
+```{code-cell} python
+import numpy as np
+import pandas as pd
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+from pymargins import Margins
+
+rng = np.random.default_rng(42)
+n = 2000
+df = pd.DataFrame({
+    "x": rng.normal(0, 1, n),
+    "firm": rng.integers(1, 50, n),
+})
+df["y"] = rng.binomial(1, 1 / (1 + np.exp(-(-1 + 0.5 * df["x"]))))
+
+fit = smf.glm("y ~ x", data=df, family=sm.families.Binomial()).fit()
+```
+
 # Cluster and block bootstrap
 
 For panel / multilevel data, pass `cluster=` at session construction:
 
-```python
+```{code-cell} python
 m = Margins.log_scale(
     fit,
     method="bootstrap",
@@ -17,7 +47,7 @@ dependence is preserved.
 For time-series data, pass `block_size=` to use moving-block
 resampling:
 
-```python
+```{code-cell} python
 m = Margins.linear_scale(
     fit,
     method="bootstrap",

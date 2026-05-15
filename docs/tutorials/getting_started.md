@@ -44,7 +44,7 @@ fit = smf.glm(
     data=df,
     family=sm.families.Binomial(),
 ).fit()
-fit.summary()
+print(fit.summary())
 ```
 
 ## 2. Open a session
@@ -71,7 +71,7 @@ Predictions on the response scale, averaged over the observed
 distribution of the *other* covariates (`at="overall"`, the AAP):
 
 ```{code-cell} python
-m.predict(atexog={"treated": [0, 1]}).summary()
+print(m.predict(atexog={"treated": [0, 1]}).summary())
 ```
 
 Because the session is on the log scale, the CI is asymmetric on the
@@ -84,9 +84,9 @@ The same predictions at the typical covariate profile (the APM —
 `at="typical"` uses median for continuous and mode for discrete):
 
 ```{code-cell} python
-Margins.log_scale(fit, vcov="HC3", at="typical").predict(
+print(Margins.log_scale(fit, vcov="HC3", at="typical").predict(
     atexog={"treated": [0, 1]}
-).summary()
+).summary())
 ```
 
 ## 4. Marginal effects
@@ -94,13 +94,13 @@ Margins.log_scale(fit, vcov="HC3", at="typical").predict(
 Average marginal effect of `age` on the response scale:
 
 ```{code-cell} python
-m.dydx("age").summary()
+print(m.dydx("age").summary())
 ```
 
 A subgroup AME — same call, with `female` fixed at each level:
 
 ```{code-cell} python
-m.dydx("age", atexog={"female": [0, 1]}).summary()
+print(m.dydx("age", atexog={"female": [0, 1]}).summary())
 ```
 
 ## 5. Contrasts
@@ -115,7 +115,7 @@ rr = m.contrasts(
     ],
     contrasts=[+1, -1],
 )
-rr.summary()
+print(rr.summary())
 ```
 
 Because the session is on the log scale, the back-transform turns a
@@ -125,7 +125,7 @@ log-RR into an RR with an asymmetric CI. See
 ## 6. Pre-flight diagnostic
 
 ```{code-cell} python
-m.diagnose().summary()
+print(m.diagnose().summary())
 ```
 
 `diagnose()` computes the κ curvature diagnostic on a sample of the
