@@ -173,12 +173,12 @@ def summary(
     title = f"Margins Result ({self.method}, level={self.level})"
     out_lines.append(title.center(total_width))
     out_lines.append(sep)
-    out_lines.append(_line([h for _, h in data_keys], aligns))
+    out_lines.append(_line([""] + [h for _, h in data_keys], aligns))
     out_lines.append(thin)
     for r in fmt_rows:
         out_lines.append(_line(r, aligns))
     if truncated:
-        out_lines.append(_line(["..."] + [""] * (len(data_keys) - 1), aligns))
+        out_lines.append(_line(["..."] + [""] * len(data_keys), aligns))
     out_lines.append(sep)
 
     # Footer
