@@ -103,16 +103,6 @@ if __name__ == "__main__":
     print()
 
     # ------------------------------------------------------------------
-    # 3. pymargins-style lift_scale  (1+p1)/(1+p0) - 1
-    # ------------------------------------------------------------------
-    _print_section("3. lift_scale equivalent = (1+p1)/(1+p0) - 1 (manual)")
-    lift_scale_black = (1 + p_black1) / (1 + p_black0) - 1.0
-    lift_scale_female = (1 + p_female1) / (1 + p_female0) - 1.0
-    print(f"  black:  lift_scale = {_fmt(lift_scale_black)}")
-    print(f"  female: lift_scale = {_fmt(lift_scale_female)}")
-    print()
-
-    # ------------------------------------------------------------------
     # Compact reference table
     # ------------------------------------------------------------------
     _print_section("REFERENCE TABLE — Point Estimates")
@@ -120,6 +110,5 @@ if __name__ == "__main__":
     print("-" * 56)
     print(f"{'RR / Direct ratio':<30} {_fmt(rr_black):>12} {_fmt(rr_female):>12}")
     print(f"{'True lift (RR - 1)':<30} {_fmt(lift_black):>12} {_fmt(lift_female):>12}")
-    print(f"{'lift_scale':<30} {_fmt(lift_scale_black):>12} {_fmt(lift_scale_female):>12}")
     print()
     print("StatsModels reference complete.")

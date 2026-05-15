@@ -38,7 +38,6 @@ possible* in `β`. That keeps κ small and the symmetric Wald CI honest.
 | additive effect on response               | identity          | `Margins.linear_scale`          |
 | rate ratio, risk ratio, hazard ratio       | log               | `Margins.log_scale`             |
 | odds ratio, probability contrast           | logit             | `Margins.logit_scale`           |
-| RR − 1 (lift)                              | `expm1`           | `Margins.lift_scale`            |
 | correlations                               | Fisher z (`tanh`) | `Margins.correlation_scale`     |
 
 The constructor also accepts arbitrary `phi=` / `phi_inv=` JAX

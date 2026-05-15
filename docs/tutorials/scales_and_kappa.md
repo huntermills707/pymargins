@@ -24,7 +24,6 @@ Common scale helpers:
 | `Margins.linear_scale(...)`     | identity    | additive contrasts; AME on response    |
 | `Margins.log_scale(...)`        | `exp`       | rate ratios, risk ratios, hazard ratios |
 | `Margins.logit_scale(...)`      | `expit`     | odds ratios, probabilities             |
-| `Margins.lift_scale(...)`       | `expm1`     | RR − 1, fold-change minus one          |
 | `Margins.correlation_scale(...)` | `tanh`     | Fisher-z transformed correlations      |
 
 The rule of thumb: pick the scale on which the *contrast* is most

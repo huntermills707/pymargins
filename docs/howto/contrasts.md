@@ -98,10 +98,6 @@ lift_est = float(res.estimate) - 1.0
 lift_ci = (float(res.conf_int_lower) - 1.0, float(res.conf_int_upper) - 1.0)
 ```
 
-Alternatively, `Margins.lift_scale` computes `(1+p₁)/(1+p₀) − 1` on
-the `log1p`/`expm1` scale.  This is a different estimand; use it only
-when your field convention requires it.
-
 ## Reference-level contrasts
 
 Compare every level of a factor against a common baseline.  The weight

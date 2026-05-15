@@ -7,7 +7,6 @@ Demonstrates three ways to quantify the effect of a binary covariate:
   1. Risk Ratio (RR)      — log_scale:  exp(log(p1) - log(p0))
   2. Direct Ratio         — linear_scale + evaluate:  p1 / p0
   3. Lift (RR - 1)        — log_scale result minus 1
-  4. pymargins lift_scale — (1+p1)/(1+p0) - 1  (documented for completeness)
 
 Reference implementations:
   - StatsModels: manual point estimates
@@ -147,36 +146,6 @@ if __name__ == "__main__":
     print()
 
     # =====================================================================
-    # 4. pymargins lift_scale (non-standard lift)
-    # =====================================================================
-    _print_section("4. pymargins lift_scale — (1+p1)/(1+p0) - 1")
-    print("   NOTE: This is NOT standard marketing lift (RR - 1).")
-    print("   The lift_scale applies log1p to predictions and expm1 to CIs,")
-    print("   so the reported contrast is (1+p1)/(1+p0) - 1.")
-    print()
-
-    m_lift = Margins.lift_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
-    lift_black = m_lift.contrasts(
-        scenarios=[
-            {"atexog": {"black": 1}, "label": "black=1"},
-            {"atexog": {"black": 0}, "label": "black=0"},
-        ],
-        contrasts=[+1, -1],
-    )
-    print(lift_black.summary(stars=True))
-    print()
-
-    lift_female = m_lift.contrasts(
-        scenarios=[
-            {"atexog": {"female": 1}, "label": "female=1"},
-            {"atexog": {"female": 0}, "label": "female=0"},
-        ],
-        contrasts=[+1, -1],
-    )
-    print(lift_female.summary(stars=True))
-    print()
-
-    # =====================================================================
     # Compact reference table
     # =====================================================================
     _print_section("REFERENCE TABLE — All Scales")
@@ -185,6 +154,5 @@ if __name__ == "__main__":
     print(f"{'RR (log_scale)':<20} {float(rr_black.estimate):>12.4f} {float(rr_female.estimate):>12.4f}")
     print(f"{'Direct ratio':<20} {float(ratio_black.estimate):>12.4f} {float(ratio_female.estimate):>12.4f}")
     print(f"{'True lift (RR-1)':<20} {lift_black_est:>12.4f} {lift_female_est:>12.4f}")
-    print(f"{'lift_scale':<20} {float(lift_black.estimate):>12.4f} {float(lift_female.estimate):>12.4f}")
     print()
     print("Demo complete.")

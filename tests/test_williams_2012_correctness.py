@@ -143,12 +143,6 @@ LIFT_FEMALE_EXPECTED = 0.0232
 LIFT_BLACK_CI = (0.088, 0.197)
 LIFT_FEMALE_CI = (-0.012, 0.059)
 
-# -- lift_scale: (1+p1)/(1+p0) - 1 ------------------------------------------
-LIFT_SCALE_BLACK_EXPECTED = 0.0539
-LIFT_SCALE_FEMALE_EXPECTED = 0.0088
-LIFT_SCALE_BLACK_CI = (0.034, 0.075)
-LIFT_SCALE_FEMALE_CI = (-0.004, 0.022)
-
 # -- OLS ------------------------------------------------------------------
 OLS_AGE_COEF_EXPECTED = 0.3938
 OLS_AGE_SE_EXPECTED = 0.0082
@@ -362,37 +356,7 @@ def test_true_lift_female_from_log_scale(fit_logit):
 
 
 # ---------------------------------------------------------------------------
-# 11. lift_scale: (1+p1)/(1+p0) - 1
-# ---------------------------------------------------------------------------
-
-def test_lift_scale_black(fit_logit):
-    m = Margins.lift_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
-    lift = m.contrasts(
-        scenarios=[
-            {"atexog": {"black": 1}},
-            {"atexog": {"black": 0}},
-        ],
-        contrasts=[+1, -1],
-    )
-    _assert_point_estimate(lift, LIFT_SCALE_BLACK_EXPECTED, abs_tol=1e-4)
-    _assert_ci(lift, LIFT_SCALE_BLACK_CI[0], LIFT_SCALE_BLACK_CI[1], abs_tol=1e-3)
-
-
-def test_lift_scale_female(fit_logit):
-    m = Margins.lift_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
-    lift = m.contrasts(
-        scenarios=[
-            {"atexog": {"female": 1}},
-            {"atexog": {"female": 0}},
-        ],
-        contrasts=[+1, -1],
-    )
-    _assert_point_estimate(lift, LIFT_SCALE_FEMALE_EXPECTED, abs_tol=1e-4)
-    _assert_ci(lift, LIFT_SCALE_FEMALE_CI[0], LIFT_SCALE_FEMALE_CI[1], abs_tol=1e-3)
-
-
-# ---------------------------------------------------------------------------
-# 12. Lift via evaluate() — direct delta method on (p1-p0)/p0
+# 11. Lift via evaluate() — direct delta method on (p1-p0)/p0
 # ---------------------------------------------------------------------------
 
 # Reference: manual computation of (mean(Y_1) - mean(Y_0)) / mean(Y_0)

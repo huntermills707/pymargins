@@ -250,8 +250,8 @@ def test_expand_with_over_is_removed():
 
 def test_joint_test_default_null_on_inference_scale(fit_logit):
     """When phi_inv is available, default null should be phi_inv(0), not 0."""
-    # Use lift_scale where phi_inv(0) = log1p(0) = 0 (finite)
-    m = Margins.lift_scale(fit_logit, at="typical")
+    # Use correlation_scale where phi_inv(0) = arctanh(0) = 0 (finite)
+    m = Margins.correlation_scale(fit_logit, at="typical")
 
     result = m.contrasts(
         scenarios=[
@@ -266,7 +266,7 @@ def test_joint_test_default_null_on_inference_scale(fit_logit):
         },
     )
     jt = result.joint_test()
-    # lift_scale: phi=expm1, phi_inv=log1p. phi_inv(0) = 0 on inference scale.
+    # correlation_scale: phi=tanh, phi_inv=arctanh. phi_inv(0) = 0 on inference scale.
     assert jt.method == "joint_wald"
     assert np.isfinite(float(jt.statistic))
 

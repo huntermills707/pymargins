@@ -439,18 +439,6 @@ class Margins:
         return cls(model, phi=expit, phi_inv=logit, **kwargs)
 
     @classmethod
-    def lift_scale(cls, model, **kwargs) -> "Margins":
-        """Lift scale: contrasts on log(1+lift); reported as (1+p1)/(1+p0) - 1.
-
-        For marketing/uplift analysis where 0 represents no effect and
-        positive values represent multiplicative excess.
-
-        Note: This is *not* the same as RR - 1 (p1/p0 - 1). For true lift
-        (p1-p0)/p0, use ``evaluate(compose=...)`` directly.
-        """
-        return cls(model, phi=jnp.expm1, phi_inv=jnp.log1p, **kwargs)
-
-    @classmethod
     def correlation_scale(cls, model, **kwargs) -> "Margins":
         """Fisher z scale: contrasts on z; reported as correlations."""
         return cls(model, phi=jnp.tanh, phi_inv=jnp.arctanh, **kwargs)

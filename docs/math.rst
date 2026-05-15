@@ -170,7 +170,7 @@ Inference scales (``phi``) and the chain rule
 The :class:`~pymargins.Margins` constructor commits to a
 :math:`(\phi, \phi^{-1})` pair via either the classmethod helpers
 (``Margins.log_scale``, ``Margins.logit_scale``,
-``Margins.lift_scale``, ``Margins.correlation_scale``,
+``Margins.correlation_scale``,
 ``Margins.linear_scale``) or by passing ``phi=`` and ``phi_inv=``
 directly.
 
