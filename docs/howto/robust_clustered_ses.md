@@ -51,6 +51,26 @@ m_cl = Margins.log_scale(fit, vcov={"type": "cluster", "groups": df["firm"]})
 print(m_cl.dydx("age").summary())
 ```
 
+## Plot: comparing standard errors
+
+```{code-cell} python
+import matplotlib.pyplot as plt
+
+res_ols = Margins.log_scale(fit, at="overall").dydx("age").to_frame()
+res_hc3 = m_hc3.dydx("age").to_frame()
+res_cl = m_cl.dydx("age").to_frame()
+
+labels = ["Default", "HC3", "Cluster-robust"]
+se_values = [res_ols["std_error"].iloc[0],
+             res_hc3["std_error"].iloc[0],
+             res_cl["std_error"].iloc[0]]
+
+fig, ax = plt.subplots(figsize=(5, 4))
+ax.bar(labels, se_values, color=["steelblue", "coral", "darkgreen"],
+       edgecolor="black")
+ax.set(ylabel="SE of AME(age)")
+```
+
 When the model already carries a robust covariance (e.g. a
 `PanelOLS` fit with `cov_type="clustered"`), you can omit `vcov=`
 and the adapter will pick up the fit-time covariance.

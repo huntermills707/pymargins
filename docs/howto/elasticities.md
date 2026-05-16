@@ -93,5 +93,26 @@ diff = res_1 - res_0
 print(diff.summary())
 ```
 
+## Plot: comparing elasticities across subgroups
+
+```{code-cell} python
+import matplotlib.pyplot as plt
+
+df_0 = res_0.to_frame()
+df_1 = res_1.to_frame()
+
+labels = ["female=0", "female=1"]
+estimates = [df_0["estimate"].iloc[0], df_1["estimate"].iloc[0]]
+ci_lower = [df_0["ci_lower"].iloc[0], df_1["ci_lower"].iloc[0]]
+ci_upper = [df_0["ci_upper"].iloc[0], df_1["ci_upper"].iloc[0]]
+
+fig, ax = plt.subplots(figsize=(4, 4))
+ax.bar(labels, estimates,
+       yerr=[np.array(estimates) - np.array(ci_lower),
+             np.array(ci_upper) - np.array(estimates)],
+       capsize=4, color="seagreen", edgecolor="black")
+ax.set(ylabel="Elasticity of x")
+```
+
 Elasticities are only defined for continuous variables — `pymargins`
 raises on discrete inputs.

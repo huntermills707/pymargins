@@ -74,6 +74,24 @@ print(Margins.linear_scale(aft, adapter=_adapter, at="overall").predict(
 print(Margins.linear_scale(aft, adapter=_adapter, at="overall").dydx("age").summary())
 ```
 
+## Plot: predicted median survival time by treatment
+
+```{code-cell} python
+import matplotlib.pyplot as plt
+
+res = Margins.linear_scale(aft, adapter=_adapter, at="overall").predict(
+    atexog={"treated": [0, 1]}
+)
+df_plot = res.to_frame()
+
+fig, ax = plt.subplots(figsize=(4, 4))
+ax.bar(["Control", "Treated"], df_plot["estimate"],
+       yerr=[df_plot["estimate"] - df_plot["ci_lower"],
+             df_plot["ci_upper"] - df_plot["estimate"]],
+       capsize=4, color="teal", edgecolor="black")
+ax.set(ylabel="Predicted median survival time")
+```
+
 Other AFT families work the same way; swap the fitter:
 
 - `LogLogisticAFTFitter`

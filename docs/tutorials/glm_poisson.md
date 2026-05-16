@@ -64,6 +64,23 @@ print(m.contrasts(
 print(m.predict(atexog={"age": [25, 45, 65]}).summary())
 ```
 
+## Plot: predicted event rate by age
+
+```{code-cell} python
+import matplotlib.pyplot as plt
+
+res = m.predict(atexog={"age": [25, 35, 45, 55, 65]})
+df_plot = res.to_frame()
+
+fig, ax = plt.subplots(figsize=(6, 4))
+ax.plot(df_plot["age"], df_plot["estimate"], marker="o", color="darkgreen")
+ax.fill_between(
+    df_plot["age"], df_plot["ci_lower"], df_plot["ci_upper"],
+    alpha=0.2, color="darkgreen"
+)
+ax.set(xlabel="Age", ylabel="Predicted event count")
+```
+
 ## Average marginal effect of `age` on rate
 
 ```{code-cell} python

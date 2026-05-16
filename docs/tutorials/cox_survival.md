@@ -70,5 +70,30 @@ from the covariate centering lifelines applies internally).  If you
 want the change in the raw HR, use `Margins.linear_scale(...)` and
 interpret the AME as the absolute change in the partial hazard ratio.
 
+## Plot: forest plot of hazard ratios
+
+```{code-cell} python
+import matplotlib.pyplot as plt
+from pymargins import reference
+
+scen, W = reference("treated", [0, 1], ref_level=0)
+res = m.contrasts(scenarios=scen, contrasts=W)
+df_forest = res.to_frame()
+
+fig, ax = plt.subplots(figsize=(4, 2))
+y = range(len(df_forest))
+ax.errorbar(
+    df_forest["estimate"], y,
+    xerr=[df_forest["estimate"] - df_forest["ci_lower"],
+          df_forest["ci_upper"] - df_forest["estimate"]],
+    fmt="o", capsize=3, color="firebrick"
+)
+ax.axvline(1, color="grey", lw=0.5)
+ax.set_yticks(list(y))
+ax.set_yticklabels(df_forest["label"])
+ax.set_xlabel("Hazard ratio")
+ax.invert_yaxis()
+```
+
 See [](aft_survival.md) for parametric AFT models, where the natural
 inference scale is the time scale rather than the hazard scale.

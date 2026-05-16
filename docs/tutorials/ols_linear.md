@@ -58,6 +58,22 @@ print(m.dydx("age", atexog={"female": [0, 1]}).summary())
 print(m.predict(atexog={"education": ["hs", "college", "grad"]}).summary())
 ```
 
+## Plot: predicted wage by education
+
+```{code-cell} python
+import matplotlib.pyplot as plt
+
+res = m.predict(atexog={"education": ["hs", "college", "grad"]})
+df_plot = res.to_frame()
+
+fig, ax = plt.subplots(figsize=(6, 4))
+ax.bar(df_plot["education"], df_plot["estimate"],
+       yerr=[df_plot["estimate"] - df_plot["ci_lower"],
+             df_plot["ci_upper"] - df_plot["estimate"]],
+       capsize=4, color="coral", edgecolor="black")
+ax.set(xlabel="Education", ylabel="Predicted wage")
+```
+
 ## A pairwise wage gap
 
 ```{code-cell} python

@@ -49,7 +49,7 @@ Useful when a probability sits near 0 or 1 and the symmetric Wald CI
 would cross the boundary.
 
 ```{code-cell} python
-m_sim = Margins.log_scale(fit, at="overall", method="simulation", n_sim=4000)
+m_sim = Margins.log_scale(fit, at="overall", method="simulation", n_sim=2000)
 print(m_sim.predict(atexog={"x": [-2, 0, 2]}).summary())
 ```
 
@@ -57,7 +57,7 @@ print(m_sim.predict(atexog={"x": [-2, 0, 2]}).summary())
 
 ```{code-cell} python
 m_boot = Margins.log_scale(
-    fit, at="overall", method="bootstrap", n_boot=500
+    fit, at="overall", method="bootstrap", n_boot=200
 )
 print(m_boot.predict(atexog={"x": [-2, 0, 2]}).summary())
 ```
@@ -74,6 +74,32 @@ m_clust = Margins.log_scale(
     n_boot=500, cluster=df["g"].values,
 )
 print(m_clust.predict(atexog={"x": [-2, 0, 2]}).summary())
+```
+
+## Plot: comparing CI widths across methods
+
+```{code-cell} python
+import matplotlib.pyplot as plt
+
+x_grid = [-2, 0, 2]
+res_delta = m.predict(atexog={"x": x_grid}).to_frame()
+res_sim = m_sim.predict(atexog={"x": x_grid}).to_frame()
+res_boot = m_boot.predict(atexog={"x": x_grid}).to_frame()
+
+fig, ax = plt.subplots(figsize=(6, 4))
+widths = {
+    "delta": res_delta["ci_upper"] - res_delta["ci_lower"],
+    "simulation": res_sim["ci_upper"] - res_sim["ci_lower"],
+    "bootstrap": res_boot["ci_upper"] - res_boot["ci_lower"],
+}
+x_pos = np.arange(len(x_grid))
+width = 0.25
+for i, (label, w) in enumerate(widths.items()):
+    ax.bar(x_pos + i * width, w, width, label=label)
+ax.set_xticks(x_pos + width)
+ax.set_xticklabels([str(v) for v in x_grid])
+ax.set(xlabel="x", ylabel="CI width")
+ax.legend(title="Method")
 ```
 
 See [](../explanations/delta_sim_bootstrap.md) for the decision rule.

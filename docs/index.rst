@@ -30,6 +30,8 @@ linearmodels, and lifelines model classes.
     tutorials/aft_survival
     tutorials/iv_2sls
     tutorials/panel_fe
+    tutorials/gee
+    tutorials/mixed_effects
     tutorials/contrasts_and_did
     tutorials/inference_methods
     tutorials/scales_and_kappa

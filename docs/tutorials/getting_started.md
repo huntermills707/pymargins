@@ -133,6 +133,26 @@ estimand surface. When κ is small the delta method is reliable; when
 κ is large `pymargins` will *auto-fall-back to simulation* on the
 next call. See [](../explanations/kappa_diagnostic.md).
 
+## Plot: prediction curve over a continuous variable
+
+```{code-cell} python
+import matplotlib.pyplot as plt
+
+ages = list(range(20, 76, 2))
+res = m.predict(atexog={"age": ages, "treated": [0, 1]})
+df_plot = res.to_frame()
+
+fig, ax = plt.subplots(figsize=(6, 4))
+for level, sub in df_plot.groupby("treated"):
+    label = "Treated" if level == 1 else "Control"
+    ax.plot(sub["age"], sub["estimate"], label=label)
+    ax.fill_between(
+        sub["age"], sub["ci_lower"], sub["ci_upper"], alpha=0.15
+    )
+ax.set(xlabel="Age", ylabel="P(y=1)")
+ax.legend(title="Treatment")
+```
+
 ## Where to next
 
 - [](glm_logit.md) — a deeper logit walkthrough with factor variables.

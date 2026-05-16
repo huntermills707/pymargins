@@ -46,6 +46,27 @@ print(grid(age=[25, 45, 65], treatment=[0, 1]))
 print(m.predict(atexog={"age": [25, 45, 65], "treatment": [0, 1]}).summary())
 ```
 
+## Plot: grid predictions as a heatmap
+
+```{code-cell} python
+import matplotlib.pyplot as plt
+import numpy as np
+
+ages = np.arange(25, 66, 10)
+treatments = [0, 1]
+res = m.predict(atexog={"age": ages, "treatment": treatments})
+df_grid = res.to_frame().pivot(index="treatment", columns="age", values="estimate")
+
+fig, ax = plt.subplots(figsize=(6, 3))
+im = ax.imshow(df_grid.values, aspect="auto", cmap="RdYlGn", vmin=0, vmax=1)
+ax.set_xticks(range(len(ages)))
+ax.set_xticklabels(ages)
+ax.set_yticks(range(len(treatments)))
+ax.set_yticklabels(["Control", "Treated"])
+ax.set(xlabel="Age", ylabel="Treatment")
+fig.colorbar(im, ax=ax, label="P(y=1)")
+```
+
 Variables not mentioned in `atexog` / `grid` follow the session's
 `at=` rule (`"overall"` averages over the sample, `"typical"` /
 `"mean"` hold them at a representative profile).

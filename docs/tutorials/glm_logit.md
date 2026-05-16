@@ -104,6 +104,24 @@ print(Margins.linear_scale(fit, at="overall").contrasts(
 ).summary())
 ```
 
+## Plot: predicted probability by age group
+
+```{code-cell} python
+import matplotlib.pyplot as plt
+
+res = Margins.linear_scale(fit, at="overall").predict(
+    atexog={"agegrp": list(range(1, 7))}
+)
+df_plot = res.to_frame()
+
+fig, ax = plt.subplots(figsize=(6, 4))
+ax.bar(df_plot["agegrp"].astype(str), df_plot["estimate"],
+       yerr=[df_plot["estimate"] - df_plot["ci_lower"],
+             df_plot["ci_upper"] - df_plot["estimate"]],
+       capsize=4, color="steelblue", edgecolor="black")
+ax.set(xlabel="Age group", ylabel="P(diabetes=1)")
+```
+
 ## Robust SEs
 
 ```{code-cell} python

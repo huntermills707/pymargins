@@ -56,6 +56,45 @@ are guaranteed to stay inside \[0, 1\] for a particular category, you
 could open a `logit_scale` session and then use `outcome="car"`, but
 `linear_scale` is the standard choice for tables and plots.
 
+## Plot: predicted probability curves by mode
+
+For multinomial predictions the result arrays are 2-D
+(scenarios × outcomes), so we build the plot DataFrame by hand:
+
+```{code-cell} python
+import matplotlib.pyplot as plt
+import numpy as np
+
+ages = list(range(18, 71, 2))
+res = m.predict(atexog={"age": ages})
+
+est = np.asarray(res.estimate)
+se = np.asarray(res.std_error)
+ci = np.asarray(res.conf_int())
+n_scen, n_out = est.shape
+
+rows = []
+for i in range(n_scen):
+    for j in range(n_out):
+        rows.append({
+            "age": ages[i],
+            "outcome": j,
+            "estimate": est[i, j],
+            "ci_lower": ci[0, i, j],
+            "ci_upper": ci[1, i, j],
+        })
+df_plot = pd.DataFrame(rows)
+
+fig, ax = plt.subplots(figsize=(6, 4))
+for outcome, sub in df_plot.groupby("outcome"):
+    ax.plot(sub["age"], sub["estimate"], label=f"Mode {outcome}")
+    ax.fill_between(
+        sub["age"], sub["ci_lower"], sub["ci_upper"], alpha=0.1
+    )
+ax.set(xlabel="Age", ylabel="P(mode)")
+ax.legend(title="Outcome", loc="upper right")
+```
+
 ## AME of income on the probability of `car`
 
 ```{code-cell} python

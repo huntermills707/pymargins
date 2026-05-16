@@ -73,5 +73,30 @@ scen, w = did("group", "preexist",
 print(m.contrasts(scenarios=scen, contrasts=w).summary())
 ```
 
+## Plot: forest plot of group contrasts
+
+```{code-cell} python
+import matplotlib.pyplot as plt
+from pymargins import reference
+
+scen, W = reference("group", ["A", "B"], ref_level="A")
+res = m.contrasts(scenarios=scen, contrasts=W)
+df_forest = res.to_frame()
+
+fig, ax = plt.subplots(figsize=(4, 2))
+y = range(len(df_forest))
+ax.errorbar(
+    df_forest["estimate"], y,
+    xerr=[df_forest["estimate"] - df_forest["ci_lower"],
+          df_forest["ci_upper"] - df_forest["estimate"]],
+    fmt="o", capsize=3, color="darkorchid"
+)
+ax.axvline(0, color="grey", lw=0.5)
+ax.set_yticks(list(y))
+ax.set_yticklabels(df_forest["label"])
+ax.set_xlabel("Risk difference vs Group A")
+ax.invert_yaxis()
+```
+
 See [](../math.rst) for why DiD must be evaluated on the response
 scale for nonlinear models.

@@ -61,5 +61,23 @@ profile (or the representative profile you specify with `at=`).
 print(m.predict(atexog={"x": [-1.0, 0.0, 1.0]}).summary())
 ```
 
+## Plot: predicted outcome over representative `x`
+
+```{code-cell} python
+import matplotlib.pyplot as plt
+
+x_vals = np.linspace(-2, 2, 50)
+res = m.predict(atexog={"x": x_vals})
+df_plot = res.to_frame()
+
+fig, ax = plt.subplots(figsize=(6, 4))
+ax.plot(df_plot["x"], df_plot["estimate"], color="navy")
+ax.fill_between(
+    df_plot["x"], df_plot["ci_lower"], df_plot["ci_upper"],
+    alpha=0.2, color="navy"
+)
+ax.set(xlabel="x", ylabel="Predicted y")
+```
+
 See [](../howto/cluster_block_bootstrap.md) for cluster-resampling
 bootstrap in panels where the analytic clustered SE is suspect.
