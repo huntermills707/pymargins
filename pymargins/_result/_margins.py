@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 import weakref
 import warnings
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
@@ -150,6 +151,7 @@ class MarginsResult:
     session: Optional[Any] = None
     ci_method: Optional[str] = None
     bootstrap_extras: Optional[dict] = None
+    resample_bank_id: Optional[str] = None
 
     # -----------------------------------------------------------------------
     # Reporting
@@ -362,7 +364,24 @@ class MarginsResult:
         se = np.atleast_1d(self.std_error)
         lo = np.atleast_1d(self.conf_int_lower)
         hi = np.atleast_1d(self.conf_int_upper)
-        n = est.size
+
+        # G7a: structured multi-dimensional output — flatten if _outcome_shape
+        # is recorded, producing an "outcome" column.
+        outcome_shape = self.estimand_metadata.get("_outcome_shape")
+        if outcome_shape is not None and est.ndim == 2:
+            n_atoms = outcome_shape["n_atoms"]
+            n_outcomes = outcome_shape["n_outcomes"]
+            outcome_labels = outcome_shape["outcome_labels"]
+            # Flatten column-major (atom-major) to match expanded labels
+            est = est.ravel(order="C")
+            se = se.ravel(order="C")
+            lo = lo.ravel(order="C")
+            hi = hi.ravel(order="C")
+            n = est.size
+            outcome_col = np.tile(outcome_labels, n_atoms)
+        else:
+            n = est.size
+            outcome_col = None
 
         # Core estimate columns
         data: dict[str, Any] = {
@@ -374,6 +393,9 @@ class MarginsResult:
             "n_obs": np.repeat(self.n_obs, n),
             "method": np.repeat(self.method, n),
         }
+
+        if outcome_col is not None:
+            data["outcome"] = outcome_col
 
         # Term: what this estimand is about
         kind = self.estimand_metadata.get("kind", "")
@@ -397,6 +419,9 @@ class MarginsResult:
             tr = self.test(value=0.0, null_scale="inference")
             z_vals = np.atleast_1d(tr.statistic)
             p_vals = np.atleast_1d(tr.pvalue)
+            if outcome_shape is not None and z_vals.ndim == 2:
+                z_vals = z_vals.ravel(order="C")
+                p_vals = p_vals.ravel(order="C")
             if z_vals.size == n:
                 data["statistic"] = z_vals
                 data["p_value"] = p_vals
@@ -428,6 +453,8 @@ class MarginsResult:
         # Diagnostics
         if self.kappa is not None:
             kvals = np.atleast_1d(self.kappa)
+            if outcome_shape is not None and kvals.ndim == 2:
+                kvals = kvals.ravel(order="C")
             if kvals.size == n:
                 data["kappa"] = kvals
         data["fallback_triggered"] = np.repeat(self.fallback_triggered, n)
@@ -437,11 +464,32 @@ class MarginsResult:
         # Scenario columns
         scenarios = self.estimand_metadata.get("scenarios")
         kind = self.estimand_metadata.get("kind")
-        if scenarios is not None and len(scenarios) == n and kind in ("prediction", "slope", None):
-            all_keys = sorted(set().union(*(s.keys() for s in scenarios)))
-            for key in all_keys:
-                col_values = [s.get(key, np.nan) for s in scenarios]
-                data[key] = col_values
+        if scenarios is not None and kind in ("prediction", "slope", None):
+            if len(scenarios) == n:
+                # 1-to-1 match: unpack directly
+                all_keys = sorted(set().union(*(s.keys() for s in scenarios)))
+                for key in all_keys:
+                    col_values = [s.get(key, np.nan) for s in scenarios]
+                    data[key] = col_values
+            elif outcome_shape is not None and len(scenarios) == outcome_shape["n_atoms"]:
+                # Multi-scenario × multi-outcome: tile each scenario once per
+                # outcome to match the atom-major / outcome-minor ravel order.
+                n_outcomes = outcome_shape["n_outcomes"]
+                tiled = []
+                for s in scenarios:
+                    tiled.extend([s] * n_outcomes)
+                all_keys = sorted(set().union(*(s.keys() for s in scenarios)))
+                for key in all_keys:
+                    col_values = [s.get(key, np.nan) for s in tiled]
+                    data[key] = col_values
+            elif len(scenarios) > 1 and outcome_shape is not None:
+                # Cannot determine tiling: raise rather than silently drop.
+                raise ValueError(
+                    "to_frame() cannot unpack scenario columns for this "
+                    "multi-outcome result. Use outcome=... to slice to a "
+                    "single outcome first, or call outcome().to_frame()."
+                )
+            # Single scenario or non-multi-outcome vector estimand: skip silently
 
         return pd.DataFrame(data)
 
@@ -585,7 +633,11 @@ class MarginsResult:
 
         return '<table class="pymargins-result">\n' + "\n".join(lines) + "\n</table>"
 
-    def conf_int(self, level: Optional[float] = None) -> tuple[np.ndarray, np.ndarray]:
+    def conf_int(
+        self,
+        level: Optional[float] = None,
+        simultaneous: bool = False,
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Recompute CI at a different confidence level.
 
         For delta-method results, uses the stored gradient and Σ̂ to
@@ -598,23 +650,120 @@ class MarginsResult:
         level : float, optional
             New confidence level. If None, returns the stored CI.
 
+        simultaneous : bool, default False
+            If True, return a **simultaneous** (family-wise) confidence band
+            rather than per-component intervals. For simulation/bootstrap
+            results this uses the sup-t method: the critical value is the
+            (1−α) quantile of ``maxⱼ |θ_{b,j} − θ̂ⱼ| / seⱼ`` over draws. For
+            delta-method results this uses the multivariate-normal
+            equicoordinate quantile (Bonferroni-style adjustment via the
+            correlation matrix). This is the appropriate interval when
+            reporting a vector estimand as a set.
+
         Returns
         -------
         (lower, upper) : tuple of arrays
         """
-        if level is None or level == self.level:
-            return self.conf_int_lower, self.conf_int_upper
+        if level is None:
+            level = self.level
 
-        if self.gradient is not None:
-            # Recompute via delta
-            est_inf = self.phi_inv(self.estimate) if self.phi_inv is not None else self.estimate
-            lower, upper = delta_confint_from_se(
-                est_inf, self.std_error, level=level, phi=self.phi,
-            )
-            return np.asarray(lower), np.asarray(upper)
+        if not simultaneous:
+            if level == self.level:
+                return self.conf_int_lower, self.conf_int_upper
+
+        est_inf = (
+            self.phi_inv(self.estimate)
+            if self.phi_inv is not None
+            else self.estimate
+        )
+
+        if self.gradient is not None and self.cov_params is not None:
+            # Delta method
+            if simultaneous:
+                # sup-t band from correlation structure of J Σ̂ Jᵀ.
+                from .._delta import joint_covariance_of_results
+                grad = jnp.asarray(self.gradient)
+                if grad.ndim == 1:
+                    grad = grad[None, :]
+                cov_joint = joint_covariance_of_results(
+                    [grad[i] for i in range(grad.shape[0])],
+                    jnp.asarray(self.cov_params),
+                )
+                se_vec = jnp.sqrt(jnp.diag(cov_joint))
+                n_comp = int(se_vec.shape[0])
+
+                if n_comp == 1:
+                    # Scalar: sup-t equals pointwise z
+                    crit = float(stats.norm.ppf(0.5 + level / 2.0))
+                else:
+                    # Monte-Carlo equicoordinate quantile: draw from N(0,R)
+                    # and take the (1−α) quantile of max_j |Z_j|.
+                    cov_np = np.asarray(cov_joint)
+                    # Force symmetry (numerical noise from JAX→numpy)
+                    cov_np = (cov_np + cov_np.T) / 2.0
+                    # Regularise for positive definiteness
+                    eigvals = np.linalg.eigvalsh(cov_np)
+                    min_eig = float(np.min(eigvals))
+                    ridge = max(0.0, -min_eig + 1e-6)
+                    if ridge > 0:
+                        cov_np = cov_np + np.eye(n_comp) * ridge
+                    R = cov_np / np.outer(se_vec, se_vec)
+                    # Force symmetry again after scaling
+                    R = (R + R.T) / 2.0
+                    # Clamp to valid correlation bounds
+                    R = np.clip(R, -1.0, 1.0)
+                    np.fill_diagonal(R, 1.0)
+                    rng = np.random.default_rng(42)
+                    n_mc = 10000
+                    z_draws = rng.multivariate_normal(
+                        mean=np.zeros(n_comp), cov=R, size=n_mc
+                    )
+                    max_abs = np.max(np.abs(z_draws), axis=1)
+                    crit = float(np.quantile(max_abs, level))
+
+                lower_inf = est_inf - crit * se_vec
+                upper_inf = est_inf + crit * se_vec
+            else:
+                lower_inf, upper_inf = delta_confint_from_se(
+                    est_inf, self.std_error, level=level, phi=None,
+                )
+
+            if self.phi is not None:
+                return np.asarray(self.phi(lower_inf)), np.asarray(self.phi(upper_inf))
+            return np.asarray(lower_inf), np.asarray(upper_inf)
+
         elif self.draws_inf is not None:
+            draws = np.asarray(self.draws_inf)
+            est_arr = np.asarray(est_inf)
+
+            if simultaneous:
+                # sup-t band: c = (1−α) quantile of max_j |draw_{b,j} − est_j| / se_j
+                se = np.asarray(self.std_error)
+                if se.ndim == 0:
+                    se = np.array([se])
+                # Ensure draws and est have compatible shapes
+                if draws.ndim == 1:
+                    draws = draws[:, None]
+                if est_arr.ndim == 0:
+                    est_arr = np.array([est_arr])
+                # Broadcast est to (n_draws, n_components)
+                est_bc = est_arr[None, :] if est_arr.ndim == 1 else est_arr
+                # Compute standardized deviations
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    std_dev = np.abs(draws - est_bc) / se[None, :]
+                # max over components per draw
+                max_dev = np.nanmax(std_dev, axis=1)
+                crit = float(np.quantile(max_dev, level))
+                lower_inf = est_arr - crit * se
+                upper_inf = est_arr + crit * se
+                if self.phi is not None:
+                    return (
+                        np.asarray(self.phi(lower_inf)),
+                        np.asarray(self.phi(upper_inf)),
+                    )
+                return np.asarray(lower_inf), np.asarray(upper_inf)
+
             alpha = (1.0 - level) / 2.0
-            est_inf = self.phi_inv(self.estimate) if self.phi_inv is not None else self.estimate
 
             if self.ci_method == "basic":
                 lower_inf = 2 * np.asarray(est_inf) - np.quantile(self.draws_inf, 1.0 - alpha, axis=0)
@@ -653,9 +802,29 @@ class MarginsResult:
             return lower, upper
 
         elif self.draws is not None:
+            draws = np.asarray(self.draws)
+            est_arr = np.asarray(self.estimate)
+
+            if simultaneous:
+                se = np.asarray(self.std_error)
+                if se.ndim == 0:
+                    se = np.array([se])
+                if draws.ndim == 1:
+                    draws = draws[:, None]
+                if est_arr.ndim == 0:
+                    est_arr = np.array([est_arr])
+                est_bc = est_arr[None, :] if est_arr.ndim == 1 else est_arr
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    std_dev = np.abs(draws - est_bc) / se[None, :]
+                max_dev = np.nanmax(std_dev, axis=1)
+                crit = float(np.quantile(max_dev, level))
+                lower = est_arr - crit * se
+                upper = est_arr + crit * se
+                return np.asarray(lower), np.asarray(upper)
+
             alpha = (1.0 - level) / 2.0
-            lower = np.quantile(self.draws, alpha, axis=0)
-            upper = np.quantile(self.draws, 1.0 - alpha, axis=0)
+            lower = np.quantile(draws, alpha, axis=0)
+            upper = np.quantile(draws, 1.0 - alpha, axis=0)
             return lower, upper
         else:
             raise ValueError(
@@ -766,7 +935,20 @@ class MarginsResult:
     ) -> TestResult:
         """Joint test H₀: all estimand components equal (vector-valued) value.
 
-        Tests the joint null using χ² with df = number of components.
+        Tests the joint null using either:
+
+        - ``kind="wald"`` (default): χ² with df = number of components. For
+          delta-method results this is the analytical Wald test; for
+          simulation/bootstrap draws it is a normal-theory plug-in using the
+          empirical covariance of the draws.
+
+        - ``kind="empirical"``: bootstrap-faithful quadratic-form test. The
+          distribution of the Mahalanobis statistic
+          ``Q_b = (θ_b−θ̂)ᵀ Σ̂_emp⁻¹ (θ_b−θ̂)`` over the draws is used as its own
+          reference distribution. The p-value is the proportion of draws with
+          ``Q_b ≥ Q_obs``. This avoids the Gaussian approximation that
+          ``kind="wald"`` imposes on bootstrap/simulation results and is
+          recommended for skewed or heavy-tailed sampling distributions.
 
         Parameters
         ----------
@@ -780,7 +962,7 @@ class MarginsResult:
             (the universal "no effect" point on the inference scale), use
             ``null_scale="inference"``.
 
-        kind : str, default "wald"
+        kind : {"wald", "empirical"}, default "wald"
 
         null_scale : {"reporting", "inference"}, default "reporting"
             Which scale ``value`` is supplied on. See ``test`` for details.
@@ -789,6 +971,11 @@ class MarginsResult:
         -------
         result : TestResult
         """
+        if kind not in ("wald", "empirical"):
+            raise ValueError(
+                f"kind must be 'wald' or 'empirical', got {kind!r}"
+            )
+
         if value is None:
             # Default null = zero on the inference scale (the universal
             # "no effect" point regardless of phi).
@@ -841,16 +1028,28 @@ class MarginsResult:
                 emp_cov = np.array([[emp_cov]])
             # Regularize if singular
             try:
-                solved = np.linalg.solve(emp_cov, diff_arr)
-                chi2 = float(diff_arr @ solved)
+                emp_cov_reg = emp_cov
+                solved = np.linalg.solve(emp_cov_reg, diff_arr)
             except np.linalg.LinAlgError:
                 ridge = 1e-12 * float(np.trace(emp_cov)) / emp_cov.shape[0]
                 ridge = max(ridge, float(np.finfo(emp_cov.dtype).eps))
                 emp_cov_reg = emp_cov + ridge * np.eye(emp_cov.shape[0])
                 solved = np.linalg.solve(emp_cov_reg, diff_arr)
+
+            if kind == "empirical":
+                # Empirical quadratic-form: use the bootstrap distribution of
+                # Q_b as its own reference distribution.
+                # Q_b = (draw_b - est)^T Sigma^{-1} (draw_b - est)
+                # Compute for every draw
+                Q = np.sum((centered @ np.linalg.inv(emp_cov_reg)) * centered, axis=1)
+                Q_obs = float(diff_arr @ solved)
+                p = float(np.mean(Q >= Q_obs))
+                chi2 = Q_obs
+            else:
+                # Wald plug-in: chi2 reference distribution
                 chi2 = float(diff_arr @ solved)
+                p = float(1.0 - stats.chi2.cdf(chi2, int(diff_arr.shape[0])))
             df = int(diff_arr.shape[0])
-            p = float(1.0 - stats.chi2.cdf(chi2, df))
         else:
             raise ValueError(
                 "Joint test requires either (a) a delta-method result with "
@@ -960,6 +1159,7 @@ class MarginsResult:
             session=self.session,
             ci_method=self.ci_method,
             bootstrap_extras=self.bootstrap_extras,
+            resample_bank_id=self.resample_bank_id,
         )
 
     def __truediv__(self, other) -> "MarginsResult":
@@ -1014,10 +1214,86 @@ class MarginsResult:
         MarginsResult
             A new result with only the requested outcome.
         """
+        outcome_shape = self.estimand_metadata.get("_outcome_shape")
         labels = self.estimand_metadata.get("labels", [])
         est = np.atleast_1d(self.estimate)
 
-        # Determine the outcome axis stride
+        # G7a: prefer structured metadata over label heuristics
+        if outcome_shape is not None and est.ndim == 2:
+            n_atoms = outcome_shape["n_atoms"]
+            n_outcomes = outcome_shape["n_outcomes"]
+            outcome_labels = outcome_shape["outcome_labels"]
+
+            if isinstance(index, str):
+                if index not in outcome_labels:
+                    raise ValueError(
+                        f"Outcome label {index!r} not found. "
+                        f"Available: {outcome_labels}"
+                    )
+                outcome_idx = outcome_labels.index(index)
+            else:
+                outcome_idx = int(index)
+                if not (0 <= outcome_idx < n_outcomes):
+                    raise ValueError(
+                        f"Outcome index {outcome_idx} out of range "
+                        f"(0..{n_outcomes - 1})."
+                    )
+
+            # Slice along the outcome axis
+            def _slice(arr):
+                if arr is None:
+                    return None
+                a = np.asarray(arr)
+                if a.ndim == 2 and a.shape == (n_atoms, n_outcomes):
+                    return a[:, outcome_idx]
+                elif a.ndim == 3 and a.shape[:2] == (n_atoms, n_outcomes):
+                    # gradient: (n_atoms, n_outcomes, n_params)
+                    return a[:, outcome_idx, :]
+                elif a.ndim == 3 and a.shape[1:] == (n_atoms, n_outcomes):
+                    # draws: (n_draws, n_atoms, n_outcomes)
+                    return a[:, :, outcome_idx]
+                elif a.ndim == 1 and a.size == n_atoms * n_outcomes:
+                    # Expanded labels — select every n_outcomes-th
+                    mask = np.arange(a.size) % n_outcomes == outcome_idx
+                    return a[mask]
+                return arr
+
+            new_labels = [
+                labels[i] for i in range(len(labels))
+                if i % n_outcomes == outcome_idx
+            ] if labels else None
+            new_meta = dict(self.estimand_metadata)
+            new_meta["labels"] = new_labels
+            new_meta["outcome_sliced"] = True
+            # Drop _outcome_shape after slicing to avoid confusion
+            new_meta.pop("_outcome_shape", None)
+
+            return MarginsResult(
+                estimate=_slice(self.estimate),
+                std_error=_slice(self.std_error),
+                conf_int_lower=_slice(self.conf_int_lower),
+                conf_int_upper=_slice(self.conf_int_upper),
+                method=self.method,
+                level=self.level,
+                n_obs=self.n_obs,
+                kappa=_slice(self.kappa),
+                delta_sim_disagreement=self.delta_sim_disagreement,
+                fallback_triggered=self.fallback_triggered,
+                fallback_reason=self.fallback_reason,
+                estimand_metadata=new_meta,
+                gradient=_slice(self.gradient),
+                draws=_slice(self.draws),
+                draws_inf=_slice(self.draws_inf),
+                cov_params=self.cov_params,
+                phi=self.phi,
+                phi_inv=self.phi_inv,
+                session=self.session,
+                ci_method=self.ci_method,
+                bootstrap_extras=self.bootstrap_extras,
+                resample_bank_id=self.resample_bank_id,
+            )
+
+        # Fallback to label-heuristic path for legacy results without _outcome_shape
         n_components = est.size
         n_labels = len(labels)
 
@@ -1067,15 +1343,13 @@ class MarginsResult:
         if not np.any(mask):
             raise ValueError(f"No components found for outcome {index!r}.")
 
-        def _slice(arr):
+        def _slice_legacy(arr):
             if arr is None:
                 return None
             a = np.asarray(arr)
             if a.ndim == 1:
                 return a[mask]
             elif a.ndim == 2:
-                # Gradient is (n_components, n_params) → slice rows.
-                # Draws are (n_draws, n_components) → slice columns.
                 if a.shape[0] == n_components:
                     return a[mask]
                 elif a.shape[1] == n_components:
@@ -1083,7 +1357,6 @@ class MarginsResult:
                 else:
                     return a
             elif a.ndim == 3:
-                # (n_draws, n_atoms, n_outcomes) or similar
                 if a.shape[1] == n_components:
                     return a[:, mask]
                 elif a.shape[2] == n_components:
@@ -1097,27 +1370,28 @@ class MarginsResult:
         new_meta["labels"] = new_labels
 
         return MarginsResult(
-            estimate=_slice(self.estimate),
-            std_error=_slice(self.std_error),
-            conf_int_lower=_slice(self.conf_int_lower),
-            conf_int_upper=_slice(self.conf_int_upper),
+            estimate=_slice_legacy(self.estimate),
+            std_error=_slice_legacy(self.std_error),
+            conf_int_lower=_slice_legacy(self.conf_int_lower),
+            conf_int_upper=_slice_legacy(self.conf_int_upper),
             method=self.method,
             level=self.level,
             n_obs=self.n_obs,
-            kappa=_slice(self.kappa),
+            kappa=_slice_legacy(self.kappa),
             delta_sim_disagreement=self.delta_sim_disagreement,
             fallback_triggered=self.fallback_triggered,
             fallback_reason=self.fallback_reason,
             estimand_metadata=new_meta,
-            gradient=_slice(self.gradient),
-            draws=_slice(self.draws),
-            draws_inf=_slice(self.draws_inf),
+            gradient=_slice_legacy(self.gradient),
+            draws=_slice_legacy(self.draws),
+            draws_inf=_slice_legacy(self.draws_inf),
             cov_params=self.cov_params,
             phi=self.phi,
             phi_inv=self.phi_inv,
             session=self.session,
             ci_method=self.ci_method,
             bootstrap_extras=self.bootstrap_extras,
+            resample_bank_id=self.resample_bank_id,
         )
 
     def materialize(self) -> "MarginsResult":
@@ -1155,6 +1429,7 @@ class MarginsResult:
             phi=self.phi,
             phi_inv=self.phi_inv,
             session=None,
+            resample_bank_id=self.resample_bank_id,
         )
 
 
@@ -1173,6 +1448,77 @@ def _join_fallback_reasons(a_reason, b_reason):
     return f"{a_reason}; {b_reason}"
 
 
+def _conservative_kappa(a_kappa, b_kappa):
+    """Propagate κ through composition using a conservative bound.
+
+    The combined estimand h = f(h_A, h_B) may have a different Lipschitz
+    constant than either component. Without access to the outer function f
+    we take the maximum of the component κ values as a safe upper bound.
+    """
+    if a_kappa is None and b_kappa is None:
+        return None
+    if a_kappa is None:
+        return b_kappa
+    if b_kappa is None:
+        return a_kappa
+    # Element-wise maximum for array κ, scalar max for scalar κ
+    a_arr = np.asarray(a_kappa)
+    b_arr = np.asarray(b_kappa)
+    result = np.maximum(a_arr, b_arr)
+    # Preserve scalar when both inputs were scalar
+    if a_arr.ndim == 0 and b_arr.ndim == 0:
+        return float(result)
+    return result
+
+
+def _check_draws_match(a: MarginsResult, b: MarginsResult) -> None:
+    """Verify that two simulation/bootstrap results carry matched draws.
+
+    Simulation draws are matched when they share the same session, rng_seed,
+    n_sim, and Σ̂ (same ``cov_params`` identity). Bootstrap draws are matched
+    when they share the same session-level resample bank (checked via
+    ``resample_bank_id``).
+    """
+    # Bootstrap composition: matched resample bank
+    if a.method == "bootstrap" or b.method == "bootstrap":
+        if a.resample_bank_id is None or b.resample_bank_id is None:
+            raise ValueError(
+                "Bootstrap composition requires both results to carry a "
+                "resample_bank_id. Results produced before the session bank "
+                "was initialized are not composable."
+            )
+        if a.resample_bank_id != b.resample_bank_id:
+            raise ValueError(
+                "Bootstrap composition requires both results to share the same "
+                "session-level resample bank. The resample indices differ, "
+                "so the draws are not jointly distributed."
+            )
+        # Fall through to Σ̂ check below
+
+    # Same session already checked by _check_compatible
+    a_sess = a._session_obj()
+    b_sess = b._session_obj()
+    if a_sess is not None and b_sess is not None:
+        if getattr(a_sess, "rng_seed", None) != getattr(b_sess, "rng_seed", None):
+            raise ValueError(
+                "Simulation composition requires both results to use the same "
+                "rng_seed. The draws were generated from different random streams."
+            )
+        if getattr(a_sess, "n_sim", None) != getattr(b_sess, "n_sim", None):
+            raise ValueError(
+                "Simulation composition requires both results to use the same "
+                "n_sim. The draws have different lengths."
+            )
+
+    # Σ̂ identity — same covariance matrix object or equal values
+    if a.cov_params is not None and b.cov_params is not None:
+        if not np.allclose(np.asarray(a.cov_params), np.asarray(b.cov_params)):
+            raise ValueError(
+                "Simulation composition requires both results to share the same "
+                "Σ̂ (cov_params). The covariance matrices differ."
+            )
+
+
 def _combine_results(
     a: MarginsResult,
     b: MarginsResult,
@@ -1186,74 +1532,423 @@ def _combine_results(
     b_inf = b.phi_inv(b.estimate) if b.phi_inv is not None else b.estimate
     combined_inf = estimate_combine(a_inf, b_inf)
 
-    if a.gradient is None or b.gradient is None:
-        raise ValueError(
-            "Composition currently requires delta-method results (with "
-            "gradients). Simulation/bootstrap composition would require "
-            "matched draws; use the draws array manually or re-run with "
-            "method='delta'."
+    if a.gradient is not None and b.gradient is not None:
+        # Delta-method composition path (G2 vector-aware)
+        new_grad = grad_combine(a.gradient, b.gradient)
+
+        if a.cov_params is None:
+            raise ValueError(
+                "Composition requires Σ̂ on the result (cov_params). The "
+                "originating session should have populated it; if this result "
+                "was constructed manually, supply cov_params."
+            )
+        cov = jnp.asarray(a.cov_params)
+        g = jnp.asarray(new_grad)
+
+        # Compute SE: scalar or vector
+        if g.ndim == 1:
+            var = jnp.dot(g, cov @ g)
+            se = float(jnp.sqrt(var))
+        else:
+            # g has shape (n_components, n_params)
+            # var[i] = g[i] @ cov @ g[i]
+            var = jnp.einsum('ij,jk,ik->i', g, cov, g)
+            se = np.asarray(jnp.sqrt(var))
+
+        z = stats.norm.ppf(0.5 + a.level / 2.0)
+        lo_inf = combined_inf - z * se
+        hi_inf = combined_inf + z * se
+
+        if a.phi is not None:
+            estimate_report = np.asarray(a.phi(combined_inf))
+            lower_report = np.asarray(a.phi(lo_inf))
+            upper_report = np.asarray(a.phi(hi_inf))
+        else:
+            estimate_report = combined_inf
+            lower_report = lo_inf
+            upper_report = hi_inf
+
+        a_label = (a.estimand_metadata.get("labels", [""])[0]
+                   if a.estimand_metadata.get("labels") else "A")
+        b_label = (b.estimand_metadata.get("labels", [""])[0]
+                   if b.estimand_metadata.get("labels") else "B")
+
+        # G4: conservative κ propagation
+        kappa = _conservative_kappa(a.kappa, b.kappa)
+
+        return MarginsResult(
+            estimate=np.asarray(estimate_report),
+            std_error=np.asarray(se),
+            conf_int_lower=np.asarray(lower_report),
+            conf_int_upper=np.asarray(upper_report),
+            method=a.method,
+            level=a.level,
+            n_obs=max(a.n_obs, b.n_obs),
+            kappa=kappa,
+            delta_sim_disagreement=None,
+            fallback_triggered=a.fallback_triggered or b.fallback_triggered,
+            fallback_reason=_join_fallback_reasons(a.fallback_reason, b.fallback_reason),
+            estimand_metadata={"labels": [label_combine(a_label, b_label)]},
+            gradient=new_grad,
+            draws=None,
+            draws_inf=None,
+            cov_params=a.cov_params,
+            phi=a.phi,
+            phi_inv=a.phi_inv,
+            session=a.session,
+            ci_method=None,
+            bootstrap_extras=None,
+            resample_bank_id=None,
         )
 
-    new_grad = grad_combine(a.gradient, b.gradient)
+    elif a.draws_inf is not None and b.draws_inf is not None:
+        # Simulation/bootstrap draws composition path (G1)
+        _check_draws_match(a, b)
 
-    # Guard against vector-valued results — composition only defined for scalars
-    if jnp.ndim(new_grad) != 1:
-        raise NotImplementedError(
-            "Composition is only supported for scalar estimands. "
-            "For vector results, compose elementwise or use evaluate()."
+        a_draws = np.asarray(a.draws_inf)
+        b_draws = np.asarray(b.draws_inf)
+        # Ensure both are at least 2-D for stacking
+        if a_draws.ndim == 1:
+            a_draws = a_draws[:, None]
+        if b_draws.ndim == 1:
+            b_draws = b_draws[:, None]
+
+        # Combine elementwise on the inference scale
+        combined_draws_inf = estimate_combine(a_draws, b_draws)
+
+        # SE = std dev of combined draws
+        se_arr = np.std(combined_draws_inf, axis=0, ddof=1)
+        se = float(se_arr) if se_arr.ndim == 0 else np.asarray(se_arr)
+
+        # CI via percentile of combined draws
+        alpha = (1.0 - a.level) / 2.0
+        lo_inf = np.quantile(combined_draws_inf, alpha, axis=0)
+        hi_inf = np.quantile(combined_draws_inf, 1.0 - alpha, axis=0)
+
+        # If the original results had scalar estimates, squeeze back to scalar
+        a_est = np.asarray(a.estimate)
+        if a_est.ndim == 0:
+            lo_inf = float(lo_inf.flat[0]) if np.ndim(lo_inf) > 0 else float(lo_inf)
+            hi_inf = float(hi_inf.flat[0]) if np.ndim(hi_inf) > 0 else float(hi_inf)
+            se = float(se.flat[0]) if np.ndim(se) > 0 else float(se)
+            combined_draws_inf = np.asarray(combined_draws_inf).ravel()
+
+        if a.phi is not None:
+            estimate_report = np.asarray(a.phi(combined_inf))
+            lower_report = np.asarray(a.phi(lo_inf))
+            upper_report = np.asarray(a.phi(hi_inf))
+            combined_draws = np.asarray(a.phi(combined_draws_inf))
+        else:
+            estimate_report = combined_inf
+            lower_report = lo_inf
+            upper_report = hi_inf
+            combined_draws = combined_draws_inf
+
+        a_label = (a.estimand_metadata.get("labels", [""])[0]
+                   if a.estimand_metadata.get("labels") else "A")
+        b_label = (b.estimand_metadata.get("labels", [""])[0]
+                   if b.estimand_metadata.get("labels") else "B")
+
+        kappa = _conservative_kappa(a.kappa, b.kappa)
+
+        return MarginsResult(
+            estimate=np.asarray(estimate_report),
+            std_error=np.asarray(se),
+            conf_int_lower=np.asarray(lower_report),
+            conf_int_upper=np.asarray(upper_report),
+            method=a.method,
+            level=a.level,
+            n_obs=max(a.n_obs, b.n_obs),
+            kappa=kappa,
+            delta_sim_disagreement=None,
+            fallback_triggered=a.fallback_triggered or b.fallback_triggered,
+            fallback_reason=_join_fallback_reasons(a.fallback_reason, b.fallback_reason),
+            estimand_metadata={"labels": [label_combine(a_label, b_label)]},
+            gradient=None,
+            draws=combined_draws,
+            draws_inf=combined_draws_inf,
+            cov_params=a.cov_params,
+            phi=a.phi,
+            phi_inv=a.phi_inv,
+            session=a.session,
+            ci_method="percentile (composed)",
+            bootstrap_extras=None,
+            resample_bank_id=None,
         )
 
-    # New SE and CI from delta on the combined gradient.
-    # Both results are from the same session and were produced with the
-    # same vcov_spec, so a.cov_params is the canonical Σ̂ for composition.
-    if a.cov_params is None:
-        raise ValueError(
-            "Composition requires Σ̂ on the result (cov_params). The "
-            "originating session should have populated it; if this result "
-            "was constructed manually, supply cov_params."
-        )
-    cov = jnp.asarray(a.cov_params)
-    var = jnp.dot(jnp.asarray(new_grad), cov @ jnp.asarray(new_grad))
-    se = float(jnp.sqrt(var))
-
-    z = stats.norm.ppf(0.5 + a.level / 2.0)
-    lo_inf = combined_inf - z * se
-    hi_inf = combined_inf + z * se
-
-    if a.phi is not None:
-        estimate_report = np.asarray(a.phi(combined_inf))
-        lower_report = np.asarray(a.phi(lo_inf))
-        upper_report = np.asarray(a.phi(hi_inf))
     else:
-        estimate_report = combined_inf
-        lower_report = lo_inf
-        upper_report = hi_inf
+        raise ValueError(
+            "Composition requires either (a) delta-method results with "
+            "gradients and cov_params, or (b) simulation/bootstrap results "
+            "with matched draws. One result has gradients, the other has "
+            "draws — mixing methods is not supported."
+        )
 
-    a_label = (a.estimand_metadata.get("labels", [""])[0]
-               if a.estimand_metadata.get("labels") else "A")
-    b_label = (b.estimand_metadata.get("labels", [""])[0]
-               if b.estimand_metadata.get("labels") else "B")
 
-    return MarginsResult(
-        estimate=np.asarray(estimate_report),
-        std_error=np.asarray(se),
-        conf_int_lower=np.asarray(lower_report),
-        conf_int_upper=np.asarray(upper_report),
-        method=a.method,
-        level=a.level,
-        n_obs=max(a.n_obs, b.n_obs),
-        kappa=None,  # not recomputed for combined results
-        delta_sim_disagreement=None,
-        fallback_triggered=a.fallback_triggered or b.fallback_triggered,
-        fallback_reason=_join_fallback_reasons(a.fallback_reason, b.fallback_reason),
-        estimand_metadata={"labels": [label_combine(a_label, b_label)]},
-        gradient=new_grad,
-        draws=None,
-        cov_params=a.cov_params,
-        phi=a.phi,
-        phi_inv=a.phi_inv,
-        session=a.session,
-    )
+# ---------------------------------------------------------------------------
+# Nonlinear multi-result composition (G3)
+# ---------------------------------------------------------------------------
+
+def compose_results(
+    results: list[MarginsResult],
+    fn: Callable,
+    label: Optional[str] = None,
+) -> MarginsResult:
+    """Compose multiple results nonlinearly via an explicit function.
+
+    This is the supported way to build ratios, products, and other nonlinear
+    combinations of estimands from separate calls (e.g. an AME and a
+    prediction).  The arithmetic operators ``+`` and ``-`` only handle linear
+    combinations; for anything else, use ``compose_results``.
+
+    Parameters
+    ----------
+    results : list of MarginsResult
+        Results to compose.  All must come from the same ``Margins`` session
+        and use the same inference method (delta, simulation, or bootstrap).
+
+    fn : callable
+        A function ``fn(theta) -> y`` where ``theta`` is a 1-D array of
+        inference-scale estimates (one per input result) and ``y`` is the
+        composed estimand (scalar or vector).  For the delta path, ``fn``
+        must be JAX-differentiable.
+
+    label : str, optional
+        Label for the composed estimand.  Defaults to ``"composed"``.
+
+    Returns
+    -------
+    MarginsResult
+        A new result carrying the composed estimate, SE, CI, and (for delta)
+        gradient or (for simulation/bootstrap) draws.
+
+    Raises
+    ------
+    ValueError
+        If results are from different sessions, use different methods, or
+        lack the required machinery (gradients for delta, matched draws for
+        simulation/bootstrap).
+    """
+    if len(results) < 2:
+        raise ValueError("compose_results requires at least two results.")
+
+    # Validate same session
+    sessions = [r._session_obj() for r in results]
+    if any(s is None for s in sessions):
+        raise ValueError(
+            "All results must carry a session reference for composition."
+        )
+    first_sess = sessions[0]
+    if not all(s is first_sess for s in sessions[1:]):
+        raise ValueError(
+            "compose_results requires all results to come from the same "
+            "Margins session."
+        )
+
+    # Validate same method
+    methods = [r.method for r in results]
+    if not all(m == methods[0] for m in methods):
+        raise ValueError(
+            "compose_results requires all results to use the same inference "
+            f"method. Got: {methods}"
+        )
+
+    method = methods[0]
+    level = results[0].level
+    phi = results[0].phi
+    phi_inv = results[0].phi_inv
+    cov_params = results[0].cov_params
+    n_obs = max(r.n_obs for r in results)
+
+    # Inference-scale estimates
+    theta_inf = jnp.stack([
+        jnp.asarray(phi_inv(r.estimate) if phi_inv is not None else r.estimate)
+        for r in results
+    ])
+
+    # Evaluate fn at the point estimate
+    composed_inf = jnp.asarray(fn(theta_inf))
+
+    if method == "delta":
+        # Delta path: chain rule through fn
+        for r in results:
+            if r.gradient is None:
+                raise ValueError(
+                    "Delta composition requires all results to carry gradients."
+                )
+        if cov_params is None:
+            raise ValueError(
+                "Delta composition requires Σ̂ (cov_params) on the results."
+            )
+
+        # Jacobian of fn w.r.t. theta
+        jac_fn = jax.jacfwd(fn)
+        J = jnp.asarray(jac_fn(theta_inf))  # shape: (n_out, n_results) or (n_results,)
+
+        # Component gradients w.r.t. beta
+        grads = [jnp.asarray(r.gradient) for r in results]
+
+        # combined_grad = J @ stacked_grads
+        # Handle scalar and vector fn output
+        if J.ndim == 0:
+            # fn returns scalar, J is scalar (unlikely but handle)
+            J = J.reshape(1, 1)
+        elif J.ndim == 1 and composed_inf.ndim == 0:
+            # fn returns scalar, J is (n_results,)
+            J = J[None, :]
+
+        # grads may be 1D (scalar components) or 2D (vector components)
+        # We need to form: combined_grad[j] = Σ_i J[j,i] * grads[i]
+        if all(g.ndim == 1 for g in grads):
+            # All scalar components
+            stacked = jnp.stack(grads, axis=0)  # (n_results, n_params)
+            combined_grad = J @ stacked  # (n_out, n_params)
+        else:
+            # Mixed or vector components — flatten each grad to 1D, compute,
+            # then reshape back if needed.  For now, require scalar.
+            raise NotImplementedError(
+                "compose_results for vector component gradients is not yet "
+                "implemented.  Compose scalar results only."
+            )
+
+        # Squeeze scalar-output shapes to 0-d for consistency with ordinary
+        # scalar results.
+        if combined_grad.shape[0] == 1:
+            combined_grad = combined_grad[0]
+            composed_inf = composed_inf.item() if hasattr(composed_inf, 'item') else float(composed_inf)
+
+        # SE from delta method
+        cov = jnp.asarray(cov_params)
+        if combined_grad.ndim == 1:
+            var = float(jnp.dot(combined_grad, cov @ combined_grad))
+            se = float(jnp.sqrt(var))
+        else:
+            var = jnp.einsum('ij,jk,ik->i', combined_grad, cov, combined_grad)
+            se = np.asarray(jnp.sqrt(var))
+
+        z = stats.norm.ppf(0.5 + level / 2.0)
+        lo_inf = composed_inf - z * se
+        hi_inf = composed_inf + z * se
+
+        if phi is not None:
+            estimate_report = np.asarray(phi(composed_inf))
+            lower_report = np.asarray(phi(lo_inf))
+            upper_report = np.asarray(phi(hi_inf))
+        else:
+            estimate_report = composed_inf
+            lower_report = lo_inf
+            upper_report = hi_inf
+
+        # Reduce κ over all results
+        from functools import reduce
+        kappa = reduce(_conservative_kappa,
+                       [r.kappa for r in results])
+
+        return MarginsResult(
+            estimate=np.asarray(estimate_report),
+            std_error=np.asarray(se),
+            conf_int_lower=np.asarray(lower_report),
+            conf_int_upper=np.asarray(upper_report),
+            method=method,
+            level=level,
+            n_obs=n_obs,
+            kappa=kappa,
+            delta_sim_disagreement=None,
+            fallback_triggered=any(r.fallback_triggered for r in results),
+            fallback_reason="; ".join(
+                r.fallback_reason for r in results if r.fallback_reason
+            ) or None,
+            estimand_metadata={"labels": [label or "composed"]},
+            gradient=combined_grad,
+            draws=None,
+            draws_inf=None,
+            cov_params=cov_params,
+            phi=phi,
+            phi_inv=phi_inv,
+            session=results[0].session,
+            ci_method=None,
+            bootstrap_extras=None,
+            resample_bank_id=None,
+        )
+
+    else:  # simulation or bootstrap
+        # Draws path: apply fn elementwise to matched draws
+        for r in results:
+            if r.draws_inf is None:
+                raise ValueError(
+                    f"{method} composition requires all results to carry draws."
+                )
+
+        # Validate matched draws
+        for i in range(1, len(results)):
+            _check_draws_match(results[0], results[i])
+
+        draws_list = [np.asarray(r.draws_inf) for r in results]
+        # Ensure all are 2-D (n_draws, n_components)
+        for i, d in enumerate(draws_list):
+            if d.ndim == 1:
+                draws_list[i] = d[:, None]
+
+        n_draws = draws_list[0].shape[0]
+        n_results = len(results)
+
+        # Stack along axis 1: (n_draws, n_results, n_components_per_result)
+        # For scalar results, each is (n_draws, 1)
+        stacked = np.stack(draws_list, axis=1)  # (n_draws, n_results, ...)
+
+        # Apply fn to each draw
+        composed_draws_inf = []
+        for b in range(n_draws):
+            theta_b = jnp.asarray(stacked[b, :, 0])  # (n_results,) for scalar
+            composed_draws_inf.append(float(fn(theta_b)))
+        composed_draws_inf = np.array(composed_draws_inf)
+
+        se = float(np.std(composed_draws_inf, ddof=1))
+        alpha = (1.0 - level) / 2.0
+        lo_inf = float(np.quantile(composed_draws_inf, alpha))
+        hi_inf = float(np.quantile(composed_draws_inf, 1.0 - alpha))
+
+        if phi is not None:
+            estimate_report = float(phi(composed_inf))
+            lower_report = float(phi(lo_inf))
+            upper_report = float(phi(hi_inf))
+            composed_draws = np.array([float(phi(d)) for d in composed_draws_inf])
+        else:
+            estimate_report = float(composed_inf)
+            lower_report = lo_inf
+            upper_report = hi_inf
+            composed_draws = composed_draws_inf
+
+        from functools import reduce
+        kappa = reduce(_conservative_kappa,
+                       [r.kappa for r in results])
+
+        return MarginsResult(
+            estimate=np.asarray(estimate_report),
+            std_error=np.asarray(se),
+            conf_int_lower=np.asarray(lower_report),
+            conf_int_upper=np.asarray(upper_report),
+            method=method,
+            level=level,
+            n_obs=n_obs,
+            kappa=kappa,
+            delta_sim_disagreement=None,
+            fallback_triggered=any(r.fallback_triggered for r in results),
+            fallback_reason="; ".join(
+                r.fallback_reason for r in results if r.fallback_reason
+            ) or None,
+            estimand_metadata={"labels": [label or "composed"]},
+            gradient=None,
+            draws=np.asarray(composed_draws),
+            draws_inf=np.asarray(composed_draws_inf),
+            cov_params=cov_params,
+            phi=phi,
+            phi_inv=phi_inv,
+            session=results[0].session,
+            ci_method="percentile (composed)",
+            bootstrap_extras=None,
+            resample_bank_id=results[0].resample_bank_id,
+        )
 
 
 # ---------------------------------------------------------------------------

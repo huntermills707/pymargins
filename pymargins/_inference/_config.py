@@ -94,3 +94,8 @@ class InferenceConfig:
     """MatchingClient for bootstrap rematching. Ignored by delta and K–R."""
 
     bootstrap_config: Optional[dict] = None
+    all_idx: Optional[list] = None
+    """Pre-generated resample indices for bootstrap. When provided, the
+    bootstrap engine reuses these instead of generating fresh indices.
+    Used by session-level resample banks to guarantee matched replicates
+    across composable bootstrap calls."""

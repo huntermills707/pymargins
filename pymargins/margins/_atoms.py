@@ -121,24 +121,30 @@ def _slice_by_outcome(
         if arr is None:
             return None
         arr = np.asarray(arr)
+        squeeze = len(idx) == 1
         if arr.ndim == 1:
-            return arr[idx]
+            out = arr[idx]
+            return out.item() if squeeze and out.ndim == 0 else out
         elif arr.ndim == 2:
             # (n_atoms, n_outcomes) or (n_outcomes, n_params)
             # We want to slice along the outcome axis. Heuristic:
             # if the last dim equals n_outcomes, slice last axis.
             if arr.shape[-1] == n_outcomes:
-                return arr[..., idx]
+                out = arr[..., idx]
+                return out.squeeze(-1) if squeeze else out
             elif arr.shape[0] == n_outcomes:
-                return arr[idx]
+                out = arr[idx]
+                return out.squeeze(0) if squeeze else out
             else:
                 return arr  # Can't determine outcome axis
         elif arr.ndim == 3:
             # (n_atoms, n_outcomes, n_params) or (n_sim, n_atoms, n_outcomes)
             if arr.shape[-1] == n_outcomes:
-                return arr[..., idx]
+                out = arr[..., idx]
+                return out.squeeze(-1) if squeeze else out
             elif arr.shape[1] == n_outcomes:
-                return arr[:, idx]
+                out = arr[:, idx]
+                return out.squeeze(1) if squeeze else out
             else:
                 return arr
         return arr

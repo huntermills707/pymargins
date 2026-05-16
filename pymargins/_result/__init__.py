@@ -5,7 +5,7 @@ Re-exports all result types for backward compatibility.
 
 from ._test import TestResult
 from ._diagnostic import DiagnosticResult
-from ._margins import MarginsResult, _join_fallback_reasons, _combine_results
+from ._margins import MarginsResult, _join_fallback_reasons, _combine_results, compose_results
 
 __all__ = [
     "TestResult",
@@ -13,4 +13,5 @@ __all__ = [
     "MarginsResult",
     "_join_fallback_reasons",
     "_combine_results",
+    "compose_results",
 ]

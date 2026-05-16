@@ -36,6 +36,73 @@ from ._config import InferenceConfig
 
 
 # ---------------------------------------------------------------------------
+# Resample-index generation (extracted for session-level bank reuse)
+# ---------------------------------------------------------------------------
+
+def _generate_resample_indices(
+    rng_seed,
+    n_boot,
+    n_obs,
+    cluster_ids=None,
+    block_size=None,
+    block_type="moving",
+):
+    """Generate the list of resample index arrays for bootstrap.
+
+    Deterministic given the parameters — same inputs always produce the same
+    ``all_idx``.  This determinism is what makes session-level resample banks
+    possible.
+    """
+    rng = np.random.default_rng(
+        [rng_seed, 1] if rng_seed is not None else None
+    )
+
+    if cluster_ids is not None:
+        cluster_ids = np.asarray(cluster_ids)
+        unique_clusters = np.unique(cluster_ids)
+        n_clusters = len(unique_clusters)
+
+    all_idx = []
+    for _ in range(n_boot):
+        if cluster_ids is not None:
+            sampled_clusters = rng.choice(unique_clusters, size=n_clusters, replace=True)
+            idx = np.concatenate([
+                np.where(cluster_ids == c)[0]
+                for c in sampled_clusters
+            ])
+        elif block_size is not None:
+            k = int(np.ceil(n_obs / block_size))
+            if block_type == "moving":
+                start_positions = rng.integers(0, n_obs - block_size + 1, size=k)
+                idx = np.concatenate([
+                    np.arange(s, s + block_size)
+                    for s in start_positions
+                ])
+            elif block_type == "circular":
+                start_positions = rng.integers(0, n_obs, size=k)
+                idx = np.concatenate([
+                    np.arange(s, s + block_size) % n_obs
+                    for s in start_positions
+                ])
+            else:  # nonoverlapping
+                n_blocks = int(np.ceil(n_obs / block_size))
+                if n_blocks == 0:
+                    raise ValueError(
+                        f"block_size ({block_size}) too large for n_obs ({n_obs})."
+                    )
+                sampled_blocks = rng.integers(0, n_blocks, size=n_blocks)
+                idx = np.concatenate([
+                    np.arange(bi * block_size, (bi + 1) * block_size) % n_obs
+                    for bi in sampled_blocks
+                ])
+        else:
+            idx = rng.integers(0, n_obs, size=n_obs)
+        all_idx.append(idx)
+
+    return all_idx
+
+
+# ---------------------------------------------------------------------------
 # BCa helpers
 # ---------------------------------------------------------------------------
 
@@ -296,50 +363,18 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
                 f"Supported: 'moving', 'nonoverlapping', 'circular'."
             )
 
-    # Bootstrap and simulation use the same user-visible rng_seed but
-    # derive independent streams via a SeedSequence tag so that side-by-side
-    # comparisons of the two methods are not correlated.
-    rng = np.random.default_rng(
-        [config.rng_seed, 1] if config.rng_seed is not None else None
-    )
-
-    # Pre-generate all resampling indices
-    all_idx = []
-    for _ in range(config.n_boot):
-        if cluster_ids is not None:
-            sampled_clusters = rng.choice(unique_clusters, size=n_clusters, replace=True)
-            idx = np.concatenate([
-                np.where(cluster_ids == c)[0]
-                for c in sampled_clusters
-            ])
-        elif block_size is not None:
-            k = int(np.ceil(n_obs / block_size))
-            if block_type == "moving":
-                start_positions = rng.integers(0, n_obs - block_size + 1, size=k)
-                idx = np.concatenate([
-                    np.arange(s, s + block_size)
-                    for s in start_positions
-                ])
-            elif block_type == "circular":
-                start_positions = rng.integers(0, n_obs, size=k)
-                idx = np.concatenate([
-                    np.arange(s, s + block_size) % n_obs
-                    for s in start_positions
-                ])
-            else:  # nonoverlapping
-                n_blocks = int(np.ceil(n_obs / block_size))
-                if n_blocks == 0:
-                    raise ValueError(
-                        f"block_size ({block_size}) too large for n_obs ({n_obs})."
-                    )
-                sampled_blocks = rng.integers(0, n_blocks, size=n_blocks)
-                idx = np.concatenate([
-                    np.arange(bi * block_size, (bi + 1) * block_size) % n_obs
-                    for bi in sampled_blocks
-                ])
-        else:
-            idx = rng.integers(0, n_obs, size=n_obs)
-        all_idx.append(idx)
+    # Use pre-generated resample bank if provided (session-level composition support)
+    if config.all_idx is not None:
+        all_idx = config.all_idx
+    else:
+        all_idx = _generate_resample_indices(
+            rng_seed=config.rng_seed,
+            n_boot=config.n_boot,
+            n_obs=n_obs,
+            cluster_ids=cluster_ids,
+            block_size=block_size,
+            block_type=block_type,
+        )
 
     # Pre-compute JAX differentiability once to avoid per-replicate
     # recompilation from is_jax_differentiable probes.
