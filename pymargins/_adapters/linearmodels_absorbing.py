@@ -44,10 +44,14 @@ class LinearmodelsAbsorbingAdapter(LinearPredictionAdapter):
         ``results.model.exog``, and ``results.model._absorb``.
     """
 
-    def __init__(self, results, training_data: Optional[pd.DataFrame] = None):
+    def __init__(self, results, training_data: Optional[pd.DataFrame] = None, formula: Optional[str] = None):
         self.results = results
         self._training_data = self._resolve_training_data(results, training_data)
         self._exog_names = list(results.params.index)
+        self._formula_spec = None
+        if formula is not None:
+            from .._formula import FormulaSpec
+            self._formula_spec = FormulaSpec(formula, self._training_data)
         self._dep = results.model.dependent
         self._exog = results.model.exog
         self._absorb = results.model._absorb if hasattr(results.model, "_absorb") else None
@@ -86,6 +90,8 @@ class LinearmodelsAbsorbingAdapter(LinearPredictionAdapter):
         vcov = getattr(session, "vcov_spec", None)
         validate_vcov_spec(vcov, adapter_name="LinearmodelsAbsorbingAdapter")
         super().attach(session)
+        if self._formula_spec is not None:
+            self._formula_spec.verify_against(self)
 
     # -----------------------------------------------------------------------
     # Core data access
@@ -132,6 +138,8 @@ class LinearmodelsAbsorbingAdapter(LinearPredictionAdapter):
     # -----------------------------------------------------------------------
 
     def design_matrix_from_df(self, df: pd.DataFrame) -> jnp.ndarray:
+        if self._formula_spec is not None:
+            return self._formula_spec.get_model_matrix(df)
         aligned = df.reindex(columns=self._exog_names)
         missing_cols = [
             col for col in self._exog_names

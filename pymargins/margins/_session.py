@@ -8,6 +8,7 @@ linear combinations, and arbitrary differentiable estimands.
 
 from __future__ import annotations
 from typing import Callable, Optional, Union, Any
+import inspect
 import weakref
 
 import warnings
@@ -41,6 +42,34 @@ from ._estimands import (
 )
 from ._atoms import _enumerate_groups, _format_atom_label, _finalize_atoms, _slice_by_outcome
 from ._inference_glue import _inference_config, _frozen_cov, _wrap_result
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _validate_callable_arity(fn: Callable, name: str, min_positional: int = 1) -> None:
+    """Validate that ``fn`` accepts at least ``min_positional`` positional args.
+
+    Raises ``ValueError`` with a clear message if the signature is inspectable
+    and shows too few positional parameters (and no *args).
+    """
+    try:
+        sig = inspect.signature(fn)
+    except (ValueError, TypeError):
+        return  # built-in or callable without inspectable signature
+    n_positional = 0
+    has_var_positional = False
+    for param in sig.parameters.values():
+        if param.kind in (param.POSITIONAL_ONLY, param.POSITIONAL_OR_KEYWORD):
+            n_positional += 1
+        elif param.kind == param.VAR_POSITIONAL:
+            has_var_positional = True
+    if not has_var_positional and n_positional < min_positional:
+        raise ValueError(
+            f"{name} must accept at least {min_positional} positional "
+            f"argument(s), but signature shows {n_positional}: {sig}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +225,8 @@ class Margins:
         block_size: Optional[int] = _NOT_GIVEN,
         bootstrap_config: Optional[dict] = _NOT_GIVEN,
         matching: Optional[Any] = _NOT_GIVEN,
+        formula: Optional[str] = _NOT_GIVEN,
+        data: Optional[pd.DataFrame] = _NOT_GIVEN,
         strict: bool = False,
         adapter: Optional[ModelAdapter] = None,
     ):
@@ -211,6 +242,7 @@ class Margins:
                 ("cluster", cluster), ("block_size", block_size),
                 ("bootstrap_config", bootstrap_config),
                 ("matching", matching),
+                ("formula", formula), ("data", data),
             ]:
                 if value is _NOT_GIVEN:
                     raise ValueError(
@@ -246,6 +278,8 @@ class Margins:
         block_size = None if block_size is _NOT_GIVEN else block_size
         bootstrap_config = None if bootstrap_config is _NOT_GIVEN else bootstrap_config
         matching = None if matching is _NOT_GIVEN else matching
+        formula = None if formula is _NOT_GIVEN else formula
+        data = None if data is _NOT_GIVEN else data
 
         # Validation: phi/phi_inv must come as a pair
         if (phi is None) != (phi_inv is None):
@@ -285,7 +319,15 @@ class Margins:
         self.strict = strict
 
         # Adapter setup
-        self.adapter = adapter if adapter is not None else auto_detect_adapter(model)
+        if adapter is not None:
+            self.adapter = adapter
+        else:
+            detect_kwargs = {}
+            if formula is not None:
+                detect_kwargs["formula"] = formula
+            if data is not None:
+                detect_kwargs["data"] = data
+            self.adapter = auto_detect_adapter(model, **detect_kwargs)
         self.adapter.attach(self)
 
         # Validate weights
@@ -421,6 +463,33 @@ class Margins:
         return cls(model, phi=None, phi_inv=None, **kwargs)
 
     @classmethod
+    def from_formula(cls, model, formula: str, data: pd.DataFrame, **kwargs) -> "Margins":
+        """Construct a Margins session with an explicit formula.
+
+        For models fit without native formula support (array-fit statsmodels,
+        linearmodels), passing ``formula`` and ``data`` ensures that
+        ``design_matrix_from_df`` re-evaluates derived terms (interactions,
+        polynomials, splines) correctly. Without this, ``dydx()`` on variables
+        involved in derived terms is silently incorrect.
+
+        Parameters
+        ----------
+        model : fitted result object
+            The fitted model to wrap.
+        formula : str
+            Formula string matching the model specification.
+        data : pd.DataFrame
+            Training data used to fit the model.
+        **kwargs
+            Forwarded to ``Margins.__init__``.
+
+        Returns
+        -------
+        Margins
+        """
+        return cls(model, formula=formula, data=data, **kwargs)
+
+    @classmethod
     def log_scale(cls, model, **kwargs) -> "Margins":
         """Log scale: contrasts are log-ratios; reported as ratios.
 
@@ -512,8 +581,10 @@ class Margins:
             ``over=`` variables, a vector over the Cartesian product of
             observed level combinations.
         """
-        if transform is not None and not callable(transform):
-            raise TypeError(f"transform must be callable, got {type(transform).__name__}")
+        if transform is not None:
+            if not callable(transform):
+                raise TypeError(f"transform must be callable, got {type(transform).__name__}")
+            _validate_callable_arity(transform, "transform", min_positional=1)
         if atexog is not None and hasattr(atexog, "iloc"):
             scenario = {"data": atexog, "over": over, "label": label}
         else:
@@ -589,8 +660,10 @@ class Margins:
         -------
         result : MarginsResult
         """
-        if transform is not None and not callable(transform):
-            raise TypeError(f"transform must be callable, got {type(transform).__name__}")
+        if transform is not None:
+            if not callable(transform):
+                raise TypeError(f"transform must be callable, got {type(transform).__name__}")
+            _validate_callable_arity(transform, "transform", min_positional=1)
         var_list = [variables] if isinstance(variables, str) else list(variables)
         for v in var_list:
             info = self.adapter.variable_metadata().get(v)
@@ -893,6 +966,7 @@ class Margins:
         """
         if not callable(compose):
             raise TypeError(f"compose must be callable, got {type(compose).__name__}")
+        _validate_callable_arity(compose, "compose", min_positional=1)
         h = self._build_evaluate_estimand(scenarios, compose)
         config = self._inference_config()
 

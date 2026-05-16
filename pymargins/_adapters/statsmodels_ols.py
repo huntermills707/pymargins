@@ -33,12 +33,22 @@ class StatsmodelsOLSAdapter(LinearPredictionAdapter):
     training_data : pd.DataFrame, optional
         The data the model was fit on. statsmodels exposes this via
         results.model.data.frame for formula-fit models.
+
+    formula : str, optional
+        Formula string for array-fit models. When provided, a
+        :class:`pymargins._formula.FormulaSpec` is built from ``training_data``
+        so that ``design_matrix_from_df`` re-evaluates derived terms
+        (interactions, polynomials, splines) correctly for ``dydx()``.
     """
 
-    def __init__(self, results, training_data: Optional[pd.DataFrame] = None):
+    def __init__(self, results, training_data: Optional[pd.DataFrame] = None, formula: Optional[str] = None):
         self.results = results
         self._training_data = extract_training_data(results, training_data)
         self._exog_names = list(results.model.exog_names)
+        self._formula_spec = None
+        if formula is not None:
+            from .._formula import FormulaSpec
+            self._formula_spec = FormulaSpec(formula, self._training_data)
 
     @property
     def training_data(self):
@@ -49,6 +59,8 @@ class StatsmodelsOLSAdapter(LinearPredictionAdapter):
         vcov = getattr(session, "vcov_spec", None)
         validate_vcov_spec(vcov, adapter_name="StatsmodelsOLSAdapter")
         super().attach(session)
+        if self._formula_spec is not None:
+            self._formula_spec.verify_against(self)
 
     # -----------------------------------------------------------------------
     # Core data access
@@ -101,7 +113,7 @@ class StatsmodelsOLSAdapter(LinearPredictionAdapter):
     # -----------------------------------------------------------------------
 
     def design_matrix_from_df(self, df: pd.DataFrame) -> jnp.ndarray:
-        return design_matrix_from_df(self.results, self._exog_names, df)
+        return design_matrix_from_df(self.results, self._exog_names, df, formula_spec=self._formula_spec)
 
     def column_index_of_variable(self, variable_name: str) -> int:
         return column_index_of_variable(

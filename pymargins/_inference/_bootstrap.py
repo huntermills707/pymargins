@@ -1,3 +1,22 @@
+"""Bootstrap inference implementation.
+
+Intentional broad exceptions
+----------------------------
+Two ``except Exception`` clauses are retained by design:
+
+- ``_refit_replicate_task`` (line ~160): ``matching.rematch()`` can raise
+  arbitrary exceptions from user-supplied matching objects.
+- ``_refit_replicate_task`` (line ~176): bootstrap resampling can trigger
+  many model-fitting failure modes (perfect separation, missing data,
+  singular Hessians, convergence failures). These are expected and counted
+  against the 10 % failure threshold. Serious errors (``AssertionError``,
+  ``MemoryError``, ``RecursionError``, ``KeyboardInterrupt``) propagate
+  immediately so they are not silently lost.
+
+Both clauses are documented inline; this module-level note exists so that
+static-analysis audits do not re-flag them.
+"""
+
 from __future__ import annotations
 from typing import Optional
 from functools import partial

@@ -157,3 +157,68 @@ def test_auto_detect_ivgmm(iv_data):
     res = mod.fit()
     cls = _detect_adapter_class(res)
     assert cls is LinearmodelsIVAdapter
+
+
+# ---------------------------------------------------------------------------
+# Formula interface (Track B)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def iv_poly_data():
+    rng = np.random.default_rng(42)
+    n = 300
+    z = rng.standard_normal(n)
+    w = rng.standard_normal(n)
+    age = rng.normal(50, 10, size=n)
+    x = 0.5 * z + 0.3 * w + rng.standard_normal(n)
+    y = (
+        1.0
+        + 0.2 * age
+        + 0.01 * (age ** 2)
+        + 2.0 * x
+        + rng.standard_normal(n)
+    )
+    df = pd.DataFrame({"y": y, "x": x, "z": z, "w": w, "age": age})
+    return df
+
+
+def test_formula_verification_passes_iv2sls(iv_poly_data):
+    """B.4 verification succeeds for a correctly specified formula."""
+    from pymargins._formula import FormulaSpec
+    mod = IV2SLS.from_formula("y ~ 1 + age + I(age**2) + [x ~ z + w]", data=iv_poly_data)
+    res = mod.fit()
+    adapter = LinearmodelsIVAdapter(res, training_data=iv_poly_data)
+    spec = FormulaSpec("y ~ age + I(age**2) + x", iv_poly_data)
+    # Should not raise
+    spec.verify_against(adapter)
+
+
+def test_formula_verification_fails_on_wrong_formula_iv2sls(iv_poly_data):
+    """B.4 verification fails when the formula omits a term."""
+    from pymargins._formula import FormulaSpec
+    mod = IV2SLS.from_formula("y ~ 1 + age + I(age**2) + [x ~ z + w]", data=iv_poly_data)
+    res = mod.fit()
+    adapter = LinearmodelsIVAdapter(res, training_data=iv_poly_data)
+    spec = FormulaSpec("y ~ age + x", iv_poly_data)  # missing I(age**2)
+    with pytest.raises(ValueError, match="Formula verification failed"):
+        spec.verify_against(adapter)
+
+
+def test_dydx_with_formula_iv2sls(iv_poly_data):
+    """B.6 Acceptance #2: IV with I(age**2) yields correct dydx via formula=."""
+    mod = IV2SLS.from_formula("y ~ 1 + age + I(age**2) + [x ~ z + w]", data=iv_poly_data)
+    res = mod.fit()
+    # Use a larger fd_step to avoid float32 precision loss in the quadratic
+    # finite-difference at age ~ 50 (default 1e-6 is too small for float32).
+    m = Margins.linear_scale(
+        res,
+        formula="y ~ age + I(age**2) + x",
+        data=iv_poly_data,
+        at="mean",
+        fd_step=1e-4,
+    )
+    slope = m.dydx("age")
+    # Expected slope: beta_age + 2 * beta_age_sq * mean(age)
+    expected = res.params["age"] + 2 * res.params["I(age ** 2)"] * iv_poly_data["age"].mean()
+    assert np.isclose(float(slope.estimate), expected, rtol=1e-3)
+    assert float(slope.std_error) > 0

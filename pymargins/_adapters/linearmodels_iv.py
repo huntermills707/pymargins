@@ -38,9 +38,14 @@ class LinearmodelsIVAdapter(LinearPredictionAdapter):
         The data the model was fit on.  linearmodels IV models do not
         store the original DataFrame, so passing this explicitly is
         strongly recommended.  If omitted, the adapter raises an error.
+    formula : str, optional
+        Formula string for array-fit models. When provided, a
+        :class:`pymargins._formula.FormulaSpec` is built from ``training_data``
+        so that ``design_matrix_from_df`` re-evaluates derived terms
+        (interactions, polynomials, splines) correctly for ``dydx()``.
     """
 
-    def __init__(self, results, training_data: Optional[pd.DataFrame] = None):
+    def __init__(self, results, training_data: Optional[pd.DataFrame] = None, formula: Optional[str] = None):
         self.results = results
         if training_data is None:
             training_data = self._try_reconstruct_training_data(results)
@@ -54,6 +59,10 @@ class LinearmodelsIVAdapter(LinearPredictionAdapter):
         self._exog_names = list(results.params.index)
         self._formula = getattr(results.model, "formula", None)
         self._model_cls = type(results.model)
+        self._formula_spec = None
+        if formula is not None:
+            from .._formula import FormulaSpec
+            self._formula_spec = FormulaSpec(formula, self._training_data)
 
     @staticmethod
     def _try_reconstruct_training_data(results) -> Optional[pd.DataFrame]:
@@ -102,6 +111,8 @@ class LinearmodelsIVAdapter(LinearPredictionAdapter):
         vcov = getattr(session, "vcov_spec", None)
         validate_vcov_spec(vcov, adapter_name="LinearmodelsIVAdapter")
         super().attach(session)
+        if self._formula_spec is not None:
+            self._formula_spec.verify_against(self)
 
     # -----------------------------------------------------------------------
     # Core data access
@@ -148,6 +159,8 @@ class LinearmodelsIVAdapter(LinearPredictionAdapter):
     # -----------------------------------------------------------------------
 
     def design_matrix_from_df(self, df: pd.DataFrame) -> jnp.ndarray:
+        if self._formula_spec is not None:
+            return self._formula_spec.get_model_matrix(df)
         aligned = df.reindex(columns=self._exog_names)
         missing_cols = [
             col for col in self._exog_names

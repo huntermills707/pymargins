@@ -50,6 +50,8 @@ def test_strict_mode_accepts_explicit_args(fit_ols):
         block_size=None,
         bootstrap_config=None,
         matching=None,
+        formula=None,
+        data=None,
     )
     assert m.strict is True
     assert m.at == "overall"
@@ -80,6 +82,8 @@ def test_strict_mode_rejects_auto_gradient_backend(fit_ols):
             block_size=None,
             bootstrap_config=None,
             matching=None,
+            formula=None,
+            data=None,
         )
 
 
@@ -122,6 +126,8 @@ def test_strict_mode_with_explicit_nondefault_vcov(fit_ols):
         block_size=None,
         bootstrap_config=None,
         matching=None,
+        formula=None,
+        data=None,
     )
     assert m.vcov_spec == "HC0"
 

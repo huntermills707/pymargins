@@ -624,7 +624,7 @@ class BootstrapOnlyAdapter(ModelAdapter):
 # Auto-detection of adapter from a fitted model
 # ---------------------------------------------------------------------------
 
-def auto_detect_adapter(model) -> ModelAdapter:
+def auto_detect_adapter(model, formula=None, data=None) -> ModelAdapter:
     """Inspect a fitted model and return an appropriate adapter.
 
     Used by Margins() when no adapter is explicitly provided. Delegates to
@@ -633,6 +633,10 @@ def auto_detect_adapter(model) -> ModelAdapter:
     Parameters
     ----------
     model : fitted result object from any supported framework
+    formula : str, optional
+        Formula string for models that were fit without native formula support.
+    data : pd.DataFrame, optional
+        Training data corresponding to ``formula``.
 
     Returns
     -------
@@ -645,7 +649,7 @@ def auto_detect_adapter(model) -> ModelAdapter:
         If no adapter is registered for the model's class.
     """
     from ._adapters import auto_detect_adapter as _auto_detect
-    return _auto_detect(model)
+    return _auto_detect(model, formula=formula, data=data)
 
 
 # ---------------------------------------------------------------------------

@@ -7,6 +7,7 @@ across OLS, GLM, and other statsmodels adapters.
 
 from __future__ import annotations
 from typing import Optional
+import warnings
 import numpy as np
 import pandas as pd
 import jax.numpy as jnp
@@ -28,14 +29,35 @@ def extract_training_data(results, training_data: Optional[pd.DataFrame]) -> pd.
     )
 
 
-def design_matrix_from_df(results, exog_names: list[str], df: pd.DataFrame) -> jnp.ndarray:
-    """Build a design matrix from a DataFrame using the model's formula."""
+def design_matrix_from_df(results, exog_names: list[str], df: pd.DataFrame, formula_spec=None) -> jnp.ndarray:
+    """Build a design matrix from a DataFrame using the model's formula.
+
+    Resolution order:
+      1. Live framework ``design_info`` (statsmodels formula-fit).
+      2. pymargins ``FormulaSpec`` if ``formula_spec`` is provided.
+      3. Column-selection fallback (with a warning when derived terms are
+         present).
+    """
+    # Path 1: live framework design_info
     if hasattr(results, "model") and results.model is not None and hasattr(results.model, "data") and hasattr(results.model.data, "design_info"):
         from patsy import dmatrix
         design_info = results.model.data.design_info
         X_np = np.asarray(dmatrix(design_info, df, return_type="matrix"))
         return jnp.asarray(X_np)
-    # Array-fit fallback: align columns and auto-inject intercept if needed
+    # Path 2: pymargins FormulaSpec
+    if formula_spec is not None:
+        return formula_spec.get_model_matrix(df)
+    # Path 3: column-selection fallback
+    if _has_derived_terms(exog_names):
+        warnings.warn(
+            "design_matrix_from_df is using column-selection fallback, but the "
+            "model's exog_names contain derived terms (interactions, polynomials, "
+            "splines, etc.). dydx() on variables involved in these terms will be "
+            "silently incorrect because the fallback does not re-evaluate derived "
+            "terms. Pass formula= and data= to Margins() to fix this.",
+            UserWarning,
+            stacklevel=3,
+        )
     aligned = df.reindex(columns=exog_names)
     # Detect missing columns that became NaN after reindexing
     missing_cols = [col for col in exog_names if col not in df.columns and col not in ("const", "Intercept")]
@@ -115,6 +137,21 @@ def build_variable_metadata(training_data: pd.DataFrame) -> dict[str, VariableIn
                      if pd.api.types.is_numeric_dtype(series) else None),
         )
     return metadata
+
+
+def _has_derived_terms(exog_names: list[str]) -> bool:
+    """Detect whether ``exog_names`` contains derived / transformed terms.
+
+    Returns ``True`` if the column names contain patterns indicating
+    interactions, polynomials, splines, or other formula-derived terms
+    that column-selection fallback cannot reproduce.
+    """
+    derived_indicators = [":", "I(", "bs(", "poly(", "cc(", "cr(", "te(", "ti("]
+    for name in exog_names:
+        for indicator in derived_indicators:
+            if indicator in name:
+                return True
+    return False
 
 
 def _infer_variable_type(series: pd.Series) -> str:

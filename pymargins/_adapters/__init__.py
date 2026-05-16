@@ -227,6 +227,12 @@ _REGISTERED_ADAPTERS = [
         "hint_modules": ["linearmodels."],
         "hint_names": ["AbsorbingLSResults"],
     },
+    {
+        "name": "SklearnBootstrapAdapter",
+        "description": "scikit-learn estimators (bootstrap-only; pass via adapter=)",
+        "hint_modules": ["sklearn."],
+        "hint_names": ["Regressor", "Classifier", "GradientBoosting", "RandomForest"],
+    },
 ]
 
 
@@ -594,7 +600,7 @@ def _detect_adapter_class(model):
     )
 
 
-def auto_detect_adapter(model):
+def auto_detect_adapter(model, formula=None, data=None):
     """Public entry point for adapter auto-detection.
 
     Returns an instantiated adapter for `model`. For most adapters the
@@ -602,10 +608,41 @@ def auto_detect_adapter(model):
     that need more arguments should be instantiated explicitly by the user
     and passed to Margins via the `adapter=` keyword.
 
+    Parameters
+    ----------
+    model : fitted result object
+    formula : str, optional
+        Formula string for models that were fit without native formula support.
+    data : pd.DataFrame, optional
+        Training data corresponding to ``formula``.
+
     Raises
     ------
     TypeError
         If no adapter is registered for the model class.
     """
+    import warnings
+
     cls = _detect_adapter_class(model)
+    kwargs = {}
+    if formula is not None:
+        kwargs["formula"] = formula
+    if data is not None:
+        kwargs["training_data"] = data
+    if kwargs:
+        try:
+            return cls(model, **kwargs)
+        except TypeError as exc:
+            if "unexpected keyword argument" in str(exc):
+                warnings.warn(
+                    f"{cls.__name__} does not support formula= or data=; "
+                    "these arguments were ignored.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                # Preserve training_data even when formula= is rejected
+                if data is not None:
+                    return cls(model, training_data=data)
+                return cls(model)
+            raise
     return cls(model)

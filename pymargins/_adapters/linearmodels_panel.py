@@ -43,11 +43,15 @@ class LinearmodelsPanelAdapter(LinearPredictionAdapter):
         original DataFrame explicitly is safer.
     """
 
-    def __init__(self, results, training_data: Optional[pd.DataFrame] = None):
+    def __init__(self, results, training_data: Optional[pd.DataFrame] = None, formula: Optional[str] = None):
         self.results = results
         self._training_data = self._resolve_training_data(results, training_data)
         self._exog_names = list(results.params.index)
         self._formula = getattr(results.model, "formula", None)
+        self._formula_spec = None
+        if formula is not None:
+            from .._formula import FormulaSpec
+            self._formula_spec = FormulaSpec(formula, self._training_data)
         self._model_cls = type(results.model)
 
     @property
@@ -81,6 +85,8 @@ class LinearmodelsPanelAdapter(LinearPredictionAdapter):
         vcov = getattr(session, "vcov_spec", None)
         validate_vcov_spec(vcov, adapter_name="LinearmodelsPanelAdapter")
         super().attach(session)
+        if self._formula_spec is not None:
+            self._formula_spec.verify_against(self)
 
     # -----------------------------------------------------------------------
     # Core data access
@@ -128,6 +134,8 @@ class LinearmodelsPanelAdapter(LinearPredictionAdapter):
     # -----------------------------------------------------------------------
 
     def design_matrix_from_df(self, df: pd.DataFrame) -> jnp.ndarray:
+        if self._formula_spec is not None:
+            return self._formula_spec.get_model_matrix(df)
         # Align columns to exog_names; auto-inject intercept if needed
         aligned = df.reindex(columns=self._exog_names)
         missing_cols = [

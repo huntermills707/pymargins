@@ -403,3 +403,16 @@ def test_all_nan_column_raises_clear_error():
     # on the all-NaN column, which should raise a clear ValueError.
     with pytest.raises(ValueError):
         m.predict()
+
+
+# ---------------------------------------------------------------------------
+# conf_int() on simulation results
+# ---------------------------------------------------------------------------
+
+def test_conf_int_on_simulation_results(fit_ols):
+    m = Margins.linear_scale(fit_ols, method="simulation", n_sim=200, rng_seed=42)
+    pred = m.predict(atexog={"treatment": [0, 1]})
+    lower, upper = pred.conf_int()
+    assert np.all(np.isfinite(lower))
+    assert np.all(np.isfinite(upper))
+    assert np.all(lower <= upper)

@@ -220,3 +220,66 @@ def test_auto_detect_pooledols(panel_data):
     res = mod.fit()
     cls = _detect_adapter_class(res)
     assert cls is LinearmodelsPanelAdapter
+
+
+# ---------------------------------------------------------------------------
+# Formula interface (Track B)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def panel_poly_data():
+    rng = np.random.default_rng(42)
+    n = 100
+    t = 5
+    entities = np.repeat(np.arange(n), t)
+    times = np.tile(np.arange(t), n)
+    age = rng.normal(50, 10, size=n * t)
+    df = pd.DataFrame({
+        "entity": entities,
+        "time": times,
+        "age": age,
+        "y": 0.2 * age + 0.01 * (age ** 2) + 0.5 * entities + rng.normal(n * t),
+    }).set_index(["entity", "time"])
+    return df
+
+
+def test_formula_verification_passes_panelols(panel_poly_data):
+    """B.4 verification succeeds for a correctly specified formula (no intercept)."""
+    from pymargins._formula import FormulaSpec
+    mod = PanelOLS.from_formula("y ~ age + I(age**2) + EntityEffects", data=panel_poly_data)
+    res = mod.fit()
+    adapter = LinearmodelsPanelAdapter(res, training_data=panel_poly_data)
+    # EntityEffects absorbs the intercept, so formula must suppress it
+    spec = FormulaSpec("y ~ 0 + age + I(age**2)", panel_poly_data)
+    spec.verify_against(adapter)
+
+
+def test_formula_verification_fails_on_wrong_formula_panelols(panel_poly_data):
+    """B.4 verification fails when the formula includes an absorbed intercept."""
+    from pymargins._formula import FormulaSpec
+    mod = PanelOLS.from_formula("y ~ age + I(age**2) + EntityEffects", data=panel_poly_data)
+    res = mod.fit()
+    adapter = LinearmodelsPanelAdapter(res, training_data=panel_poly_data)
+    # Wrong: includes Intercept which the model absorbed
+    spec = FormulaSpec("y ~ age + I(age**2)", panel_poly_data)
+    with pytest.raises(ValueError, match="Formula verification failed"):
+        spec.verify_against(adapter)
+
+
+def test_dydx_with_formula_panelols(panel_poly_data):
+    """B.6 Acceptance #2: PanelOLS with I(age**2) yields correct dydx via formula=."""
+    mod = PanelOLS.from_formula("y ~ age + I(age**2) + EntityEffects", data=panel_poly_data)
+    res = mod.fit()
+    # Use a larger fd_step to avoid float32 precision loss in the quadratic
+    # finite-difference at age ~ 50 (default 1e-6 is too small for float32).
+    m = Margins.linear_scale(
+        res,
+        formula="y ~ 0 + age + I(age**2)",
+        data=panel_poly_data,
+        at="mean",
+        fd_step=1e-4,
+    )
+    slope = m.dydx("age")
+    expected = res.params["age"] + 2 * res.params["I(age ** 2)"] * panel_poly_data["age"].mean()
+    assert np.isclose(float(slope.estimate), expected, rtol=1e-3)
+    assert float(slope.std_error) > 0
