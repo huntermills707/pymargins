@@ -37,6 +37,31 @@ import numpy as np
 # ---------------------------------------------------------------------------
 
 
+def split_kernel_partial(h):
+    """If *h* is a :class:`functools.partial` wrapping a module-level kernel
+    (i.e. the function carries ``__pymargins_kernel__``), return a dict with
+
+    - ``kernel_fn``: the underlying kernel callable
+    - ``args``: positional args bound by the partial
+    - ``keywords``: keyword args bound by the partial
+
+    Otherwise return ``None``.  This helper lets the bootstrap engine extract
+    a stable kernel once and batch-evaluate it with ``jax.vmap``, avoiding
+    per-replicate recompilation.
+    """
+    from functools import partial
+
+    if not isinstance(h, partial):
+        return None
+    if not getattr(h.func, "__pymargins_kernel__", False):
+        return None
+    return {
+        "kernel_fn": h.func,
+        "args": h.args,
+        "keywords": dict(h.keywords),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Aggregation helper
 # ---------------------------------------------------------------------------

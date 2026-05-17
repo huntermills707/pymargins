@@ -591,7 +591,7 @@ class Margins:
             scenario = {"atexog": atexog, "over": over, "label": label}
         h, labels, scenarios = self._build_prediction_estimand(scenario, transform)
         config = self._inference_config()
-        meta = {"kind": "prediction"}
+        meta = {"kind": "prediction", "at": self.at}
         if label is not None:
             if labels is None or (isinstance(labels, list) and len(labels) == 1):
                 labels = [label]
@@ -681,7 +681,7 @@ class Margins:
             scenario = {"atexog": atexog, "over": over, "label": label}
         h, labels, scenarios = self._build_slope_estimand(scenario, var_list, transform)
         config = self._inference_config()
-        meta = {"kind": "slope", "variables": var_list}
+        meta = {"kind": "slope", "variables": var_list, "at": self.at}
         if label is not None:
             if labels is None or (isinstance(labels, list) and len(labels) == 1):
                 labels = [label]
@@ -859,7 +859,7 @@ class Margins:
             )
         result_data = run_inference(
             h, self.adapter, config,
-            estimand_metadata={"kind": "contrasts", "labels": labels, "scenarios": scenarios},
+            estimand_metadata={"kind": "contrasts", "labels": labels, "scenarios": scenarios, "at": self.at},
             h_factory=h_factory,
         )
         if outcome is not None and self.adapter.n_outcomes > 1:
@@ -981,7 +981,7 @@ class Margins:
             )
         result_data = run_inference(
             h, self.adapter, config,
-            estimand_metadata={"kind": "evaluate", "labels": labels, "scenarios": scenarios},
+            estimand_metadata={"kind": "evaluate", "labels": labels, "scenarios": scenarios, "at": self.at},
             h_factory=h_factory,
         )
         if outcome is not None and self.adapter.n_outcomes > 1:

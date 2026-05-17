@@ -10,6 +10,7 @@ These models predict the conditional probability via a link function
 """
 
 from __future__ import annotations
+from functools import lru_cache
 from typing import Optional, Any
 import jax.numpy as jnp
 import numpy as np
@@ -105,18 +106,10 @@ class StatsmodelsDiscreteBinaryAdapter(ModelAdapter):
     # Prediction
     # -----------------------------------------------------------------------
 
-    def predict(
-        self,
-        beta: jnp.ndarray,
-        X: jnp.ndarray,
-        offset: Optional[jnp.ndarray] = None,
-    ) -> jnp.ndarray:
-        eta = jnp.asarray(X) @ beta
-        if offset is not None:
-            eta = eta + jnp.asarray(offset)
-        if self._model_cls_name == "Probit":
-            return ndtr(eta)
-        return expit(eta)
+    @property
+    def predict(self):
+        """Identity-stable predict callable for JAX compilation caching."""
+        return _discrete_binary_predict(self._model_cls_name)
 
     # -----------------------------------------------------------------------
     # Design matrix construction
@@ -247,3 +240,22 @@ class StatsmodelsDiscreteBinaryAdapter(ModelAdapter):
             if val is not None:
                 kwargs[attr] = val
         return kwargs
+
+
+@lru_cache(maxsize=None)
+def _discrete_binary_predict(model_cls_name: str):
+    """Cached predict factory so JAX sees the same callable across refits."""
+
+    def predict(
+        beta: jnp.ndarray,
+        X: jnp.ndarray,
+        offset: Optional[jnp.ndarray] = None,
+    ) -> jnp.ndarray:
+        eta = jnp.asarray(X) @ beta
+        if offset is not None:
+            eta = eta + jnp.asarray(offset)
+        if model_cls_name == "Probit":
+            return ndtr(eta)
+        return expit(eta)
+
+    return predict

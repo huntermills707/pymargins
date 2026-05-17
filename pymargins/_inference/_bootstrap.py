@@ -31,7 +31,7 @@ import threadpoolctl
 from .._gradients import gradient
 from .._delta import delta_se
 from .._kappa import kappa, kappa_vector
-from .._estimands import is_jax_differentiable
+from .._estimands import is_jax_differentiable, split_kernel_partial, slope_kernel
 from ._config import InferenceConfig
 
 
@@ -106,12 +106,15 @@ def _generate_resample_indices(
 # BCa helpers
 # ---------------------------------------------------------------------------
 
-def _compute_acceleration_jackknife(adapter, h_factory, data, cluster_ids, block_size):
+def _compute_acceleration_jackknife(adapter, h_factory, h, data, cluster_ids, block_size):
     """Compute BCa acceleration via leave-one-out jackknife.
 
     Returns None when jackknife is deemed too expensive (n_obs or n_clusters
     > 200) or for block bootstrap where leave-one-out is not well-defined.
     """
+    kernel_info = split_kernel_partial(h)
+    static_kwargs = kernel_info["keywords"] if kernel_info is not None else None
+    kernel_fn = kernel_info["kernel_fn"] if kernel_info is not None else None
     n_obs = len(data)
     if cluster_ids is not None:
         unique_clusters = np.unique(cluster_ids)
@@ -126,8 +129,30 @@ def _compute_acceleration_jackknife(adapter, h_factory, data, cluster_ids, block
             else:
                 resampled = data[mask]
             new_adapter = adapter.refit(resampled, index=np.where(mask)[0])
-            h_b = h_factory(new_adapter)
-            theta_minus.append(np.asarray(h_b(new_adapter.coefficients())))
+            if kernel_fn is not None:
+                h_probe = h_factory(new_adapter)
+                probe_info = split_kernel_partial(h_probe)
+                if probe_info is not None:
+                    probe_kw = probe_info["keywords"]
+                    data_independent = True
+                    for key, val in static_kwargs.items():
+                        if isinstance(val, (np.ndarray, jnp.ndarray)):
+                            probe_val = probe_kw.get(key)
+                            if not isinstance(probe_val, (np.ndarray, jnp.ndarray)):
+                                data_independent = False
+                                break
+                            if val.shape != probe_val.shape or not np.allclose(val, probe_val):
+                                data_independent = False
+                                break
+                    if data_independent:
+                        theta_minus.append(np.asarray(kernel_fn(new_adapter.coefficients(), **static_kwargs)))
+                    else:
+                        theta_minus.append(np.asarray(h_probe(new_adapter.coefficients())))
+                else:
+                    theta_minus.append(np.asarray(h_probe(new_adapter.coefficients())))
+            else:
+                h_b = h_factory(new_adapter)
+                theta_minus.append(np.asarray(h_b(new_adapter.coefficients())))
     elif block_size is not None:
         return None
     else:
@@ -154,7 +179,7 @@ def _compute_acceleration_jackknife(adapter, h_factory, data, cluster_ids, block
     return a
 
 
-def _compute_bca_params(h_draws_inf, estimate, adapter, h_factory, data,
+def _compute_bca_params(h_draws_inf, estimate, adapter, h_factory, h, data,
                         cluster_ids, block_size, bootstrap_config):
     """Compute BCa bias correction (z0) and acceleration (a)."""
     if not np.all(np.isfinite(estimate)):
@@ -171,7 +196,7 @@ def _compute_bca_params(h_draws_inf, estimate, adapter, h_factory, data,
         a = np.asarray(bootstrap_config["acceleration"])
     else:
         a = _compute_acceleration_jackknife(
-            adapter, h_factory, data, cluster_ids, block_size,
+            adapter, h_factory, h, data, cluster_ids, block_size,
         )
         if a is None:
             warnings.warn(
@@ -269,6 +294,296 @@ def _refit_replicate_task(args, adapter, data, matching=None):
         if isinstance(exc, (AssertionError, MemoryError, RecursionError, KeyboardInterrupt)):
             raise
         return b, None, exc
+
+
+def _try_fast_path(h, adapter, config):
+    """Gate the batched fast path: it is eligible only when the user did not
+    force ``engine="loop"``, the adapter's ``predict`` is a pure JAX array
+    function (``supports_jax_autodiff``), and the estimand is a single
+    module-level kernel partial.  Returns ``kernel_info`` or ``None``.
+
+    Data-independent vs data-coupled classification and the per-replicate
+    extraction happen in :func:`_run_fast_path`, after refitting.
+    """
+    bootstrap_config = config.bootstrap_config or {}
+    if bootstrap_config.get("engine", "batched") == "loop":
+        return None
+    if not getattr(adapter, "supports_jax_autodiff", False):
+        return None
+    kernel_info = split_kernel_partial(h)
+    if kernel_info is None:
+        return None
+    return kernel_info
+
+
+# ---------------------------------------------------------------------------
+# Array-tree helpers for the batched fast path
+#
+# Kernel partials bind a mix of arrays (``X``, ``Xp``/``Xm``, ``eps_jax``,
+# ``weights``), lists of arrays (``scenarios_X``, ``offsets``, ``sw``),
+# callables (``predict_fn``, ``transform``, ``compose``, ``phi_inv``) and
+# strings (``aggregate``).  These helpers classify and stack the array-bearing
+# leaves so the kernel can be vmapped over replicates.
+# ---------------------------------------------------------------------------
+
+def _is_arr(x):
+    return isinstance(x, (np.ndarray, jnp.ndarray))
+
+
+def _has_arr(x):
+    """True if *x* is an array or a list/tuple containing one."""
+    if _is_arr(x):
+        return True
+    if isinstance(x, (list, tuple)):
+        return any(_has_arr(e) for e in x)
+    return False
+
+
+def _arr_tree_equal(a, b):
+    """Exact (bitwise) structural+value equality for an array-tree.
+
+    Used for data-independence detection: a design is data-independent only
+    if it is *byte-identical* across resamples, not merely close (a loose
+    tolerance is exactly what risked a silent-wrong-results false positive).
+    """
+    if _is_arr(a) and _is_arr(b):
+        a, b = np.asarray(a), np.asarray(b)
+        return a.shape == b.shape and np.array_equal(a, b)
+    if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+        return len(a) == len(b) and all(_arr_tree_equal(x, y) for x, y in zip(a, b))
+    if _is_arr(a) or _is_arr(b):
+        return False
+    return a is None and b is None if (a is None or b is None) else True
+
+
+def _arr_tree_sig(x):
+    """Stackable-shape signature; mismatched signatures => ragged => no batch."""
+    if _is_arr(x):
+        return ("a", tuple(np.shape(x)))
+    if isinstance(x, (list, tuple)):
+        return ("l", tuple(_arr_tree_sig(e) for e in x))
+    if x is None:
+        return ("n",)
+    return ("s",)
+
+
+def _stack_arr_tree(items):
+    """Stack a list of matching array-trees along a new leading (replicate) axis."""
+    first = items[0]
+    if _is_arr(first):
+        return jnp.stack([jnp.asarray(t) for t in items])
+    if isinstance(first, (list, tuple)):
+        return [_stack_arr_tree([t[i] for t in items]) for i in range(len(first))]
+    return first  # None / scalar: identical across replicates by construction
+
+
+def _tree_in_axes(tree):
+    """vmap in_axes pytree: map axis 0 of every array leaf, broadcast others."""
+    if _is_arr(tree):
+        return 0
+    if isinstance(tree, list):
+        return [_tree_in_axes(e) for e in tree]
+    if isinstance(tree, tuple):
+        return tuple(_tree_in_axes(e) for e in tree)
+    return None
+
+
+def _tree_take(tree, sl):
+    """Slice the leading axis of every array leaf in *tree*."""
+    if _is_arr(tree):
+        return tree[sl]
+    if isinstance(tree, list):
+        return [_tree_take(e, sl) for e in tree]
+    if isinstance(tree, tuple):
+        return tuple(_tree_take(e, sl) for e in tree)
+    return tree
+
+
+def _chunked_batched(fn, betas, dyn_stacked, chunk_size):
+    """vmap ``fn(beta, dyn)`` over the replicate axis in memory-bounded chunks.
+
+    ``fn`` is jitted once; ``dyn_stacked`` is a (possibly empty) dict pytree
+    whose array leaves have a leading replicate axis.  With no dynamic args
+    this degenerates to ``vmap(fn)(betas)``.
+    """
+    n = betas.shape[0]
+    if dyn_stacked:
+        jitted = jax.jit(fn)
+        in_axes = (0, {k: _tree_in_axes(v) for k, v in dyn_stacked.items()})
+        out = []
+        for s in range(0, n, chunk_size):
+            e = min(s + chunk_size, n)
+            dyn_c = {k: _tree_take(v, slice(s, e)) for k, v in dyn_stacked.items()}
+            out.append(np.asarray(
+                jax.vmap(jitted, in_axes=in_axes)(betas[s:e], dyn_c)
+            ))
+        return np.concatenate(out, axis=0)
+
+    jitted = jax.jit(lambda beta: fn(beta, {}))
+    out = []
+    for s in range(0, n, chunk_size):
+        e = min(s + chunk_size, n)
+        out.append(np.asarray(jax.vmap(jitted, in_axes=(0,))(betas[s:e])))
+    return np.concatenate(out, axis=0)
+
+
+def _probe_indices(n, n_probe):
+    """Evenly spaced unique indices into ``range(n)`` (always includes 0)."""
+    if n <= n_probe:
+        return list(range(n))
+    return sorted(set(int(i) for i in np.linspace(0, n - 1, n_probe)))
+
+
+def _split_static_dynamic(orig_kw, probe_kws):
+    """Partition kernel kwargs into static vs replicate-varying.
+
+    Non-array leaves (``predict_fn``, ``transform``, ``compose``, ``phi_inv``,
+    ``aggregate``) are *always* static and taken from the original estimand:
+    the ``supports_jax_autodiff`` gate guarantees ``predict`` is a pure array
+    function (identical math across refits — often the same cached object),
+    and the composition/scale callables are fixed by the estimand spec, not
+    the data.  Array leaves are dynamic iff they are not byte-identical across
+    the original and every probed replicate.
+    """
+    dynamic_keys = []
+    for k, v in orig_kw.items():
+        if not _has_arr(v):
+            continue  # callable / str / None -> static from original
+        if not all(_arr_tree_equal(v, pk.get(k)) for pk in probe_kws):
+            dynamic_keys.append(k)
+    static_kwargs = {k: v for k, v in orig_kw.items() if k not in dynamic_keys}
+    return static_kwargs, dynamic_keys
+
+
+def _run_fast_path(kernel_info, refitted, h_factory, config,
+                   ci_method, jax_diffable, chunk_size):
+    """Batched (JIT + chunked vmap) replacement for the per-replicate loop.
+
+    Returns ``raw_results`` (one entry per replicate, in ``refitted`` order:
+    an ``(theta_b, se_b)`` tuple for successes, the exception for failures)
+    or ``None`` to signal the caller to use the legacy loop.  Any structural
+    surprise (probe failure, non-kernel rebuild, ragged shapes, JAX error)
+    returns ``None`` so the loop produces the authoritative result — the
+    batched engine is never allowed to silently diverge.
+    """
+    kernel_fn = kernel_info["kernel_fn"]
+    if kernel_info["args"]:
+        return None  # unexpected positional binding; let the loop handle it
+
+    failed = [(b, exc) for b, _, exc in refitted if exc is not None]
+    successful = [(b, na) for b, na, exc in refitted if exc is None]
+    if not successful:
+        return None  # let the loop run the failure-threshold accounting
+
+    orig_kw = dict(kernel_info["keywords"])
+
+    # ---- robust data-independence probe: exact equality over k replicates --
+    probe_cache = {}
+    probe_kws = []
+    for idx in _probe_indices(len(successful), 8):
+        _, adp = successful[idx]
+        try:
+            info = split_kernel_partial(h_factory(adp))
+        except Exception:
+            return None
+        if (info is None or info["kernel_fn"] is not kernel_fn
+                or info["args"]):
+            return None
+        probe_cache[idx] = info
+        probe_kws.append(info["keywords"])
+    if any(set(pk) != set(orig_kw) for pk in probe_kws):
+        return None
+
+    static_kwargs, dynamic_keys = _split_static_dynamic(orig_kw, probe_kws)
+
+    betas = []
+    if not dynamic_keys:
+        # Data-independent: design is byte-stable across resamples.  No
+        # per-replicate h_factory rebuild (the W1 win); only beta varies.
+        for _, adp in successful:
+            betas.append(adp.coefficients())
+        dyn_stacked = {}
+    elif kernel_fn is slope_kernel:
+        # Data-coupled slope: slope_kernel evaluates an internal ±eps finite
+        # difference with eps≈1e-6.  Under JAX's default float32 the
+        # (mu_p - mu_m) subtraction catastrophically cancels, and a batched
+        # (XLA-fused) reduction over per-replicate Xp/Xm diverges from the
+        # eager per-replicate loop well beyond the FP-identity tolerance
+        # (observed ~6%).  The loop stays authoritative for this case.
+        # (Data-*independent* slopes — fixed Xp/Xm — are exact and handled
+        # by the branch above; only the data-coupled variant is excluded.)
+        return None
+    else:
+        # Data-coupled: the design genuinely varies, so it must be rebuilt
+        # per replicate (unavoidable, and exactly what the loop does).  Pull
+        # the dynamic args straight from h_factory(new_adapter) so the result
+        # is identical-by-construction to h_b(beta_b) — including matching's
+        # rematch(), expand_scenario, and grid layout.
+        dyn_lists = {k: [] for k in dynamic_keys}
+        sig = None
+        for i, (_b, adp) in enumerate(successful):
+            info = probe_cache.get(i)
+            if info is None:
+                try:
+                    info = split_kernel_partial(h_factory(adp))
+                except Exception:
+                    return None
+                if (info is None or info["kernel_fn"] is not kernel_fn
+                        or info["args"] or set(info["keywords"]) != set(orig_kw)):
+                    return None
+            kwb = info["keywords"]
+            # Static array leaves must really be invariant; bail (to the
+            # loop) rather than batch a wrong constant if a probe missed it.
+            for k, v in static_kwargs.items():
+                if _has_arr(v) and not _arr_tree_equal(v, kwb.get(k)):
+                    return None
+            cur = tuple(_arr_tree_sig(kwb[k]) for k in dynamic_keys)
+            if sig is None:
+                sig = cur
+            elif cur != sig:
+                return None  # ragged across replicates -> loop
+            betas.append(adp.coefficients())
+            for k in dynamic_keys:
+                dyn_lists[k].append(kwb[k])
+        dyn_stacked = {k: _stack_arr_tree(dyn_lists[k]) for k in dynamic_keys}
+
+    betas = jnp.stack([jnp.asarray(b) for b in betas])
+
+    def _value(beta, dyn):
+        return kernel_fn(beta, **static_kwargs, **dyn)
+
+    try:
+        thetas = _chunked_batched(_value, betas, dyn_stacked, chunk_size)
+    except (ValueError, TypeError, jax.errors.JAXTypeError):
+        return None
+
+    se_draws = None
+    if ci_method == "studentized" and jax_diffable:
+        is_vector = np.ndim(thetas) > 1
+        gfn = jax.jacobian(kernel_fn, argnums=0) if is_vector else jax.grad(kernel_fn, argnums=0)
+
+        def _grad(beta, dyn):
+            return gfn(beta, **static_kwargs, **dyn)
+
+        try:
+            grads = _chunked_batched(_grad, betas, dyn_stacked, chunk_size)
+            Sigma_stack = jnp.stack(
+                [jnp.asarray(na.covariance()) for _, na in successful]
+            )
+            se_draws = np.asarray(
+                jax.vmap(delta_se, in_axes=(0, 0))(jnp.asarray(grads), Sigma_stack)
+            )
+        except (ValueError, TypeError, jax.errors.JAXTypeError,
+                np.linalg.LinAlgError):
+            se_draws = None
+
+    result_map = {}
+    for i, (b, _) in enumerate(successful):
+        se_b = se_draws[i] if (se_draws is not None) else None
+        result_map[b] = (np.asarray(thetas[i]), se_b)
+    for b, exc in failed:
+        result_map[b] = exc
+    return [result_map[b] for b, _, _ in refitted]
 
 
 def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=None, h_factory=None):
@@ -458,35 +773,64 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
         if isinstance(h_probe, partial) and getattr(h_probe.func, "__pymargins_kernel__", False):
             _kernel_grad_fn = jax.grad(h_probe.func, argnums=0)
 
+    # ------------------------------------------------------------------
+    # Fast path: JIT + chunked vmap over stacked replicates.
+    #
+    # Any eligible single-atom kernel partial is batched, at *any* scenario
+    # (fixed atexog, at="typical" with free covariates, AME at="overall",
+    # and AME under matching).  The evaluation design is either reused
+    # (data-independent, detected by exact byte-equality over several
+    # probed replicates) or rebuilt per replicate via the same h_factory
+    # the loop uses (data-coupled) — so the batched result is identical-by-
+    # construction to h_b(beta_b).  Any structural surprise returns None and
+    # the legacy loop below produces the authoritative result.
+    # ------------------------------------------------------------------
     raw_results = []
-    for b, new_adapter, refit_exc in refitted:
-        if refit_exc is not None:
-            raw_results.append(refit_exc)
-            continue
-        try:
-            h_b = h_factory(new_adapter)
-            beta_b = new_adapter.coefficients()
-            theta_b = np.asarray(h_b(beta_b))
+    fast_path = _try_fast_path(h, adapter, config)
+    if fast_path is not None:
+        bootstrap_config = config.bootstrap_config or {}
+        chunk_size = bootstrap_config.get("vmap_chunk_size", 256)
+        batched = _run_fast_path(
+            fast_path, refitted, h_factory, config,
+            ci_method, jax_diffable, chunk_size,
+        )
+        if batched is None:
+            fast_path = None
+        else:
+            raw_results = batched
 
-            se_b = None
-            if ci_method == "studentized" and jax_diffable:
-                try:
-                    Sigma_b = new_adapter.covariance()
-                    if _kernel_grad_fn is not None and isinstance(h_b, partial):
-                        grad_b = _kernel_grad_fn(beta_b, *h_b.args, **h_b.keywords)
-                    else:
-                        grad_b = gradient(
-                            h_b, beta_b,
-                            backend=config.gradient_backend,
-                            fd_step=config.fd_step,
-                        )
-                    se_b = np.asarray(delta_se(grad_b, Sigma_b))
-                except (ValueError, TypeError, jax.errors.JAXTypeError, np.linalg.LinAlgError):
-                    se_b = None
+    if fast_path is None:
+        # Legacy per-replicate loop: non-autodiff adapters, multi-atom
+        # (over=/grid) estimands, non-kernel composes, or any structural
+        # surprise the batched path declined. Authoritative result.
+        for b, new_adapter, refit_exc in refitted:
+            if refit_exc is not None:
+                raw_results.append(refit_exc)
+                continue
+            try:
+                h_b = h_factory(new_adapter)
+                beta_b = new_adapter.coefficients()
+                theta_b = np.asarray(h_b(beta_b))
 
-            raw_results.append((theta_b, se_b))
-        except (ValueError, RuntimeError, np.linalg.LinAlgError) as exc:
-            raw_results.append(exc)
+                se_b = None
+                if ci_method == "studentized" and jax_diffable:
+                    try:
+                        Sigma_b = new_adapter.covariance()
+                        if _kernel_grad_fn is not None and isinstance(h_b, partial):
+                            grad_b = _kernel_grad_fn(beta_b, *h_b.args, **h_b.keywords)
+                        else:
+                            grad_b = gradient(
+                                h_b, beta_b,
+                                backend=config.gradient_backend,
+                                fd_step=config.fd_step,
+                            )
+                        se_b = np.asarray(delta_se(grad_b, Sigma_b))
+                    except (ValueError, TypeError, jax.errors.JAXTypeError, np.linalg.LinAlgError):
+                        se_b = None
+
+                raw_results.append((theta_b, se_b))
+            except (ValueError, RuntimeError, np.linalg.LinAlgError) as exc:
+                raw_results.append(exc)
 
     # Collect results
     h_draws_inf = []
@@ -566,7 +910,7 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
 
     elif ci_method == "bca":
         bca_z0, bca_a = _compute_bca_params(
-            h_draws_inf, estimate, adapter, h_factory, data,
+            h_draws_inf, estimate, adapter, h_factory, h, data,
             cluster_ids, block_size, bootstrap_config,
         )
         lower, upper = _bca_confint(
@@ -620,11 +964,23 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
     Sigma_hat = config.cov_params if config.cov_params is not None else adapter.covariance()
     if config.diagnostics and is_jax_differentiable(h, beta_hat):
         try:
+            # Reuse the jitted kernel for κ so the forward evaluation is
+            # compiled, avoiding an extra eager trace.
+            kernel_info_kappa = split_kernel_partial(h)
+            if kernel_info_kappa is not None:
+                kernel_fn_kappa = kernel_info_kappa["kernel_fn"]
+                static_kwargs_kappa = kernel_info_kappa["keywords"]
+                def h_jitted(beta):
+                    return kernel_fn_kappa(beta, **static_kwargs_kappa)
+                h_for_kappa = jax.jit(h_jitted)
+            else:
+                h_for_kappa = h
+
             if jnp.ndim(estimate) == 0:
-                k = kappa(h, beta_hat, Sigma_hat,
+                k = kappa(h_for_kappa, beta_hat, Sigma_hat,
                           backend=config.gradient_backend, fd_step=config.fd_step)
             else:
-                k = kappa_vector(h, beta_hat, Sigma_hat,
+                k = kappa_vector(h_for_kappa, beta_hat, Sigma_hat,
                                  backend=config.gradient_backend, fd_step=config.fd_step)
         except (ValueError, TypeError, jax.errors.JAXTypeError) as exc:
             warnings.warn(f"Bootstrap kappa diagnostic failed: {exc}", RuntimeWarning)

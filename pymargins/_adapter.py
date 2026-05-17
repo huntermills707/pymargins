@@ -494,8 +494,8 @@ class LinearPredictionAdapter(ModelAdapter):
         """Recommend pure autodiff for linear adapters."""
         return "autodiff"
 
+    @staticmethod
     def predict(
-        self,
         beta: jnp.ndarray,
         X: jnp.ndarray,
         offset: Optional[jnp.ndarray] = None,

@@ -10,6 +10,7 @@ prediction in pure JAX so autodiff is exact.
 """
 
 from __future__ import annotations
+from functools import lru_cache
 from typing import Optional, Any
 import jax.numpy as jnp
 import numpy as np
@@ -120,25 +121,10 @@ class StatsmodelsMNLogitAdapter(ModelAdapter):
     # Prediction
     # -----------------------------------------------------------------------
 
-    def predict(
-        self,
-        beta: jnp.ndarray,
-        X: jnp.ndarray,
-        offset: Optional[jnp.ndarray] = None,
-    ) -> jnp.ndarray:
-        X_arr = jnp.asarray(X)
-        n_obs, p = X_arr.shape
-        K = self._n_outcomes
-        # Unflatten beta into (p, K-1) matrix using Fortran order
-        B = beta.reshape(p, K - 1, order="F")
-        eta = X_arr @ B  # (n_obs, K-1)
-        # Reference category has zero linear predictor
-        eta_full = jnp.concatenate([jnp.zeros((n_obs, 1)), eta], axis=1)  # (n_obs, K)
-        # Softmax
-        eta_max = jnp.max(eta_full, axis=1, keepdims=True)
-        exp_eta = jnp.exp(eta_full - eta_max)
-        probs = exp_eta / jnp.sum(exp_eta, axis=1, keepdims=True)
-        return probs
+    @property
+    def predict(self):
+        """Identity-stable predict callable for JAX compilation caching."""
+        return _mnlogit_predict(self._n_outcomes)
 
     # -----------------------------------------------------------------------
     # Design matrix construction
@@ -218,3 +204,29 @@ class StatsmodelsMNLogitAdapter(ModelAdapter):
                 exog_df.insert(0, "const", 1.0)
         new_results = sm.MNLogit(endog, exog_df).fit(disp=False)
         return StatsmodelsMNLogitAdapter(new_results, training_data=resampled_data)
+
+
+@lru_cache(maxsize=None)
+def _mnlogit_predict(n_outcomes: int):
+    """Cached predict factory so JAX sees the same callable across refits."""
+
+    def predict(
+        beta: jnp.ndarray,
+        X: jnp.ndarray,
+        offset: Optional[jnp.ndarray] = None,
+    ) -> jnp.ndarray:
+        X_arr = jnp.asarray(X)
+        n_obs, p = X_arr.shape
+        K = n_outcomes
+        # Unflatten beta into (p, K-1) matrix using Fortran order
+        B = beta.reshape(p, K - 1, order="F")
+        eta = X_arr @ B  # (n_obs, K-1)
+        # Reference category has zero linear predictor
+        eta_full = jnp.concatenate([jnp.zeros((n_obs, 1)), eta], axis=1)  # (n_obs, K)
+        # Softmax
+        eta_max = jnp.max(eta_full, axis=1, keepdims=True)
+        exp_eta = jnp.exp(eta_full - eta_max)
+        probs = exp_eta / jnp.sum(exp_eta, axis=1, keepdims=True)
+        return probs
+
+    return predict
