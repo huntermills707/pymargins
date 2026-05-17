@@ -10,6 +10,9 @@ kernelspec:
   name: python3
 ---
 
+# Elasticities and semi-elasticities
+
+
 ```{code-cell} python
 import numpy as np
 import pandas as pd
@@ -31,7 +34,6 @@ fit = smf.glm("y ~ x + female", data=df,
 m = Margins.log_scale(fit, at="overall")
 ```
 
-# Elasticities and semi-elasticities
 
 `dydx` returns the level derivative. The other three elasticity flavors
 correspond to the standard Stata `dyex` / `eyex` / `eydx` methods —

@@ -10,6 +10,9 @@ kernelspec:
   name: python3
 ---
 
+# Linear contrasts with `contrasts`
+
+
 ```{code-cell} python
 import numpy as np
 import pandas as pd
@@ -38,7 +41,6 @@ fit = smf.glm("y ~ age + female + treated + C(region) + C(group) + preexist", da
 m = Margins.log_scale(fit, at="overall")
 ```
 
-# Linear contrasts with `contrasts`
 
 `Margins.contrasts` forms a **weighted sum of scenario predictions on the
 inference scale**.  It is the workhorse for risk differences, risk

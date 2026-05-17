@@ -10,6 +10,9 @@ kernelspec:
   name: python3
 ---
 
+# scikit-learn models
+
+
 ```{code-cell} python
 import numpy as np
 import pandas as pd
@@ -37,7 +40,6 @@ df["y"] = (
 )
 ```
 
-# scikit-learn models
 
 `pymargins` supports scikit-learn estimators through a bootstrap-only
 adapter.  Because sklearn models do not expose a parametric coefficient

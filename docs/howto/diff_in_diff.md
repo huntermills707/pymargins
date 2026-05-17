@@ -10,6 +10,9 @@ kernelspec:
   name: python3
 ---
 
+# Difference-in-differences on the response scale
+
+
 ```{code-cell} python
 import numpy as np
 import pandas as pd
@@ -34,7 +37,6 @@ fit = smf.glm("condX ~ C(group) * C(preexist) + age", data=df,
 m = Margins.linear_scale(fit, at="overall")
 ```
 
-# Difference-in-differences on the response scale
 
 For a 2×2 DiD on a nonlinear model, evaluate the four cells on the
 response scale and difference them. The interaction coefficient

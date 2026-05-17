@@ -10,6 +10,9 @@ kernelspec:
   name: python3
 ---
 
+# Discrete changes for binary / categorical regressors
+
+
 ```{code-cell} python
 import numpy as np
 import pandas as pd
@@ -35,7 +38,6 @@ fit = smf.glm("y ~ age + female + treated + C(region)", data=df,
 m = Margins.log_scale(fit, at="overall")
 ```
 
-# Discrete changes for binary / categorical regressors
 
 `dydx` on a binary regressor is a derivative — it evaluates the slope
 at the midpoint of the 0→1 jump (or averages midpoints over the

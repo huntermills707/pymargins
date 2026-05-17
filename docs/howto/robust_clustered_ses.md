@@ -10,6 +10,9 @@ kernelspec:
   name: python3
 ---
 
+# Robust and clustered standard errors
+
+
 ```{code-cell} python
 import numpy as np
 import pandas as pd
@@ -33,7 +36,6 @@ fit = smf.glm("y ~ age + female + treated", data=df,
 m = Margins.log_scale(fit, at="overall")
 ```
 
-# Robust and clustered standard errors
 
 Pass the variance estimator at session construction. The session
 treats `vcov=` as a session-level commitment — every subsequent call

@@ -10,6 +10,9 @@ kernelspec:
   name: python3
 ---
 
+# The scenarios model — `at` vs `atexog`
+
+
 ```{code-cell} python
 import numpy as np
 import pandas as pd
@@ -32,7 +35,6 @@ fit = smf.glm("y ~ age + female + treated", data=df,
 m = Margins.log_scale(fit, at="overall")
 ```
 
-# The scenarios model — `at` vs `atexog`
 
 Two knobs control *where in covariate space* a margin is evaluated.
 They live at different levels of the API.

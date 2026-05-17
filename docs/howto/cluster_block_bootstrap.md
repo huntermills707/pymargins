@@ -10,6 +10,9 @@ kernelspec:
   name: python3
 ---
 
+# Cluster and block bootstrap
+
+
 ```{code-cell} python
 import numpy as np
 import pandas as pd
@@ -28,7 +31,6 @@ df["y"] = rng.binomial(1, 1 / (1 + np.exp(-(-1 + 0.5 * df["x"]))))
 fit = smf.glm("y ~ x", data=df, family=sm.families.Binomial()).fit()
 ```
 
-# Cluster and block bootstrap
 
 For panel / multilevel data, pass `cluster=` at session construction:
 

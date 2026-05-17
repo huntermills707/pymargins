@@ -10,6 +10,9 @@ kernelspec:
   name: python3
 ---
 
+# Nonlinear estimands with `evaluate`
+
+
 ```{code-cell} python
 import numpy as np
 import pandas as pd
@@ -35,7 +38,6 @@ fit = smf.glm("y ~ age + treatment + dose + C(policy)", data=df,
 m = Margins.linear_scale(fit, at="overall")
 ```
 
-# Nonlinear estimands with `evaluate`
 
 `Margins.evaluate` is the escape hatch for estimands that cannot be written
 as a weighted sum of scenario predictions.  Use it for reciprocals,

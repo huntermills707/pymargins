@@ -10,6 +10,9 @@ kernelspec:
   name: python3
 ---
 
+# Plotting predictions and effects
+
+
 ```{code-cell} python
 import numpy as np
 import pandas as pd
@@ -35,7 +38,6 @@ fit = smf.glm("y ~ age + female + treated + C(region)", data=df,
 m = Margins.log_scale(fit, at="overall")
 ```
 
-# Plotting predictions and effects
 
 `MarginsResult.to_frame()` returns a plot-ready table. Combine with
 matplotlib for prediction curves and forest plots.

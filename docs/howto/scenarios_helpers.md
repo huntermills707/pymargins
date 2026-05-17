@@ -10,6 +10,9 @@ kernelspec:
   name: python3
 ---
 
+# Scenario helpers
+
+
 ```{code-cell} python
 import numpy as np
 import pandas as pd
@@ -38,7 +41,6 @@ fit = smf.glm("y ~ age + female + treated + C(region) + C(group) + preexist", da
 m = Margins.log_scale(fit, at="overall")
 ```
 
-# Scenario helpers
 
 The `pymargins.scenarios` module ships factories for common contrast
 patterns so you don't have to hand-build dicts and weight vectors.

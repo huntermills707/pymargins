@@ -10,6 +10,9 @@ kernelspec:
   name: python3
 ---
 
+# Grid predictions
+
+
 ```{code-cell} python
 import numpy as np
 import pandas as pd
@@ -31,7 +34,6 @@ fit = smf.glm("y ~ age + treatment", data=df,
 m = Margins.log_scale(fit, at="overall")
 ```
 
-# Grid predictions
 
 For a Cartesian product of counterfactual values, use `grid` (or pass
 a list to `atexog`):

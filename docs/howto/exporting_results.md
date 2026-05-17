@@ -10,6 +10,9 @@ kernelspec:
   name: python3
 ---
 
+# Exporting results
+
+
 ```{code-cell} python
 import numpy as np
 import pandas as pd
@@ -31,7 +34,6 @@ fit = smf.glm("y ~ age + female", data=df,
 m = Margins.log_scale(fit, at="overall")
 ```
 
-# Exporting results
 
 Every `MarginsResult` can be printed, framed, or serialized to LaTeX
 / HTML for inclusion in papers and reports.

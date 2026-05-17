@@ -10,6 +10,9 @@ kernelspec:
   name: python3
 ---
 
+# Reading and controlling the κ fallback
+
+
 ```{code-cell} python
 import numpy as np
 import pandas as pd
@@ -32,7 +35,6 @@ fit = smf.glm("y ~ age + female + treated", data=df,
 m = Margins.log_scale(fit, at="overall")
 ```
 
-# Reading and controlling the κ fallback
 
 Every result records the inference path actually used. When the
 session's κ threshold is exceeded, delta auto-falls-back to
