@@ -43,6 +43,7 @@ myst_heading_anchors = 3
 # for CI), and 'off' disables execution entirely.  Override with the
 # PYMARGINS_DOCS_EXEC environment variable.
 nb_execution_mode = os.getenv("PYMARGINS_DOCS_EXEC", "auto")
+nb_execution_cache_path = os.path.join(os.path.dirname(__file__), ".jupyter_cache")
 nb_execution_timeout = 180
 nb_execution_raise_on_error = True
 nb_execution_show_tb = True

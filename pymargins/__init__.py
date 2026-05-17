@@ -91,6 +91,13 @@ __all__ = [
     "all_pairwise",
     # Matching support
     "PysmatchClient",
+    # Package metadata
+    "__version__",
 ]
 
-__version__ = "0.0.1"
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
+
+try:
+    __version__ = _pkg_version("pymargins")
+except PackageNotFoundError:  # not installed (e.g. running from a source tree)
+    __version__ = "0.0.0+unknown"

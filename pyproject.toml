@@ -19,6 +19,8 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Mathematics",
 ]
 
@@ -73,9 +75,9 @@ test = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/huntermill707/pymargins"
-Documentation = "https://github.com/huntermill707/pymargins#readme"
-Repository = "https://github.com/huntermill707/pymargins"
+Homepage = "https://github.com/huntermills707/pymargins"
+Documentation = "https://pymargins.readthedocs.io"
+Repository = "https://github.com/huntermills707/pymargins"
 
 [tool.hatch.build.targets.wheel]
 packages = ["pymargins"]
