@@ -161,7 +161,17 @@ class SklearnBootstrapAdapter(BootstrapOnlyAdapter):
     ) -> jnp.ndarray:
         """Predict using the fitted sklearn model, ignoring ``beta``."""
         X_np = np.asarray(X)
-        preds = self.model.predict(X_np)
+        # sklearn models fitted with a DataFrame warn when predict() receives
+        # a bare array ("X does not have valid feature names").  Re-wrap in a
+        # DataFrame using the model's own recorded feature names so the
+        # warning is suppressed without risking a name mismatch when a formula
+        # is active.
+        model_features = getattr(self.model, "feature_names_in_", None)
+        if model_features is not None and X_np.ndim == 2:
+            X_in = pd.DataFrame(X_np, columns=list(model_features))
+        else:
+            X_in = X_np
+        preds = self.model.predict(X_in)
         return jnp.asarray(preds)
 
     # -----------------------------------------------------------------------
@@ -239,8 +249,21 @@ class SklearnBootstrapAdapter(BootstrapOnlyAdapter):
         if self._formula_spec is None or self._training_data is None:
             return
         X_form = np.asarray(self._formula_spec.get_model_matrix(self._training_data))
+        X_orig = np.asarray(self._X_train)
+        model_features = getattr(self.model, "feature_names_in_", None)
+        # Wrap in DataFrame when shapes match to avoid sklearn's feature-name
+        # warning.  If shapes differ, pass the array through so sklearn raises
+        # its usual column-count error, which we translate below.
+        if model_features is not None and X_form.shape[1] == len(model_features):
+            X_form_in = pd.DataFrame(X_form, columns=list(model_features))
+        else:
+            X_form_in = X_form
+        if model_features is not None and X_orig.shape[1] == len(model_features):
+            X_orig_in = pd.DataFrame(X_orig, columns=list(model_features))
+        else:
+            X_orig_in = X_orig
         try:
-            preds_form = self.model.predict(X_form)
+            preds_form = self.model.predict(X_form_in)
         except ValueError as exc:
             if "feature" in str(exc).lower():
                 raise ValueError(
@@ -254,7 +277,7 @@ class SklearnBootstrapAdapter(BootstrapOnlyAdapter):
                     "'Intercept' column."
                 ) from exc
             raise
-        preds_orig = self.model.predict(np.asarray(self._X_train))
+        preds_orig = self.model.predict(X_orig_in)
         if len(preds_form) != len(preds_orig):
             return
         max_diff = float(np.max(np.abs(preds_form - preds_orig)))
