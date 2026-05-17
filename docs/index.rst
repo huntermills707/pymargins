@@ -9,7 +9,7 @@ fallback when the delta method is unsafe.
 session, then computes adjusted predictions, slopes, contrasts, and
 arbitrary differentiable estimands — with uncertainty from the delta
 method, Krinsky–Robb simulation, or bootstrap — across statsmodels,
-linearmodels, and lifelines model classes.
+linearmodels, lifelines, and scikit-learn model classes.
 
 .. toctree::
     :maxdepth: 1
@@ -35,6 +35,7 @@ linearmodels, and lifelines model classes.
     tutorials/contrasts_and_did
     tutorials/inference_methods
     tutorials/scales_and_kappa
+    tutorials/sklearn_models
 
 .. toctree::
     :maxdepth: 1
@@ -57,6 +58,7 @@ linearmodels, and lifelines model classes.
     howto/evaluate
     howto/contrasts
     howto/contrasts_vs_evaluate
+    howto/formula_interface
 
 .. toctree::
     :maxdepth: 2

@@ -12,3 +12,9 @@ jax
 jaxlib
 lifelines
 linearmodels
+scikit-learn>=1.3
+openpyxl>=3.0
+joblib>=1.0
+polars>=1.0
+pyarrow>=10.0
+pysmatch>=2.1

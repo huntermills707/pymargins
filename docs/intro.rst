@@ -122,6 +122,14 @@ Out of the box, with adapter auto-detection:
 - **lifelines**: CoxPHFitter, CoxTimeVaryingFitter, AAF, CRC splines,
   Weibull / LogLogistic / LogNormal / GeneralizedGamma /
   PiecewiseExponential AFTs.
+- **scikit-learn**: Bootstrap-only inference for any estimator with
+  ``fit()`` and ``predict()``.  Linear models should use statsmodels
+  or linearmodels instead; see :doc:`tutorials/sklearn_models`.
+
+Models fit without native formula support (array-fit statsmodels,
+linearmodels, sklearn) can still use interactions, polynomials, and
+splines by passing ``formula=`` and ``data=`` to ``Margins``; see
+:doc:`howto/formula_interface`.
 
 Adapters for other model classes can be registered via
 :func:`~pymargins.register_adapter`; see
@@ -145,6 +153,8 @@ Where to next
   bootstrap.
 - :doc:`tutorials/scales_and_kappa` — picking an inference scale and
   reading the κ diagnostic.
+- :doc:`tutorials/sklearn_models` — bootstrap inference for
+  scikit-learn estimators.
 
 **How-to guides — task-focused recipes.**
 
@@ -160,6 +170,7 @@ Where to next
 - Extension and export: :doc:`howto/custom_adapter`,
   :doc:`howto/matching`, :doc:`howto/exporting_results`,
   :doc:`howto/plotting`.
+- Formula support for array-fit models: :doc:`howto/formula_interface`.
 
 **Explanations — theory and design.**
 
