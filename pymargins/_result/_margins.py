@@ -1812,8 +1812,9 @@ def compose_results(
             )
 
         # Squeeze scalar-output shapes to 0-d for consistency with ordinary
-        # scalar results.
-        if combined_grad.shape[0] == 1:
+        # scalar results.  Only squeeze when fn genuinely returns a scalar,
+        # not a length-1 vector.
+        if combined_grad.shape[0] == 1 and composed_inf.ndim == 0:
             combined_grad = combined_grad[0]
             composed_inf = composed_inf.item() if hasattr(composed_inf, 'item') else float(composed_inf)
 
@@ -1883,6 +1884,22 @@ def compose_results(
         for i in range(1, len(results)):
             _check_draws_match(results[0], results[i])
 
+        # Warn if bootstrap results used BCa/studentized — composed
+        # percentile CIs are not valid for those methods without
+        # recomputing z0/a/t* on the derived quantity.
+        ci_methods = {r.ci_method for r in results if r.ci_method}
+        invalid_for_compose = {"bca", "studentized"}
+        bad = ci_methods & invalid_for_compose
+        if bad:
+            warnings.warn(
+                f"Bootstrap composition uses percentile CIs, but input results "
+                f"carry {sorted(bad)}.  BCa/studentized intervals are not "
+                f"generally valid on a derived quantity without recomputing "
+                f"acceleration/studentization on the composition.  Use "
+                f"evaluate() if you need those CI methods.",
+                UserWarning, stacklevel=2,
+            )
+
         draws_list = [np.asarray(r.draws_inf) for r in results]
         # Ensure all are 2-D (n_draws, n_components)
         for i, d in enumerate(draws_list):
@@ -1900,23 +1917,32 @@ def compose_results(
         composed_draws_inf = []
         for b in range(n_draws):
             theta_b = jnp.asarray(stacked[b, :, 0])  # (n_results,) for scalar
-            composed_draws_inf.append(float(fn(theta_b)))
-        composed_draws_inf = np.array(composed_draws_inf)
+            val = fn(theta_b)
+            composed_draws_inf.append(np.asarray(val))
+        composed_draws_inf = np.stack(composed_draws_inf, axis=0)
+        # composed_draws_inf shape: (n_draws,) for scalar fn, (n_draws, m) for vector fn
 
-        se = float(np.std(composed_draws_inf, ddof=1))
-        alpha = (1.0 - level) / 2.0
-        lo_inf = float(np.quantile(composed_draws_inf, alpha))
-        hi_inf = float(np.quantile(composed_draws_inf, 1.0 - alpha))
+        if composed_draws_inf.ndim == 1:
+            se = float(np.std(composed_draws_inf, ddof=1))
+            alpha = (1.0 - level) / 2.0
+            lo_inf = float(np.quantile(composed_draws_inf, alpha))
+            hi_inf = float(np.quantile(composed_draws_inf, 1.0 - alpha))
+        else:
+            se_arr = np.std(composed_draws_inf, axis=0, ddof=1)
+            se = float(se_arr) if se_arr.ndim == 0 else np.asarray(se_arr)
+            alpha = (1.0 - level) / 2.0
+            lo_inf = np.quantile(composed_draws_inf, alpha, axis=0)
+            hi_inf = np.quantile(composed_draws_inf, 1.0 - alpha, axis=0)
 
         if phi is not None:
-            estimate_report = float(phi(composed_inf))
-            lower_report = float(phi(lo_inf))
-            upper_report = float(phi(hi_inf))
-            composed_draws = np.array([float(phi(d)) for d in composed_draws_inf])
+            estimate_report = np.asarray(phi(composed_inf))
+            lower_report = np.asarray(phi(lo_inf))
+            upper_report = np.asarray(phi(hi_inf))
+            composed_draws = np.asarray(phi(composed_draws_inf))
         else:
-            estimate_report = float(composed_inf)
-            lower_report = lo_inf
-            upper_report = hi_inf
+            estimate_report = np.asarray(composed_inf)
+            lower_report = np.asarray(lo_inf)
+            upper_report = np.asarray(hi_inf)
             composed_draws = composed_draws_inf
 
         from functools import reduce

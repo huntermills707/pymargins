@@ -967,3 +967,276 @@ def test_g7b_outcome_then_test_correct():
     pval = float(np.asarray(tr.pvalue).ravel()[0])
     assert np.isfinite(pval)
     assert 0.0 <= pval <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# Post-audit test-coverage gaps
+# ---------------------------------------------------------------------------
+
+
+def test_compose_results_delta_vector_output():
+    """compose_results with vector-output fn should produce vector result."""
+    from pymargins._result import MarginsResult, compose_results
+
+    sess = _make_mock_session()
+    cov = np.diag([0.01, 0.02])
+    r_a = MarginsResult(
+        estimate=1.0, std_error=0.1,
+        conf_int_lower=0.8, conf_int_upper=1.2,
+        method="delta", level=0.95, n_obs=100,
+        gradient=np.array([1.0, 0.0]),
+        cov_params=cov,
+        estimand_metadata={"labels": ["A"]}, session=sess,
+    )
+    r_b = MarginsResult(
+        estimate=0.5, std_error=0.1,
+        conf_int_lower=0.3, conf_int_upper=0.7,
+        method="delta", level=0.95, n_obs=100,
+        gradient=np.array([0.0, 1.0]),
+        cov_params=cov,
+        estimand_metadata={"labels": ["B"]}, session=sess,
+    )
+    # fn returns [a, b] — a 2-element vector
+    composed = compose_results(
+        [r_a, r_b],
+        fn=lambda theta: jnp.array([theta[0], theta[1]]),
+        label="[A, B]",
+    )
+    assert composed.estimate.shape == (2,)
+    assert composed.std_error.shape == (2,)
+    assert composed.gradient.shape == (2, 2)
+    np.testing.assert_allclose(composed.estimate, np.array([1.0, 0.5]), rtol=1e-5)
+
+
+def test_compose_results_simulation_vector_output():
+    """compose_results with vector-output fn on simulation draws."""
+    from pymargins._result import MarginsResult, compose_results
+
+    sess = _make_mock_session()
+    rng = np.random.default_rng(42)
+    draws = rng.normal(size=(100,))
+    r_a = MarginsResult(
+        estimate=1.0, std_error=0.1,
+        conf_int_lower=0.8, conf_int_upper=1.2,
+        method="simulation", level=0.95, n_obs=100,
+        draws=draws, draws_inf=draws,
+        cov_params=np.diag([0.01]),
+        estimand_metadata={"labels": ["A"]}, session=sess,
+    )
+    r_b = MarginsResult(
+        estimate=0.5, std_error=0.1,
+        conf_int_lower=0.3, conf_int_upper=0.7,
+        method="simulation", level=0.95, n_obs=100,
+        draws=draws, draws_inf=draws,
+        cov_params=np.diag([0.01]),
+        estimand_metadata={"labels": ["B"]}, session=sess,
+    )
+    composed = compose_results(
+        [r_a, r_b],
+        fn=lambda theta: jnp.array([theta[0], theta[1]]),
+    )
+    assert composed.estimate.shape == (2,)
+    assert composed.std_error.shape == (2,)
+    assert composed.draws_inf.shape == (100, 2)
+
+
+def test_compose_results_four_result_kappa_reduction():
+    """κ should reduce correctly over 4+ results."""
+    from pymargins._result import MarginsResult, compose_results
+
+    sess = _make_mock_session()
+    cov = np.diag([0.01])
+    results = []
+    for i in range(4):
+        results.append(MarginsResult(
+            estimate=float(i), std_error=0.1,
+            conf_int_lower=float(i) - 0.2, conf_int_upper=float(i) + 0.2,
+            method="delta", level=0.95, n_obs=100,
+            kappa=0.1 * (i + 1),
+            gradient=np.array([1.0]),
+            cov_params=cov,
+            estimand_metadata={"labels": [f"r{i}"]}, session=sess,
+        ))
+
+    composed = compose_results(results, fn=lambda theta: jnp.sum(theta))
+    assert composed.kappa == pytest.approx(0.4)
+
+
+def test_large_n_comp_simultaneous_ci():
+    """sup-t simultaneous CIs should work for large n_comp."""
+    rng = np.random.default_rng(42)
+    n_comp = 20
+    est = rng.standard_normal(n_comp)
+    se = np.ones(n_comp) * 0.2
+    cov = np.eye(n_comp) * 0.04
+
+    from pymargins._result import MarginsResult
+    r = MarginsResult(
+        estimate=est,
+        std_error=se,
+        conf_int_lower=est - 1.96 * se,
+        conf_int_upper=est + 1.96 * se,
+        method="delta",
+        level=0.95,
+        n_obs=100,
+        gradient=np.eye(n_comp),
+        cov_params=cov,
+        estimand_metadata={"labels": [f"c{i}" for i in range(n_comp)]},
+    )
+    lo, hi = r.conf_int(simultaneous=True)
+    # Simultaneous bands should be wider than pointwise
+    assert np.all(lo <= r.conf_int_lower)
+    assert np.all(hi >= r.conf_int_upper)
+    # Should have same shape as estimate
+    assert lo.shape == est.shape
+    assert hi.shape == est.shape
+
+
+def test_singular_covariance_simultaneous_ci():
+    """Delta simultaneous CIs should handle near-singular covariance."""
+    import warnings
+    n_comp = 3
+    est = np.array([1.0, 2.0, 3.0])
+    # Near-singular: third component is almost a linear combination
+    cov = np.array([[1.0, 0.5, 0.99],
+                    [0.5, 1.0, 0.99],
+                    [0.99, 0.99, 1.0]])
+    cov = (cov + cov.T) / 2.0 * 0.01
+
+    from pymargins._result import MarginsResult
+    r = MarginsResult(
+        estimate=est,
+        std_error=np.sqrt(np.diag(cov)),
+        conf_int_lower=est - 1.96 * np.sqrt(np.diag(cov)),
+        conf_int_upper=est + 1.96 * np.sqrt(np.diag(cov)),
+        method="delta",
+        level=0.95,
+        n_obs=100,
+        gradient=np.eye(n_comp),
+        cov_params=cov,
+        estimand_metadata={"labels": ["a", "b", "c"]},
+    )
+    # Should not raise; suppress PSD warning from near-singular test matrix
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        lo, hi = r.conf_int(simultaneous=True)
+    assert np.all(np.isfinite(lo))
+    assert np.all(np.isfinite(hi))
+
+
+def test_bootstrap_composition_warns_on_bca():
+    """Composing BCa bootstrap results should emit a UserWarning."""
+    from pymargins._result import MarginsResult, compose_results
+
+    sess = _make_mock_session()
+    draws = np.random.default_rng(42).normal(size=(50,))
+    r_a = MarginsResult(
+        estimate=1.0, std_error=0.1,
+        conf_int_lower=0.8, conf_int_upper=1.2,
+        method="bootstrap", level=0.95, n_obs=100,
+        draws=draws, draws_inf=draws,
+        cov_params=np.diag([0.01]),
+        estimand_metadata={"labels": ["A"]}, session=sess,
+        resample_bank_id="bank1",
+        ci_method="bca",
+    )
+    r_b = MarginsResult(
+        estimate=0.5, std_error=0.1,
+        conf_int_lower=0.3, conf_int_upper=0.7,
+        method="bootstrap", level=0.95, n_obs=100,
+        draws=draws, draws_inf=draws,
+        cov_params=np.diag([0.01]),
+        estimand_metadata={"labels": ["B"]}, session=sess,
+        resample_bank_id="bank1",
+        ci_method="percentile",
+    )
+    with pytest.warns(UserWarning, match="percentile CIs"):
+        compose_results([r_a, r_b], fn=lambda theta: theta[0] / theta[1])
+
+
+def test_outcome_then_conf_int_on_simulation_multi_outcome():
+    """.conf_int() after .outcome() on simulation multi-outcome result."""
+    import statsmodels.formula.api as smf
+
+    rng = np.random.default_rng(42)
+    n = 200
+    df = pd.DataFrame({
+        "x1": rng.standard_normal(n),
+        "x2": rng.standard_normal(n),
+        "treatment": rng.binomial(1, 0.5, n),
+    })
+    eta0 = 0.5 + 0.3 * df["x1"] - 0.2 * df["x2"]
+    eta1 = 0.2 - 0.1 * df["x1"] + 0.4 * df["treatment"]
+    logits = np.column_stack([np.zeros(n), eta0, eta1])
+    probs = np.exp(logits - logits.max(axis=1, keepdims=True))
+    probs /= probs.sum(axis=1, keepdims=True)
+    df["y"] = np.array([rng.choice(3, p=p) for p in probs])
+
+    fit = smf.mnlogit("y ~ x1 + x2 + treatment", data=df).fit(disp=False)
+    m = Margins.linear_scale(fit, method="simulation", n_sim=200, rng_seed=42)
+    pred = m.predict()
+    sliced = pred.outcome(1)
+
+    # Should not raise and should return finite bounds
+    lo, hi = sliced.conf_int()
+    assert np.isfinite(float(np.asarray(lo).ravel()[0]))
+    assert np.isfinite(float(np.asarray(hi).ravel()[0]))
+
+
+def test_outcome_then_test_on_bootstrap_multi_outcome():
+    """.test() after .outcome() on bootstrap multi-outcome result."""
+    import statsmodels.formula.api as smf
+
+    rng = np.random.default_rng(42)
+    n = 200
+    df = pd.DataFrame({
+        "x1": rng.standard_normal(n),
+        "x2": rng.standard_normal(n),
+        "treatment": rng.binomial(1, 0.5, n),
+    })
+    eta0 = 0.5 + 0.3 * df["x1"] - 0.2 * df["x2"]
+    eta1 = 0.2 - 0.1 * df["x1"] + 0.4 * df["treatment"]
+    logits = np.column_stack([np.zeros(n), eta0, eta1])
+    probs = np.exp(logits - logits.max(axis=1, keepdims=True))
+    probs /= probs.sum(axis=1, keepdims=True)
+    df["y"] = np.array([rng.choice(3, p=p) for p in probs])
+
+    fit = smf.mnlogit("y ~ x1 + x2 + treatment", data=df).fit(disp=False)
+    m = Margins.linear_scale(fit, method="bootstrap", n_boot=50, rng_seed=42)
+    pred = m.predict()
+    sliced = pred.outcome(1)
+
+    tr = sliced.test(value=0.0)
+    pval = float(np.asarray(tr.pvalue).ravel()[0])
+    assert np.isfinite(pval)
+    assert 0.0 <= pval <= 1.0
+
+
+def test_to_frame_vector_estimand_scenarios_preserved():
+    """to_frame() on single-outcome vector estimand should unpack scenarios."""
+    from pymargins._result import MarginsResult
+
+    sess = _make_mock_session()
+    est = np.array([1.0, 2.0, 3.0])
+    scenarios = [{"x": i} for i in range(3)]
+    r = MarginsResult(
+        estimate=est,
+        std_error=np.ones(3) * 0.1,
+        conf_int_lower=est - 0.2,
+        conf_int_upper=est + 0.2,
+        method="delta",
+        level=0.95,
+        n_obs=100,
+        gradient=np.eye(3),
+        cov_params=np.diag([0.01, 0.02, 0.03]),
+        estimand_metadata={
+            "labels": ["a", "b", "c"],
+            "scenarios": scenarios,
+            "kind": "prediction",
+        },
+        session=sess,
+    )
+    frame = r.to_frame()
+    assert len(frame) == 3
+    assert "x" in frame.columns
+    assert list(frame["x"]) == [0, 1, 2]
