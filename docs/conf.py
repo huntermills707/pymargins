@@ -72,3 +72,17 @@ exclude_patterns = [
 html_theme = 'alabaster'
 html_static_path = ['_static']
 html_css_files = ['custom.css']
+
+html_theme_options = {
+    'github_user': 'huntermills707',
+    'github_repo': 'pymargins',
+    'github_button': True,
+    'github_type': 'star',
+    'description': 'Expert-mode marginal effects for Python.',
+    'extra_nav_links': {
+        'GitHub repository': 'https://github.com/huntermills707/pymargins',
+        'Issue tracker': 'https://github.com/huntermills707/pymargins/issues',
+        'Changelog': 'https://github.com/huntermills707/pymargins/blob/main/CHANGELOG.md',
+        'PyPI': 'https://pypi.org/project/pymargins/',
+    },
+}

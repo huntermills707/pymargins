@@ -11,6 +11,11 @@ arbitrary differentiable estimands — with uncertainty from the delta
 method, Krinsky–Robb simulation, or bootstrap — across statsmodels,
 linearmodels, lifelines, and scikit-learn model classes.
 
+- **Source code:** https://github.com/huntermills707/pymargins
+- **Issue tracker:** https://github.com/huntermills707/pymargins/issues
+- **Changelog:** https://github.com/huntermills707/pymargins/blob/main/CHANGELOG.md
+- **PyPI:** https://pypi.org/project/pymargins/
+
 .. toctree::
     :maxdepth: 1
     :caption: Getting started
