@@ -17,6 +17,46 @@ default evaluation point, and inference method. Every subsequent
 computation inherits those commitments. Switching any of them requires
 a new session.
 
+Why marginal effects?
+---------------------
+
+A fitted nonlinear model reports on the wrong scale. A logistic
+regression returns coefficients in log-odds; a Poisson model, in
+log-counts; a Cox model, in log-hazards. The question an analyst or
+stakeholder actually has — *how much does the predicted probability,
+count, or survival move?* — is a marginal effect, and in a nonlinear
+model that quantity is **not** any single coefficient. It is a
+derivative or discrete contrast that
+
+- depends on *where* in covariate space it is evaluated (the effect of
+  ``bmi`` in a logit differs along the curve),
+- combines several coefficients whenever the model contains
+  interactions, polynomials, or splines, and
+- carries its own standard error, which hand-calculation usually gets
+  wrong.
+
+``pymargins`` computes that quantity, on the outcome scale, with
+uncertainty from the delta method, simulation, or bootstrap:
+
+.. code-block:: python
+
+    m = Margins.log_scale(fit, vcov="HC3")
+
+    m.dydx("bmi")                            # AME on P(diabetes)
+    m.predict(atexog={"age": [25, 45, 65]})  # adjusted predictions
+    m.contrasts(scenarios=[...], contrasts=[+1, -1])  # risk difference
+
+Reach for marginal effects when the model is nonlinear, when effects
+are conditional (interactions / polynomials / splines), when the
+audience needs outcome units rather than link-scale coefficients, when
+heterogeneity across subgroups *is* the research question, or when the
+answer is a counterfactual contrast ("what if everyone were
+treated?"). These correspond exactly to the estimand axis below:
+:meth:`~pymargins.Margins.predict`,
+:meth:`~pymargins.Margins.dydx`, and
+:meth:`~pymargins.Margins.contrasts` /
+:meth:`~pymargins.Margins.evaluate`.
+
 Why a session?
 --------------
 

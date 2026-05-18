@@ -20,6 +20,52 @@ Every subsequent computation inherits those commitments — so a
 reviewer sees the entire methodological posture in one constructor
 call, and posture changes show up as new sessions in the audit trail.
 
+## Why marginal effects?
+
+A fitted nonlinear model answers questions on the wrong scale. A
+logistic regression of `diabetes` on `bmi` returns a coefficient in
+log-odds: `β = 0.087`. No stakeholder, and few analysts, can act on
+"a one-unit BMI increase adds 0.087 to the log-odds." The quantity
+people actually need — *how much does the probability of diabetes
+move?* — is a marginal effect, and in a nonlinear model it is not any
+coefficient. It is a derivative (or a discrete contrast) that depends
+on where in covariate space you evaluate it, combines several
+coefficients whenever the model has interactions or polynomials, and
+carries its own standard error.
+
+pymargins computes that quantity and its uncertainty in the units the
+decision is made in:
+
+```python
+m = Margins.log_scale(fit, vcov="HC3")
+
+m.dydx("bmi")               # AME: avg change in P(diabetes) per unit BMI
+m.predict(atexog={"bmi": [25, 30, 35]})   # adjusted P at representative profiles
+m.contrasts(scenarios=[                   # treated-vs-control risk difference
+    {"atexog": {"treatment": 1}, "label": "treated"},
+    {"atexog": {"treatment": 0}, "label": "control"},
+], contrasts=[+1, -1])
+```
+
+Reach for this when:
+
+- **The model is nonlinear** — GLM, logit/probit, Poisson, Cox, AFT:
+  coefficients are not effects on the outcome scale.
+- **Effects are conditional** — interactions, polynomials, or splines
+  mean the effect of *X* is a combination of terms, not one of them.
+- **The audience needs outcome units** — percentage points, expected
+  counts, predicted survival — not log-odds or hazard ratios.
+- **Heterogeneity is the question** — the effect by age, by region,
+  by treatment arm, evaluated over a grid.
+- **You need a counterfactual contrast** — "what if everyone were
+  treated?" as an average contrast, not a coefficient.
+
+These map onto the three estimands: `predict` (adjusted predictions),
+`dydx` (slopes), and `contrasts` / `evaluate` (differences and
+arbitrary differentiable combinations). Picking *whose* effect — the
+sample average (AME), a typical unit (MEM), or a representative
+profile (MER) — is the aggregation axis described in the docs.
+
 ## Installation
 
 ```bash
