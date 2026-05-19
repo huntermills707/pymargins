@@ -45,7 +45,7 @@ Because the model was fit directly on a DataFrame (not via a formula),
 we pass the training data explicitly to the adapter:
 
 ```{code-cell} python
-from pymargins._adapters.lifelines_weibull_aft import LifelinesWeibullAFTAdapter
+from pymargins.adapters import LifelinesWeibullAFTAdapter
 
 _adapter = LifelinesWeibullAFTAdapter(aft, training_data=df)
 m = Margins.log_scale(aft, adapter=_adapter, at="overall")

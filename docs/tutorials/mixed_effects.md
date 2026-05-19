@@ -120,7 +120,7 @@ If you fit with `sm.MixedLM(y, X, groups=...)` instead of
 `smf.mixedlm(...)`, pass the training data explicitly:
 
 ```python
-from pymargins._adapters.statsmodels_mixedlm import StatsmodelsMixedLMAdapter
+from pymargins.adapters import StatsmodelsMixedLMAdapter
 
 adapter = StatsmodelsMixedLMAdapter(fit_array, training_data=df)
 m = Margins.linear_scale(fit_array, adapter=adapter, at="overall")

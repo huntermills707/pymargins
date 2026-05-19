@@ -139,7 +139,7 @@ provide the training data explicitly so the adapter can reconstruct the
 design matrix:
 
 ```python
-from pymargins._adapters.statsmodels_gee import StatsmodelsGEEAdapter
+from pymargins.adapters import StatsmodelsGEEAdapter
 
 adapter = StatsmodelsGEEAdapter(fit_array, training_data=df)
 m = Margins.linear_scale(fit_array, adapter=adapter, at="overall")

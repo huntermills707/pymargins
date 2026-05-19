@@ -63,6 +63,8 @@ exclude_patterns = [
     '_build',
     'jupyter_execute',
     '**/jupyter_execute',
+    '.jupyter_cache',
+    '**/.jupyter_cache',
     'tutorials/README.md',
     'howto/README.md',
     'explanations/README.md',
