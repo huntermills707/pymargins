@@ -20,7 +20,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import GradientBoostingRegressor
 
 from pymargins import Margins
-from pymargins._adapters.sklearn_bootstrap import SklearnBootstrapAdapter
+from pymargins.adapters import SklearnBootstrapAdapter
 
 rng = np.random.default_rng(42)
 n = 1000

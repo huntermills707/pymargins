@@ -57,6 +57,25 @@ Adapter interface
     VariableInfo
     register_adapter
 
+Concrete adapters
+-----------------
+
+You rarely need these — ``Margins(model)`` auto-detects the right adapter
+for standard statsmodels / linearmodels / lifelines results. Import a
+concrete adapter from ``pymargins.adapters`` only when you need a
+non-default scale that shares a result class with another adapter (e.g.
+``LifelinesCoxPHSurvivalAdapter`` for survival probability vs the
+auto-detected ``LifelinesCoxPHAdapter`` for hazard ratio), when wrapping a
+framework with no native inference (``SklearnBootstrapAdapter``), or when
+constructing an adapter explicitly to override auto-detection or pass extra
+arguments such as ``training_data=``.
+
+.. currentmodule:: pymargins.adapters
+
+.. automodule:: pymargins.adapters
+
+.. currentmodule:: pymargins
+
 Gradient helpers (for adapter authors)
 --------------------------------------
 

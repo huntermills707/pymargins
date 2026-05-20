@@ -31,7 +31,9 @@ model admits.
 
 ## What's included
 
-In `pymargins._adapters/`:
+Available from `pymargins.adapters` (auto-detected by `Margins(model)`;
+import explicitly only to override detection or select a non-default
+scale):
 
 - **statsmodels**: GLM, OLS, MNLogit, ordered, discrete binary /
   count, Poisson, GEE (gaussian / nominal / ordinal), MixedLM,

@@ -26,10 +26,16 @@ Public API
 - ``VariableInfo`` — per-variable metadata used by adapters
 - ``register_adapter`` — register a custom adapter for auto-detection
 
-Internal modules (prefixed with _) hold the numerical kernels and engine.
-End users should not import from these directly. Adapter implementers
-should import from _adapter, _gradients (for make_*_jvp_wrapper helpers),
-and the type aliases in _adapter and _gradients.
+Internal modules (prefixed with _) hold the numerical kernels and engine;
+end users should not import from these directly.
+
+Adapter authors writing a custom adapter subclass one of the base shapes
+re-exported above (``ModelAdapter``, ``GLMAdapter``, etc.) plus the
+``make_*_jvp_wrapper`` gradient helpers, and register it with
+``register_adapter``. The concrete built-in adapters are available, lazily,
+from the public ``pymargins.adapters`` module — you rarely need them since
+``Margins(model)`` auto-detects the right one; import explicitly only to
+override detection or select a non-default scale.
 """
 
 from .margins import Margins

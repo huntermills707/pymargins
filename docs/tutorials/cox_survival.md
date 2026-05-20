@@ -44,7 +44,7 @@ Because the model was fit directly on a DataFrame (not via a formula),
 we pass the training data explicitly to the adapter:
 
 ```{code-cell} python
-from pymargins._adapters.lifelines_coxph import LifelinesCoxPHAdapter
+from pymargins.adapters import LifelinesCoxPHAdapter
 
 _adapter = LifelinesCoxPHAdapter(cph, training_data=df)
 m = Margins.log_scale(cph, adapter=_adapter, at="overall")
