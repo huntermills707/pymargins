@@ -28,6 +28,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 import threadpoolctl
+from tqdm import tqdm
 from .._gradients import gradient
 from .._delta import delta_se
 from .._kappa import kappa, kappa_vector
@@ -713,6 +714,10 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
             stacklevel=3,
         )
 
+    _refit_iter = enumerate(all_idx)
+    if config.progress_bar:
+        _refit_iter = tqdm(_refit_iter, total=config.n_boot, desc="Bootstrap refit")
+
     if n_jobs != 1:
         import pickle
         try:
@@ -739,7 +744,7 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
             with ProcessPoolExecutor(max_workers=n_jobs, mp_context=_ctx) as executor:
                 refitted = list(executor.map(
                     _refit_replicate_task,
-                    enumerate(all_idx),
+                    _refit_iter,
                     [adapter] * len(all_idx),
                     [data] * len(all_idx),
                     [config.matching] * len(all_idx),
@@ -749,7 +754,7 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
                 with ThreadPoolExecutor(max_workers=n_jobs) as executor:
                     refitted = list(executor.map(
                         _refit_replicate_task,
-                        enumerate(all_idx),
+                        _refit_iter,
                         [adapter] * len(all_idx),
                         [data] * len(all_idx),
                         [config.matching] * len(all_idx),
@@ -757,7 +762,7 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
     else:
         refitted = list(map(
             _refit_replicate_task,
-            enumerate(all_idx),
+            _refit_iter,
             [adapter] * len(all_idx),
             [data] * len(all_idx),
             [config.matching] * len(all_idx),
@@ -803,7 +808,10 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
         # Legacy per-replicate loop: non-autodiff adapters, multi-atom
         # (over=/grid) estimands, non-kernel composes, or any structural
         # surprise the batched path declined. Authoritative result.
-        for b, new_adapter, refit_exc in refitted:
+        _eval_iter = refitted
+        if config.progress_bar:
+            _eval_iter = tqdm(_eval_iter, total=config.n_boot, desc="Bootstrap evaluate")
+        for b, new_adapter, refit_exc in _eval_iter:
             if refit_exc is not None:
                 raw_results.append(refit_exc)
                 continue

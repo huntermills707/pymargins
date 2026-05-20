@@ -187,6 +187,10 @@ class Margins:
 
         - ``"block_type"``: ``"moving"`` (default), ``"nonoverlapping"``, or ``"circular"``
 
+    progress_bar : bool, default False
+        Whether to show a progress bar during bootstrap execution.
+        Requires ``tqdm`` to be installed.
+
     strict : bool, default False
         If True, no defaults are inferred — every analytical choice must be
         explicit at construction. Useful for pre-registered or audit-relevant
@@ -224,6 +228,7 @@ class Margins:
         cluster: Optional[Any] = _NOT_GIVEN,
         block_size: Optional[int] = _NOT_GIVEN,
         bootstrap_config: Optional[dict] = _NOT_GIVEN,
+        progress_bar: bool = _NOT_GIVEN,
         matching: Optional[Any] = _NOT_GIVEN,
         formula: Optional[str] = _NOT_GIVEN,
         data: Optional[pd.DataFrame] = _NOT_GIVEN,
@@ -241,6 +246,7 @@ class Margins:
                 ("fd_step", fd_step), ("diagnostics", diagnostics),
                 ("cluster", cluster), ("block_size", block_size),
                 ("bootstrap_config", bootstrap_config),
+                ("progress_bar", progress_bar),
                 ("matching", matching),
                 ("formula", formula), ("data", data),
             ]:
@@ -277,6 +283,7 @@ class Margins:
         cluster = None if cluster is _NOT_GIVEN else cluster
         block_size = None if block_size is _NOT_GIVEN else block_size
         bootstrap_config = None if bootstrap_config is _NOT_GIVEN else bootstrap_config
+        progress_bar = False if progress_bar is _NOT_GIVEN else progress_bar
         matching = None if matching is _NOT_GIVEN else matching
         formula = None if formula is _NOT_GIVEN else formula
         data = None if data is _NOT_GIVEN else data
@@ -315,6 +322,7 @@ class Margins:
         self.cluster = cluster
         self.block_size = block_size
         self.bootstrap_config = bootstrap_config
+        self.progress_bar = progress_bar
         self.matching = matching
         self.strict = strict
 

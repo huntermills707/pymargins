@@ -99,3 +99,7 @@ class InferenceConfig:
     bootstrap engine reuses these instead of generating fresh indices.
     Used by session-level resample banks to guarantee matched replicates
     across composable bootstrap calls."""
+
+    progress_bar: bool = False
+    """Whether to show a progress bar during bootstrap execution.
+    Requires ``tqdm`` to be installed."""

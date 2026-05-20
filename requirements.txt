@@ -4,6 +4,7 @@ jaxlib>=0.4.20
 numpy>=1.24
 scipy>=1.10
 pandas>=2.0
+tqdm>=4.60
 
 # Primary modeling framework (used by demos and tests)
 statsmodels>=0.14
