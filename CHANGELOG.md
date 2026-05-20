@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Optional `progress_bar=True` on `Margins(..., method="bootstrap")` to show
+  a TQDM progress bar during bootstrap refitting and evaluation.
+
 ## [0.0.1] — 2026-05-17
 
 Initial public release on PyPI and Read the Docs.
