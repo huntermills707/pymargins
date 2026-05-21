@@ -28,6 +28,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 import threadpoolctl
+from tqdm import tqdm
 from .._gradients import gradient
 from .._delta import delta_se
 from .._kappa import kappa, kappa_vector
@@ -713,6 +714,11 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
             stacklevel=3,
         )
 
+    def _maybe_tqdm(it, *, desc):
+        if config.progress_bar:
+            return tqdm(it, total=config.n_boot, desc=desc)
+        return it
+
     if n_jobs != 1:
         import pickle
         try:
@@ -737,31 +743,31 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
             # Use 'spawn' to avoid deadlocks with JAX's background threads.
             _ctx = _mp.get_context("spawn")
             with ProcessPoolExecutor(max_workers=n_jobs, mp_context=_ctx) as executor:
-                refitted = list(executor.map(
+                refitted = list(_maybe_tqdm(executor.map(
                     _refit_replicate_task,
                     enumerate(all_idx),
                     [adapter] * len(all_idx),
                     [data] * len(all_idx),
                     [config.matching] * len(all_idx),
-                ))
+                ), desc="Bootstrap refit"))
         else:
             with threadpoolctl.threadpool_limits(limits=1):
                 with ThreadPoolExecutor(max_workers=n_jobs) as executor:
-                    refitted = list(executor.map(
+                    refitted = list(_maybe_tqdm(executor.map(
                         _refit_replicate_task,
                         enumerate(all_idx),
                         [adapter] * len(all_idx),
                         [data] * len(all_idx),
                         [config.matching] * len(all_idx),
-                    ))
+                    ), desc="Bootstrap refit"))
     else:
-        refitted = list(map(
+        refitted = list(_maybe_tqdm(map(
             _refit_replicate_task,
             enumerate(all_idx),
             [adapter] * len(all_idx),
             [data] * len(all_idx),
             [config.matching] * len(all_idx),
-        ))
+        ), desc="Bootstrap refit"))
 
     # Step 2: Serial JAX evaluation (thread-safe, compilation cache friendly).
     # For studentized bootstrap, if the estimand is a module-level kernel
@@ -803,7 +809,7 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
         # Legacy per-replicate loop: non-autodiff adapters, multi-atom
         # (over=/grid) estimands, non-kernel composes, or any structural
         # surprise the batched path declined. Authoritative result.
-        for b, new_adapter, refit_exc in refitted:
+        for b, new_adapter, refit_exc in _maybe_tqdm(refitted, desc="Bootstrap evaluate"):
             if refit_exc is not None:
                 raw_results.append(refit_exc)
                 continue

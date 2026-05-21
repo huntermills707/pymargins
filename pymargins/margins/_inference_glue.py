@@ -122,6 +122,7 @@ def _inference_config(session) -> InferenceConfig:
         matching=session.matching,
         bootstrap_config=session.bootstrap_config,
         all_idx=all_idx,
+        progress_bar=session.progress_bar,
     )
 
 

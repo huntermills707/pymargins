@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Optional `progress_bar=True` on `Margins(..., method="bootstrap")` to show
+  a TQDM progress bar during bootstrap refitting and evaluation.
 - Public `pymargins.adapters` module exposing every concrete adapter class
   (e.g. `StatsmodelsGLMAdapter`, `LifelinesCoxPHAdapter`,
   `SklearnBootstrapAdapter`) via lazy PEP 562 resolution.  This keeps

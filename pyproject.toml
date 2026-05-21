@@ -34,6 +34,7 @@ dependencies = [
     "scipy>=1.10",
     "pandas>=2.0",
     "threadpoolctl>=3.0",
+    "tqdm>=4.60",
 ]
 
 [project.optional-dependencies]
