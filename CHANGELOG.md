@@ -11,6 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Optional `progress_bar=True` on `Margins(..., method="bootstrap")` to show
   a TQDM progress bar during bootstrap refitting and evaluation.
+- Public `pymargins.adapters` module exposing every concrete adapter class
+  (e.g. `StatsmodelsGLMAdapter`, `LifelinesCoxPHAdapter`,
+  `SklearnBootstrapAdapter`) via lazy PEP 562 resolution.  This keeps
+  `import pymargins` cheap — optional third-party dependencies are loaded
+  only when an adapter is actually accessed.
+- Base adapter shapes (`ModelAdapter`, `GLMAdapter`,
+  `LinearPredictionAdapter`, `WrappedFDAdapter`, `BootstrapOnlyAdapter`),
+  `VariableInfo`, `InferenceMethod`, and `register_adapter` are also
+  re-exported from `pymargins.adapters` so custom-adapter authors have a
+  single import target.
+- `tests/test_adapters_facade.py` ensuring every concrete adapter is mapped
+  and resolved correctly.
 
 ## [0.0.1] — 2026-05-17
 
