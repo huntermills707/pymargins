@@ -66,10 +66,25 @@ linearmodels, lifelines, and scikit-learn model classes.
     howto/formula_interface
 
 .. toctree::
+    :maxdepth: 1
+    :caption: Demos — end-to-end analyses
+
+    demos/mroz_lfp
+    demos/fair_affairs
+    demos/spector_psi
+    demos/rossi_recidivism
+    demos/wage_panel
+    demos/anes96_party
+
+.. toctree::
     :maxdepth: 2
     :caption: Reference
 
     api
+
+.. toctree::
+    :hidden:
+
     demos
 
 .. toctree::

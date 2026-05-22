@@ -1,13 +1,15 @@
-Demos
-=====
+Replication scripts (archive)
+=============================
 
-End-to-end walkthroughs ship under ``demo/`` in the repository root.
-Each one is a self-contained script you can run with ``python
-demo/<name>.py`` after installing ``pymargins``.
+The notebook-style dataset demos under
+:doc:`Demos — end-to-end analyses <index>` are the recommended
+entry point. The script-style demos archived here ship as standalone
+``.py`` files in ``demo/`` and are kept for reference and exact
+numerical reproduction against the Williams (2012) paper.
 
 .. contents::
     :local:
-    :depth: 2
+    :depth: 1
 
 .. _demo-williams:
 

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Six end-to-end demos in `docs/demos/` using bundled datasets: Mroz LFP
+  (logit), Fair affairs (logit vs Poisson), Spector PSI (small-n
+  inference), Rossi recidivism (Cox PH), wage panel (entity FE), and
+  ANES96 (multinomial logit). Notebook-style (`myst-nb`), executed at
+  docs-build time. Surfaced as a top-level "Demos — end-to-end
+  analyses" section in the sidebar; the Williams (2012) replication
+  scripts move to a hidden archive page.
 - Optional `progress_bar=True` on `Margins(..., method="bootstrap")` to show
   a TQDM progress bar during bootstrap refitting and evaluation.
 - Public `pymargins.adapters` module exposing every concrete adapter class
