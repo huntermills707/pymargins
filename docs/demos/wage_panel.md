@@ -23,8 +23,7 @@ This demo walks through:
 
 1. An entity-FE specification with cluster-robust SEs.
 2. The marginal union premium, with the FE-corrected interval.
-3. Profile of predicted wages over experience, by union status.
-4. A Krinsky–Robb simulation cross-check on the analytic clustered
+3. A Krinsky–Robb simulation cross-check on the analytic clustered
    SE.
 
 ```{code-cell} python
@@ -86,41 +85,7 @@ The point estimate on the log scale is the log-wage gap; the
 back-transformed interval is the multiplicative ratio (1.X means
 "X% premium").
 
-## 3. Experience profile by union status
-
-For the predicted-curve plot, switch to `at="typical"` so each grid
-point evaluates at one representative profile instead of averaging
-over thousands of rows — the question is "what is the predicted log
-wage at *this* experience level," not a sample-averaged AAP:
-
-```{code-cell} python
-import matplotlib.pyplot as plt
-
-m_typ = Margins.linear_scale(fe, at="typical")
-exper_grid = np.arange(0, 18, 2)
-res = m_typ.predict(atexog={
-    "exper": exper_grid,
-    "expersq": exper_grid ** 2,
-    "union": [0, 1],
-})
-df_plot = res.to_frame()
-
-fig, ax = plt.subplots(figsize=(6, 4))
-for union_val, sub in df_plot.groupby("union"):
-    label = "Union" if union_val == 1 else "Non-union"
-    ax.plot(sub["exper"], sub["estimate"], label=label)
-    ax.fill_between(
-        sub["exper"], sub["ci_lower"], sub["ci_upper"], alpha=0.2
-    )
-ax.set(xlabel="Years of experience", ylabel="Predicted log wage")
-ax.legend()
-```
-
-Pair `exper` and `expersq` together in the same `atexog` so the
-quadratic is internally consistent at every grid point — a common
-source of nonsense plots when people forget.
-
-## 4. Krinsky–Robb simulation as a sanity check
+## 3. Krinsky–Robb simulation as a sanity check
 
 The analytic cluster-robust SE assumes the within-cluster dependence
 structure is well-approximated by the sandwich formula. With

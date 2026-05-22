@@ -50,7 +50,7 @@ poorly linearized.
     :linenos:
 
 Cross-checks
-^^^^^^^^^^^^
+------------
 
 The companion files ``demo/williams_2012_demo_statsmodels.py``,
 ``demo/williams_2012_demo_marginaleffects_r.R``, and

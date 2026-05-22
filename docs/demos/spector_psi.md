@@ -62,8 +62,8 @@ print("Delta method:")
 print(m_delta.contrasts(scenarios=scen, contrasts=w).summary())
 ```
 
-With only 32 observations the delta-method CI is wide. A simulation
-or bootstrap interval is the honest cross-check:
+With only 32 observations the delta-method CI is wide. A Krinsky–Robb
+simulation is the cleanest cross-check that does not require refits:
 
 ```{code-cell} python
 m_sim = Margins.linear_scale(
@@ -74,18 +74,12 @@ print("Krinsky–Robb simulation:")
 print(m_sim.contrasts(scenarios=scen, contrasts=w).summary())
 ```
 
-```{code-cell} python
-m_boot = Margins.linear_scale(
-    fit, vcov="HC1", at="overall",
-    method="bootstrap", n_boot=1000, rng_seed=0,
-)
-print("Paired bootstrap:")
-print(m_boot.contrasts(scenarios=scen, contrasts=w).summary())
-```
-
-In a properly behaved logit at a moderate probability the three
-intervals will agree to within Monte Carlo noise. The κ diagnostic
-gives the analytical reason to expect that:
+A paired bootstrap is the more general non-parametric check, but
+with n=32 and three covariates the resampled datasets are frequently
+perfectly separable — the logit refit fails to converge and the
+bootstrap is not the right tool for this size of problem. The κ
+diagnostic gives the analytical reason the delta and simulation
+intervals agree:
 
 ```{code-cell} python
 print(m_delta.diagnose().summary())

@@ -81,13 +81,22 @@ est = np.asarray(res.estimate)        # (n_lr, n_outcomes)
 ci = np.asarray(res.conf_int())       # (2, n_lr, n_outcomes)
 n_lr, n_out = est.shape
 
+pid_labels = [
+    "Strong Dem", "Weak Dem", "Ind-Dem",
+    "Independent",
+    "Ind-Rep", "Weak Rep", "Strong Rep",
+]
+# Blue = Democrat, red = Republican, grey = independent — standard US
+# political color convention.
+colors = ["#1f4e96", "#5588c8", "#a6c8e8",
+          "#7f7f7f",
+          "#e8a6a6", "#c85555", "#961f1f"]
+
 fig, ax = plt.subplots(figsize=(7, 4))
-cmap = plt.get_cmap("RdBu_r")
 for j in range(n_out):
-    color = cmap(j / (n_out - 1))
-    ax.plot(lr_grid, est[:, j], color=color, label=f"PID={j}")
+    ax.plot(lr_grid, est[:, j], color=colors[j], label=pid_labels[j], lw=2)
     ax.fill_between(
-        lr_grid, ci[0, :, j], ci[1, :, j], alpha=0.12, color=color
+        lr_grid, ci[0, :, j], ci[1, :, j], alpha=0.15, color=colors[j]
     )
 ax.set(xlabel="Self-placed liberal–conservative (1=liberal, 7=conservative)",
        ylabel="P(PID category)",
