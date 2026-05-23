@@ -12,6 +12,23 @@ from .._inference import InferenceConfig, run_inference
 from .._result import MarginsResult
 
 
+def _check_adapter_drift(session):
+    """Snapshot β̂ at first materialization and check drift on subsequent calls."""
+    cached = session.__dict__.get("_adapter_beta_snapshot")
+    current = np.asarray(session.adapter.coefficients())
+    if cached is None:
+        session._adapter_beta_snapshot = current
+        return
+    # NaN-aware equality: NaN == NaN is True here so rank-deficient fits
+    # with dropped-term NaNs do not falsely trip drift detection.
+    if not np.allclose(cached, current, equal_nan=True):
+        raise RuntimeError(
+            "adapter.coefficients() has changed since the inference "
+            "cache was built. The cache is invalid. Construct a new "
+            "Margins session."
+        )
+
+
 def _bootstrap_bank_key(session) -> str:
     """Deterministic key for a session's bootstrap resample bank.
 
@@ -95,6 +112,92 @@ def _bootstrap_resample_bank(session):
     return all_idx, bank_key
 
 
+def _bootstrap_states_bank(session):
+    """Return (all_states, failures, bank_id), harvesting if needed.
+
+    The states cache is keyed by the same bootstrap bank key so that
+    invalidation rules are identical to the resample-index bank.
+    """
+    if session.method != "bootstrap":
+        return None, None, None
+
+    bank_key = _bootstrap_bank_key(session)
+    cache_attr = "_bootstrap_states_cache"
+
+    if hasattr(session, cache_attr):
+        cached_key, cached_states, cached_failures = getattr(session, cache_attr)
+        if cached_key == bank_key:
+            return cached_states, cached_failures, bank_key
+
+    all_idx, _ = _bootstrap_resample_bank(session)
+
+    try:
+        data = session.adapter.training_data
+    except (NotImplementedError, AttributeError, TypeError):
+        data = None
+
+    if session.matching is not None:
+        data = session.matching.matched_data
+
+    if data is None:
+        raise NotImplementedError(
+            "Bootstrap inference requires the adapter to expose training_data. "
+            f"{type(session.adapter).__name__} does not implement it."
+        )
+
+    from .._inference._bootstrap import _harvest_bootstrap_states
+
+    states, failures = _harvest_bootstrap_states(
+        session.adapter,
+        data,
+        all_idx,
+        matching=session.matching,
+        n_jobs=session.n_jobs,
+        progress=session.progress_bar,
+    )
+    setattr(session, cache_attr, (bank_key, states, failures))
+    return states, failures, bank_key
+
+
+def _simulation_bank_key(session) -> str:
+    """Deterministic key for a session's simulation draws bank."""
+    parts = [
+        str(session.rng_seed),
+        str(session.n_sim),
+    ]
+    cov = _frozen_cov(session)
+    parts.append(hashlib.sha256(np.asarray(cov).tobytes()).hexdigest()[:16])
+    return hashlib.sha256("|".join(parts).encode()).hexdigest()[:32]
+
+
+def _simulation_draws_bank(session):
+    """Return (draws, bank_id) for the session, generating if needed.
+
+    The bank is cached on the session instance so that every simulation
+    call in the same session reuses the same β* draws.
+    """
+    if session.method != "simulation":
+        return None, None
+
+    bank_key = _simulation_bank_key(session)
+    cache_attr = "_simulation_draws_cache"
+
+    if hasattr(session, cache_attr):
+        cached_key, cached_draws = getattr(session, cache_attr)
+        if cached_key == bank_key:
+            return cached_draws, bank_key
+
+    beta = session.adapter.coefficients()
+    Sigma = _frozen_cov(session)
+    rng = np.random.default_rng(
+        [session.rng_seed, 0] if session.rng_seed is not None else None
+    )
+    from .._inference._simulation import _generate_simulation_draws
+    draws = _generate_simulation_draws(beta, Sigma, rng, session.n_sim)
+    setattr(session, cache_attr, (bank_key, draws))
+    return draws, bank_key
+
+
 def _inference_config(session) -> InferenceConfig:
     """Build the InferenceConfig for a single call.
 
@@ -102,7 +205,10 @@ def _inference_config(session) -> InferenceConfig:
     are not supported by design. Switching method, level, vcov, or scale
     requires constructing a new ``Margins`` instance.
     """
+    _check_adapter_drift(session)
     all_idx, _ = _bootstrap_resample_bank(session)
+    all_states, all_states_failures, _ = _bootstrap_states_bank(session)
+    sim_draws, _ = _simulation_draws_bank(session)
     return InferenceConfig(
         method=session.method,
         level=session.level,
@@ -122,6 +228,9 @@ def _inference_config(session) -> InferenceConfig:
         matching=session.matching,
         bootstrap_config=session.bootstrap_config,
         all_idx=all_idx,
+        all_states=all_states,
+        all_states_failures=all_states_failures,
+        sim_draws=sim_draws,
         progress_bar=session.progress_bar,
     )
 
@@ -214,4 +323,6 @@ def _wrap_result(session, result_data: dict) -> MarginsResult:
         ci_method=result_data.get("ci_method"),
         bootstrap_extras=result_data.get("bootstrap_extras"),
         resample_bank_id=bank_id if result_data.get("method") == "bootstrap" else None,
+        n_boot_effective=result_data.get("n_boot_effective"),
+        n_boot_failed=result_data.get("n_boot_failed"),
     )

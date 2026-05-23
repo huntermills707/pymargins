@@ -330,6 +330,7 @@ def make_linear_combination_estimand(
     scenario_offsets: Optional[list[Optional[jnp.ndarray]]] = None,
     scenario_aggregate: str = "overall",
     scenario_weights: Optional[list[Optional[jnp.ndarray]]] = None,
+    scenario_predict_fns: Optional[list[Callable]] = None,
 ) -> Callable[[jnp.ndarray], jnp.ndarray]:
     """Construct h(β) for a linear combination of predictions across scenarios.
 
@@ -369,6 +370,12 @@ def make_linear_combination_estimand(
         Per-scenario aggregation weights. Used when scenario_aggregate
         is "weighted".
 
+    scenario_predict_fns : list of callables, optional
+        Per-scenario predict functions, same length as scenarios_X. Used
+        when scenarios are evaluated against different adapter states
+        (e.g., per-scenario ``prediction_time`` for survival adapters).
+        Default: ``adapter.predict`` for all scenarios.
+
     Returns
     -------
     h : callable (beta) -> scalar or vector
@@ -377,10 +384,14 @@ def make_linear_combination_estimand(
     n_scenarios = len(scenarios_X)
     offsets = scenario_offsets if scenario_offsets is not None else [None] * n_scenarios
     sw = scenario_weights if scenario_weights is not None else [None] * n_scenarios
+    predict_fns = (
+        scenario_predict_fns if scenario_predict_fns is not None
+        else [adapter.predict] * n_scenarios
+    )
 
     return partial(
         linear_combination_kernel,
-        predict_fn=adapter.predict,
+        predict_fns=tuple(predict_fns),
         scenarios_X=scenarios_X,
         offsets=offsets,
         sw=sw,
@@ -411,7 +422,7 @@ def per_scenario_kernel(beta, predict_fn, X, offset, w, scenario_aggregate):
 
 def linear_combination_kernel(
     beta,
-    predict_fn,
+    predict_fns,
     scenarios_X,
     offsets,
     sw,
@@ -419,9 +430,14 @@ def linear_combination_kernel(
     phi_inv,
     scenario_aggregate,
 ):
-    """Module-level kernel for linear-combination estimands."""
+    """Module-level kernel for linear-combination estimands.
+
+    ``predict_fns`` is a tuple of per-scenario predict callables, allowing
+    scenarios to be evaluated against different adapter states (e.g.,
+    per-scenario ``prediction_time`` for survival adapters).
+    """
     scenario_values = jnp.stack([
-        per_scenario_kernel(beta, predict_fn, scenarios_X[i], offsets[i], sw[i], scenario_aggregate)
+        per_scenario_kernel(beta, predict_fns[i], scenarios_X[i], offsets[i], sw[i], scenario_aggregate)
         for i in range(len(scenarios_X))
     ])
     if phi_inv is not None:
@@ -449,6 +465,7 @@ def make_evaluate_estimand(
     scenario_offsets: Optional[list[Optional[jnp.ndarray]]] = None,
     scenario_aggregate: str = "overall",
     scenario_weights: Optional[list[Optional[jnp.ndarray]]] = None,
+    scenario_predict_fns: Optional[list[Callable]] = None,
 ) -> Callable[[jnp.ndarray], jnp.ndarray]:
     """Construct h(β) for an arbitrary differentiable composition of scenario
     predictions.
@@ -491,10 +508,14 @@ def make_evaluate_estimand(
     n_scenarios = len(scenarios_X)
     offsets = scenario_offsets if scenario_offsets is not None else [None] * n_scenarios
     sw = scenario_weights if scenario_weights is not None else [None] * n_scenarios
+    predict_fns = (
+        scenario_predict_fns if scenario_predict_fns is not None
+        else [adapter.predict] * n_scenarios
+    )
 
     return partial(
         evaluate_kernel,
-        predict_fn=adapter.predict,
+        predict_fns=tuple(predict_fns),
         scenarios_X=scenarios_X,
         offsets=offsets,
         sw=sw,
@@ -506,7 +527,7 @@ def make_evaluate_estimand(
 
 def evaluate_kernel(
     beta,
-    predict_fn,
+    predict_fns,
     scenarios_X,
     offsets,
     sw,
@@ -516,7 +537,7 @@ def evaluate_kernel(
 ):
     """Module-level kernel for arbitrary nonlinear composition estimands."""
     scenario_values = jnp.stack([
-        per_scenario_kernel(beta, predict_fn, scenarios_X[i], offsets[i], sw[i], scenario_aggregate)
+        per_scenario_kernel(beta, predict_fns[i], scenarios_X[i], offsets[i], sw[i], scenario_aggregate)
         for i in range(len(scenarios_X))
     ])
     result = compose(scenario_values)

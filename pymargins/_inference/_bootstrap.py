@@ -587,6 +587,182 @@ def _run_fast_path(kernel_info, refitted, h_factory, config,
     return [result_map[b] for b, _, _ in refitted]
 
 
+def _harvest_bootstrap_states(adapter, data, all_idx, matching=None, n_jobs=1, progress=False):
+    """Resample + refit, returning bootstrap_state() snapshots.
+
+    Parameters
+    ----------
+    adapter : ModelAdapter
+        Original adapter (for refit and parameter-count validation).
+    data : DataFrame or array
+        Training data to resample.
+    all_idx : list of arrays
+        Resample indices.
+    matching : optional
+        Matching object with a ``rematch`` method.
+    n_jobs : int
+        Number of parallel workers.
+    progress : bool
+        Whether to show a progress bar.
+
+    Returns
+    -------
+    states : list of (int, object)
+        Successful replicates: (replicate_index, bootstrap_state).
+    failures : list of (int, Exception)
+        Failed replicates.
+    """
+    if n_jobs == -1:
+        import os
+        n_jobs = os.cpu_count() or 1
+
+    if n_jobs > 1:
+        warnings.warn(
+            f"Parallel bootstrap (n_jobs={n_jobs}) is experimental. "
+            "Process-based execution is used when pickling succeeds; "
+            "otherwise it falls back to thread-based execution.",
+            RuntimeWarning,
+            stacklevel=4,
+        )
+
+    def _maybe_tqdm(it, *, desc, total):
+        if progress:
+            return tqdm(it, total=total, desc=desc)
+        return it
+
+    if n_jobs != 1:
+        import pickle
+        try:
+            pickle.dumps(adapter)
+            pickle.dumps(data)
+            if matching is not None:
+                pickle.dumps(matching)
+            use_processes = True
+        except (TypeError, pickle.PicklingError):
+            warnings.warn(
+                "Adapter, data, or matching object cannot be pickled; falling back "
+                "to thread-based parallel bootstrap. Consider setting n_jobs=1 "
+                "for stability.",
+                RuntimeWarning,
+                stacklevel=4,
+            )
+            use_processes = False
+
+        if use_processes:
+            import multiprocessing as _mp
+            from concurrent.futures import ProcessPoolExecutor
+            _ctx = _mp.get_context("spawn")
+            with ProcessPoolExecutor(max_workers=n_jobs, mp_context=_ctx) as executor:
+                refitted = list(_maybe_tqdm(executor.map(
+                    _refit_replicate_task,
+                    enumerate(all_idx),
+                    [adapter] * len(all_idx),
+                    [data] * len(all_idx),
+                    [matching] * len(all_idx),
+                ), desc="Bootstrap refit", total=len(all_idx)))
+        else:
+            with threadpoolctl.threadpool_limits(limits=1):
+                with ThreadPoolExecutor(max_workers=n_jobs) as executor:
+                    refitted = list(_maybe_tqdm(executor.map(
+                        _refit_replicate_task,
+                        enumerate(all_idx),
+                        [adapter] * len(all_idx),
+                        [data] * len(all_idx),
+                        [matching] * len(all_idx),
+                    ), desc="Bootstrap refit", total=len(all_idx)))
+    else:
+        refitted = list(_maybe_tqdm(map(
+            _refit_replicate_task,
+            enumerate(all_idx),
+            [adapter] * len(all_idx),
+            [data] * len(all_idx),
+            [matching] * len(all_idx),
+        ), desc="Bootstrap refit", total=len(all_idx)))
+
+    states = []
+    failures = []
+    for b, new_adapter, exc in refitted:
+        if exc is not None:
+            failures.append((b, exc))
+        else:
+            states.append((b, new_adapter.bootstrap_state()))
+    return states, failures
+
+
+def _replay_h_over_states(states, failures, h_factory, h, config, *, kernel_info=None, jax_diffable=None):
+    """Evaluate h over cached bootstrap states.
+
+    Returns a list ``raw_results`` where each element is either
+    ``(theta_b, se_b)`` or an exception.
+    """
+    bootstrap_config = config.bootstrap_config or {}
+    ci_method = bootstrap_config.get("ci_method", "percentile")
+
+    # Build replicates list in the format expected by _run_fast_path
+    replicates = []
+    for b, state in states:
+        replicates.append((b, state, None))
+    for b, exc in failures:
+        replicates.append((b, None, exc))
+    replicates.sort(key=lambda x: x[0])
+
+    def _maybe_tqdm(it, *, desc):
+        if config.progress_bar:
+            return tqdm(it, total=config.n_boot, desc=desc)
+        return it
+
+    # Pre-build stable kernel gradient for studentized CIs
+    _kernel_grad_fn = None
+    if ci_method == "studentized" and jax_diffable:
+        if states:
+            h_probe = h_factory(states[0][1])
+            if isinstance(h_probe, partial) and getattr(h_probe.func, "__pymargins_kernel__", False):
+                _kernel_grad_fn = jax.grad(h_probe.func, argnums=0)
+
+    raw_results = []
+    if kernel_info is not None:
+        chunk_size = bootstrap_config.get("vmap_chunk_size", 256)
+        batched = _run_fast_path(
+            kernel_info, replicates, h_factory, config,
+            ci_method, jax_diffable, chunk_size,
+        )
+        if batched is not None:
+            raw_results = batched
+
+    if not raw_results:
+        # Legacy per-replicate loop
+        for b, state, refit_exc in _maybe_tqdm(replicates, desc="Bootstrap evaluate"):
+            if refit_exc is not None:
+                raw_results.append(refit_exc)
+                continue
+            try:
+                h_b = h_factory(state)
+                beta_b = state.coefficients()
+                theta_b = np.asarray(h_b(beta_b))
+
+                se_b = None
+                if ci_method == "studentized" and jax_diffable:
+                    try:
+                        Sigma_b = state.covariance()
+                        if _kernel_grad_fn is not None and isinstance(h_b, partial):
+                            grad_b = _kernel_grad_fn(beta_b, *h_b.args, **h_b.keywords)
+                        else:
+                            grad_b = gradient(
+                                h_b, beta_b,
+                                backend=config.gradient_backend,
+                                fd_step=config.fd_step,
+                            )
+                        se_b = np.asarray(delta_se(grad_b, Sigma_b))
+                    except (ValueError, TypeError, jax.errors.JAXTypeError, np.linalg.LinAlgError):
+                        se_b = None
+
+                raw_results.append((theta_b, se_b))
+            except (ValueError, RuntimeError, np.linalg.LinAlgError) as exc:
+                raw_results.append(exc)
+
+    return raw_results
+
+
 def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=None, h_factory=None):
     """Nonparametric bootstrap: refit the model on resampled data, recompute
     h, take quantiles.
@@ -699,144 +875,25 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
         beta_hat = adapter.coefficients()
         jax_diffable = is_jax_differentiable(h, beta_hat)
 
-    # Step 1: Parallel refit (pure statsmodels/numpy, no JAX).
-    n_jobs = config.n_jobs
-    if n_jobs == -1:
-        import os
-        n_jobs = os.cpu_count() or 1
-
-    if n_jobs > 1:
-        warnings.warn(
-            f"Parallel bootstrap (n_jobs={n_jobs}) is experimental. "
-            "Process-based execution is used when pickling succeeds; "
-            "otherwise it falls back to thread-based execution.",
-            RuntimeWarning,
-            stacklevel=3,
-        )
-
-    def _maybe_tqdm(it, *, desc):
-        if config.progress_bar:
-            return tqdm(it, total=config.n_boot, desc=desc)
-        return it
-
-    if n_jobs != 1:
-        import pickle
-        try:
-            pickle.dumps(adapter)
-            pickle.dumps(data)
-            if config.matching is not None:
-                pickle.dumps(config.matching)
-            use_processes = True
-        except (TypeError, pickle.PicklingError):
-            warnings.warn(
-                "Adapter, data, or matching object cannot be pickled; falling back "
-                "to thread-based parallel bootstrap. Consider setting n_jobs=1 "
-                "for stability.",
-                RuntimeWarning,
-                stacklevel=3,
-            )
-            use_processes = False
-
-        if use_processes:
-            import multiprocessing as _mp
-            from concurrent.futures import ProcessPoolExecutor
-            # Use 'spawn' to avoid deadlocks with JAX's background threads.
-            _ctx = _mp.get_context("spawn")
-            with ProcessPoolExecutor(max_workers=n_jobs, mp_context=_ctx) as executor:
-                refitted = list(_maybe_tqdm(executor.map(
-                    _refit_replicate_task,
-                    enumerate(all_idx),
-                    [adapter] * len(all_idx),
-                    [data] * len(all_idx),
-                    [config.matching] * len(all_idx),
-                ), desc="Bootstrap refit"))
-        else:
-            with threadpoolctl.threadpool_limits(limits=1):
-                with ThreadPoolExecutor(max_workers=n_jobs) as executor:
-                    refitted = list(_maybe_tqdm(executor.map(
-                        _refit_replicate_task,
-                        enumerate(all_idx),
-                        [adapter] * len(all_idx),
-                        [data] * len(all_idx),
-                        [config.matching] * len(all_idx),
-                    ), desc="Bootstrap refit"))
+    # Step 1: Harvest or reuse cached bootstrap states
+    if config.all_states is not None:
+        states = config.all_states
+        failures = config.all_states_failures or []
     else:
-        refitted = list(_maybe_tqdm(map(
-            _refit_replicate_task,
-            enumerate(all_idx),
-            [adapter] * len(all_idx),
-            [data] * len(all_idx),
-            [config.matching] * len(all_idx),
-        ), desc="Bootstrap refit"))
-
-    # Step 2: Serial JAX evaluation (thread-safe, compilation cache friendly).
-    # For studentized bootstrap, if the estimand is a module-level kernel
-    # partial, pre-build a stable gradient function so JAX can cache the
-    # compilation across replicates (see CODE_AUDIT §5.1).
-    _kernel_grad_fn = None
-    if ci_method == "studentized" and jax_diffable:
-        h_probe = h_factory(adapter)
-        if isinstance(h_probe, partial) and getattr(h_probe.func, "__pymargins_kernel__", False):
-            _kernel_grad_fn = jax.grad(h_probe.func, argnums=0)
-
-    # ------------------------------------------------------------------
-    # Fast path: JIT + chunked vmap over stacked replicates.
-    #
-    # Any eligible single-atom kernel partial is batched, at *any* scenario
-    # (fixed atexog, at="typical" with free covariates, AME at="overall",
-    # and AME under matching).  The evaluation design is either reused
-    # (data-independent, detected by exact byte-equality over several
-    # probed replicates) or rebuilt per replicate via the same h_factory
-    # the loop uses (data-coupled) — so the batched result is identical-by-
-    # construction to h_b(beta_b).  Any structural surprise returns None and
-    # the legacy loop below produces the authoritative result.
-    # ------------------------------------------------------------------
-    raw_results = []
-    fast_path = _try_fast_path(h, adapter, config)
-    if fast_path is not None:
-        bootstrap_config = config.bootstrap_config or {}
-        chunk_size = bootstrap_config.get("vmap_chunk_size", 256)
-        batched = _run_fast_path(
-            fast_path, refitted, h_factory, config,
-            ci_method, jax_diffable, chunk_size,
+        states, failures = _harvest_bootstrap_states(
+            adapter, data, all_idx,
+            matching=config.matching,
+            n_jobs=config.n_jobs,
+            progress=config.progress_bar,
         )
-        if batched is None:
-            fast_path = None
-        else:
-            raw_results = batched
 
-    if fast_path is None:
-        # Legacy per-replicate loop: non-autodiff adapters, multi-atom
-        # (over=/grid) estimands, non-kernel composes, or any structural
-        # surprise the batched path declined. Authoritative result.
-        for b, new_adapter, refit_exc in _maybe_tqdm(refitted, desc="Bootstrap evaluate"):
-            if refit_exc is not None:
-                raw_results.append(refit_exc)
-                continue
-            try:
-                h_b = h_factory(new_adapter)
-                beta_b = new_adapter.coefficients()
-                theta_b = np.asarray(h_b(beta_b))
-
-                se_b = None
-                if ci_method == "studentized" and jax_diffable:
-                    try:
-                        Sigma_b = new_adapter.covariance()
-                        if _kernel_grad_fn is not None and isinstance(h_b, partial):
-                            grad_b = _kernel_grad_fn(beta_b, *h_b.args, **h_b.keywords)
-                        else:
-                            grad_b = gradient(
-                                h_b, beta_b,
-                                backend=config.gradient_backend,
-                                fd_step=config.fd_step,
-                            )
-                        se_b = np.asarray(delta_se(grad_b, Sigma_b))
-                    except (ValueError, TypeError, jax.errors.JAXTypeError, np.linalg.LinAlgError):
-                        se_b = None
-
-                raw_results.append((theta_b, se_b))
-            except (ValueError, RuntimeError, np.linalg.LinAlgError) as exc:
-                raw_results.append(exc)
+    # Step 2: Evaluate estimand over the states (fast path or legacy loop)
+    kernel_info = _try_fast_path(h, adapter, config)
+    raw_results = _replay_h_over_states(
+        states, failures, h_factory, h, config,
+        kernel_info=kernel_info,
+        jax_diffable=jax_diffable,
+    )
 
     # Collect results
     h_draws_inf = []
@@ -1020,4 +1077,6 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
         "estimand_metadata": estimand_metadata or {},
         "ci_method": ci_method,
         "bootstrap_extras": bootstrap_extras,
+        "n_boot_effective": len(h_draws_inf),
+        "n_boot_failed": n_failures,
     }

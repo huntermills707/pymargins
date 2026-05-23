@@ -202,6 +202,33 @@ class Margins:
         models or when customizing predict semantics.
     """
 
+    _FROZEN_AFTER_CACHE = frozenset({
+        "method", "n_boot", "rng_seed", "n_sim",
+        "cluster", "block_size", "bootstrap_config",
+        "matching",
+    })
+
+    def __setattr__(self, name, value):
+        if name in self._FROZEN_AFTER_CACHE and self._any_cache_materialized():
+            raise RuntimeError(
+                f"Cannot mutate {name!r} after the inference cache has been "
+                f"materialized. Construct a new Margins session."
+            )
+        super().__setattr__(name, value)
+
+    def _any_cache_materialized(self):
+        # Only inference-distribution caches trigger the freeze.
+        # _cov_cache is set eagerly at construction but does not commit
+        # the session to a specific bootstrap/simulation distribution.
+        return any(
+            hasattr(self, attr)
+            for attr in (
+                "_bootstrap_bank_cache",
+                "_bootstrap_states_cache",
+                "_simulation_draws_cache",
+            )
+        )
+
     # -----------------------------------------------------------------------
     # Construction
     # -----------------------------------------------------------------------

@@ -168,6 +168,80 @@ For this sample size and event count the bootstrap CI agrees closely
 with the partial-likelihood CI from §2 — exactly the boring result
 you want.
 
+## 6. Counterfactual survival curves
+
+The hazard-ratio analyses above answer "does the treatment change the
+*relative* re-arrest rate." A reviewer reading the paper will also
+want the *absolute* survival curve under each treatment arm,
+standardized over the sample. That's the pymargins analogue of a
+Kaplan–Meier plot for the counterfactual `fin=1` vs `fin=0` worlds,
+adjusted for the rest of the covariates.
+
+Each scenario carries its own `prediction_time`; one bootstrap pass
+covers the entire grid because the refit cache is session-level.
+
+```{code-cell} python
+from pymargins.adapters import LifelinesCoxPHSurvivalAdapter
+
+surv_adapter = LifelinesCoxPHSurvivalAdapter(cph, training_data=df)
+m_surv = Margins(
+    cph, adapter=surv_adapter, at="overall",
+    method="bootstrap", n_boot=300, rng_seed=0,
+)
+
+weeks = np.arange(4, 53, 4)
+scens = (
+    [{"atexog": {"fin": 1}, "prediction_time": float(t),
+      "label": f"fin=1,t={t}"} for t in weeks]
+    + [{"atexog": {"fin": 0}, "prediction_time": float(t),
+        "label": f"fin=0,t={t}"} for t in weeks]
+)
+curves = m_surv.contrasts(scenarios=scens, contrasts=np.eye(len(scens)))
+curve_df = curves.to_frame()
+curve_df["arm"] = ["fin=1"] * len(weeks) + ["fin=0"] * len(weeks)
+curve_df["week"] = list(weeks) * 2
+
+fig, ax = plt.subplots(figsize=(6, 4))
+for arm, color in [("fin=0", "steelblue"), ("fin=1", "firebrick")]:
+    sub = curve_df[curve_df["arm"] == arm]
+    ax.plot(sub["week"], sub["estimate"], "-o", color=color, label=arm)
+    ax.fill_between(sub["week"], sub["ci_lower"], sub["ci_upper"],
+                    alpha=0.15, color=color)
+ax.set(xlabel="Week", ylabel="Counterfactual survival probability",
+       ylim=(0.5, 1.0))
+ax.legend()
+```
+
+The bands are bootstrap percentile intervals, computed jointly across
+treatment arms and times because every estimand in this session shares
+the same resample bank.
+
+The *difference* curve `S₁(t) − S₀(t)` is a contrast over the same
+scenarios — one row of weights per week, +1 on the treated atom and
+−1 on the matched control atom:
+
+```{code-cell} python
+k = len(weeks)
+W = np.zeros((k, 2 * k))
+for i in range(k):
+    W[i, i] = +1.0       # treated arm at week i
+    W[i, k + i] = -1.0   # control arm at the same week
+diff = m_surv.contrasts(scenarios=scens, contrasts=W)
+diff_df = diff.to_frame()
+diff_df["week"] = list(weeks)
+
+fig, ax = plt.subplots(figsize=(6, 4))
+ax.plot(diff_df["week"], diff_df["estimate"], "-o", color="black")
+ax.fill_between(diff_df["week"], diff_df["ci_lower"], diff_df["ci_upper"],
+                alpha=0.2, color="black")
+ax.axhline(0.0, color="grey", lw=0.5)
+ax.set(xlabel="Week", ylabel="S(t | fin=1) − S(t | fin=0)")
+```
+
+Because both curves came from the same `Margins` session, their
+`draws_inf` are aligned per replicate — the difference is a valid
+bootstrap estimand without extra reweighting.
+
 ## Where to next
 
 - [](../tutorials/cox_survival.md) — the underlying Cox tutorial.

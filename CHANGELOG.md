@@ -7,8 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-05-23
+
 ### Added
 
+- **Session-level inference-distribution caching.** Bootstrap and
+  simulation random objects are now materialized once per session and
+  reused across every subsequent call:
+  - **Bootstrap**: resample indices and refitted-model states are
+    harvested at first bootstrap-method use; later calls evaluate the
+    estimand over the cached states rather than re-fitting. A 10-point
+  survival curve now costs ~1 bootstrap pass, not 10.
+  - **Simulation**: β* draws are generated once and reused.
+  - Sessions freeze inference parameters (`method`, `n_boot`, `rng_seed`,
+    `n_sim`, `cluster`, `block_size`, `bootstrap_config`, `matching`)
+    after the cache is built; mutating them raises `RuntimeError`.
+  - Adapter-drift detection: if the underlying model is re-fitted after
+    the cache exists, the next call raises `RuntimeError`.
+  - `MarginsResult` exposes `n_boot_effective` and `n_boot_failed` so
+    callers know how many replicates succeeded.
+- **Multi-time prediction** for survival and other time-indexed adapters.
+  Scenarios can now carry a `prediction_time` key; the lifelines Cox-PH
+  survival adapter supports it via `with_prediction_time` shallow clones.
+  `contrasts()` and `evaluate()` correctly route each scenario through
+  its own predict function. The Rossi recidivism demo shows a
+  counterfactual survival-curve grid computed in one bootstrap pass.
 - Six end-to-end demos in `docs/demos/` using bundled datasets: Mroz LFP
   (logit), Fair affairs (logit vs Poisson), Spector PSI (small-n
   inference), Rossi recidivism (Cox PH), wage panel (entity FE), and
@@ -30,6 +53,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   single import target.
 - `tests/test_adapters_facade.py` ensuring every concrete adapter is mapped
   and resolved correctly.
+- `tests/test_session_bank_cache.py` covering session-level bootstrap-state
+  banks, simulation-draw banks, resample-index banks, cache invalidation,
+  adapter-drift detection, and frozen-attribute enforcement.
+
+### Fixed
+
+- Broken MyST cross-references in `docs/explanations/session_precommitment.md`
+  (links to `howto/bootstrap.md`, `howto/cluster_block_bootstrap.md`, and
+  `howto/matching.md`).
+- ReadTheDocs notebook execution now defaults to `nb_execution_mode="cache"`
+  so already-executed notebooks do not re-run on every RTD build.
 
 ## [0.0.1] — 2026-05-17
 
@@ -66,5 +100,6 @@ Initial public release on PyPI and Read the Docs.
 - Documentation site with tutorials, how-to guides, API reference,
   and theory/design explanations.
 
-[Unreleased]: https://github.com/huntermills707/pymargins/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/huntermills707/pymargins/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/huntermills707/pymargins/releases/tag/v0.1.0
 [0.0.1]: https://github.com/huntermills707/pymargins/releases/tag/v0.0.1

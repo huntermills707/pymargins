@@ -129,6 +129,13 @@ class MarginsResult:
     bootstrap_extras : dict, optional
         Method-specific data for recomputing CIs (e.g., BCa z0/a,
         studentized t-star draws).
+
+    n_boot_effective : int, optional
+        Number of successful bootstrap replicates (may be less than
+        ``n_boot`` if some replicates failed to refit).
+
+    n_boot_failed : int, optional
+        Number of bootstrap replicates that failed to refit.
     """
     estimate: np.ndarray
     std_error: np.ndarray
@@ -152,6 +159,8 @@ class MarginsResult:
     ci_method: Optional[str] = None
     bootstrap_extras: Optional[dict] = None
     resample_bank_id: Optional[str] = None
+    n_boot_effective: Optional[int] = None
+    n_boot_failed: Optional[int] = None
 
     # -----------------------------------------------------------------------
     # Reporting
@@ -1160,6 +1169,8 @@ class MarginsResult:
             ci_method=self.ci_method,
             bootstrap_extras=self.bootstrap_extras,
             resample_bank_id=self.resample_bank_id,
+            n_boot_effective=self.n_boot_effective,
+            n_boot_failed=self.n_boot_failed,
         )
 
     def __truediv__(self, other) -> "MarginsResult":
@@ -1291,6 +1302,8 @@ class MarginsResult:
                 ci_method=self.ci_method,
                 bootstrap_extras=self.bootstrap_extras,
                 resample_bank_id=self.resample_bank_id,
+                n_boot_effective=self.n_boot_effective,
+                n_boot_failed=self.n_boot_failed,
             )
 
         # Fallback to label-heuristic path for legacy results without _outcome_shape
@@ -1392,6 +1405,8 @@ class MarginsResult:
             ci_method=self.ci_method,
             bootstrap_extras=self.bootstrap_extras,
             resample_bank_id=self.resample_bank_id,
+            n_boot_effective=self.n_boot_effective,
+            n_boot_failed=self.n_boot_failed,
         )
 
     def materialize(self) -> "MarginsResult":
@@ -1599,6 +1614,8 @@ def _combine_results(
             ci_method=None,
             bootstrap_extras=None,
             resample_bank_id=None,
+            n_boot_effective=None,
+            n_boot_failed=None,
         )
 
     elif a.draws_inf is not None and b.draws_inf is not None:
@@ -1974,6 +1991,8 @@ def compose_results(
             ci_method="percentile (composed)",
             bootstrap_extras=None,
             resample_bank_id=results[0].resample_bank_id,
+            n_boot_effective=None,
+            n_boot_failed=None,
         )
 
 

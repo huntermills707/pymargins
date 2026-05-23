@@ -427,6 +427,16 @@ class ModelAdapter(abc.ABC):
             "bootstrap inference is unavailable for this adapter."
         )
 
+    def bootstrap_state(self) -> "ModelAdapter":
+        """Replay state for a refitted adapter.
+
+        Returning ``self`` is correct — a refitted adapter is itself a
+        valid state. Override only when (a) you want a slimmer or more
+        picklable representation, or (b) the framework's refit retains
+        mutable state you'd rather drop before caching.
+        """
+        return self
+
 
 # ---------------------------------------------------------------------------
 # Adapter shapes (intermediate base classes)

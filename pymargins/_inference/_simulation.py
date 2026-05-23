@@ -9,15 +9,12 @@ from .._estimands import is_jax_differentiable
 from ._config import InferenceConfig
 
 
-def _run_simulation(h, adapter, config, estimand_metadata, *, fallback_reason=None, skip_kappa=False):
-    """Krinsky–Robb simulation: sample β̃ ~ N(β̂, Σ̂), evaluate h, take
-    quantiles for CIs."""
-    beta = adapter.coefficients()
-    Sigma = config.cov_params if config.cov_params is not None else adapter.covariance()
+def _generate_simulation_draws(beta, Sigma, rng, n_sim):
+    """Generate β* ~ N(beta, Sigma, size=n_sim) with PSD validation.
 
-    rng = np.random.default_rng(
-        [config.rng_seed, 0] if config.rng_seed is not None else None
-    )
+    Shared helper used by both the session-level simulation draw bank
+    and the inline generation path in _run_simulation.
+    """
     Sigma_np = np.asarray(Sigma)
     beta_np = np.asarray(beta)
     eigvals = np.linalg.eigvalsh(Sigma_np)
@@ -28,12 +25,28 @@ def _run_simulation(h, adapter, config, estimand_metadata, *, fallback_reason=No
             f"Minimum eigenvalue: {np.min(eigvals):.3e}. "
             "Check your vcov specification or use a different inference method."
         )
-    draws_beta = rng.multivariate_normal(beta_np, Sigma_np, size=config.n_sim)
-    if not np.all(np.isfinite(draws_beta)):
+    draws = rng.multivariate_normal(beta_np, Sigma_np, size=n_sim)
+    if not np.all(np.isfinite(draws)):
         raise ValueError(
             "Simulation draws contain NaN or Inf. The covariance matrix may be "
             "singular or numerically unstable."
         )
+    return draws
+
+
+def _run_simulation(h, adapter, config, estimand_metadata, *, fallback_reason=None, skip_kappa=False):
+    """Krinsky–Robb simulation: sample β̃ ~ N(β̂, Σ̂), evaluate h, take
+    quantiles for CIs."""
+    beta = adapter.coefficients()
+    Sigma = config.cov_params if config.cov_params is not None else adapter.covariance()
+
+    if config.sim_draws is not None:
+        draws_beta = config.sim_draws
+    else:
+        rng = np.random.default_rng(
+            [config.rng_seed, 0] if config.rng_seed is not None else None
+        )
+        draws_beta = _generate_simulation_draws(beta, Sigma, rng, config.n_sim)
 
     estimate = h(beta)
     try:

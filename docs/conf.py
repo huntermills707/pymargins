@@ -5,7 +5,7 @@ sys.path.insert(0, os.path.abspath('..'))
 project = 'pymargins'
 copyright = '2026'
 author = 'Hunter Mills'
-release = '0.0.2'
+release = '0.1.0'
 
 extensions = [
     'sphinx.ext.autodoc',
@@ -42,7 +42,10 @@ myst_heading_anchors = 3
 # 'cache' reuses cached outputs when inputs haven't changed (fastest
 # for CI), and 'off' disables execution entirely.  Override with the
 # PYMARGINS_DOCS_EXEC environment variable.
-nb_execution_mode = os.getenv("PYMARGINS_DOCS_EXEC", "auto")
+# Default to 'cache' on ReadTheDocs so already-cached notebooks don't
+# re-execute on every build.
+_default_exec_mode = "cache" if os.getenv("READTHEDOCS") else "auto"
+nb_execution_mode = os.getenv("PYMARGINS_DOCS_EXEC", _default_exec_mode)
 nb_execution_cache_path = os.path.join(os.path.dirname(__file__), ".jupyter_cache")
 nb_execution_timeout = 180
 nb_execution_raise_on_error = True

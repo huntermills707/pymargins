@@ -14,9 +14,15 @@ are hidden inside the JVP wrapper.
 Delta-method SEs are INVALID for survival-probability estimands because they
 ignore uncertainty in the estimated baseline hazard. Only bootstrap inference
 is supported, matching marginaleffects' recommendation.
+
+prediction_time can be set at construction (constant across calls) or
+overridden per scenario via the ``prediction_time`` scenario key. Scenarios
+producing different times are evaluated against the same refit/cache via
+shallow adapter clones (``with_prediction_time``).
 """
 
 from __future__ import annotations
+import copy
 from typing import Optional, Any
 import jax.numpy as jnp
 import numpy as np
@@ -120,6 +126,16 @@ class LifelinesCoxPHSurvivalAdapter(WrappedFDAdapter):
     # -----------------------------------------------------------------------
     # Prediction (via WrappedFDAdapter)
     # -----------------------------------------------------------------------
+
+    def with_prediction_time(self, t: float) -> "LifelinesCoxPHSurvivalAdapter":
+        """Return a shallow clone with prediction_time overridden.
+
+        Used by the atom builders to evaluate scenarios that carry a
+        ``prediction_time`` key, without rebuilding the underlying fit.
+        """
+        clone = copy.copy(self)
+        clone._prediction_time = float(t)
+        return clone
 
     def native_predict(self, beta_np: np.ndarray, X) -> np.ndarray:
         """Compute survival probability at prediction_time.
