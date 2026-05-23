@@ -4,8 +4,8 @@ sys.path.insert(0, os.path.abspath('..'))
 
 project = 'pymargins'
 copyright = '2026'
-author = ''
-release = '0.0.1'
+author = 'Hunter Mills'
+release = '0.0.2'
 
 extensions = [
     'sphinx.ext.autodoc',
