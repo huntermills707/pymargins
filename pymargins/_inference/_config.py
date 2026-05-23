@@ -100,6 +100,20 @@ class InferenceConfig:
     Used by session-level resample banks to guarantee matched replicates
     across composable bootstrap calls."""
 
+    all_states: Optional[list] = None
+    """Pre-harvested bootstrap states (refitted adapters). When provided,
+    the bootstrap engine skips refitting and replays h over the cached
+    states. Used by session-level bootstrap state banks."""
+
+    all_states_failures: Optional[list] = None
+    """Failed replicates corresponding to ``all_states``. Paired with
+    ``all_states`` so failure accounting is consistent across calls."""
+
+    sim_draws: Optional[Any] = None
+    """Pre-generated simulation β* draws. When provided, the simulation
+    engine reuses these instead of drawing fresh values. Used by
+    session-level simulation draw banks."""
+
     progress_bar: bool = False
     """Whether to show a progress bar during bootstrap execution.
     Requires ``tqdm`` to be installed."""
