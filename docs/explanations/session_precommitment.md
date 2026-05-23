@@ -157,6 +157,6 @@ construction. The session refuses to fall back to defaults.
   analysis. New session-level commitments must show up there.
 
 See [](inference_scale.md), [](kappa_diagnostic.md),
-[](delta_sim_bootstrap.md), [](howto/bootstrap.md),
-[](howto/cluster_block_bootstrap.md), and [](howto/matching.md)
+[](delta_sim_bootstrap.md), [](../howto/bootstrap.md),
+[](../howto/cluster_block_bootstrap.md), and [](../howto/matching.md)
 for why each particular commitment matters.
