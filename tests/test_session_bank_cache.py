@@ -352,3 +352,65 @@ def test_lifelines_cox_bootstrap_cache():
         assert r1.n_boot_effective == r2.n_boot_effective
     finally:
         _boot_mod._harvest_bootstrap_states = orig_harvest
+
+
+def test_survival_multi_time_scenario_curve():
+    """Survival adapter accepts per-scenario prediction_time and produces a
+    multi-time counterfactual curve in a single bootstrap pass."""
+    pytest.importorskip("lifelines")
+    from lifelines import CoxPHFitter
+    from pymargins._adapters.lifelines_coxph_survival import (
+        LifelinesCoxPHSurvivalAdapter,
+    )
+
+    rng = np.random.default_rng(0)
+    n = 300
+    df = pd.DataFrame({
+        "age": rng.normal(50, 10, size=n),
+        "treatment": rng.binomial(1, 0.5, size=n),
+    })
+    lp = -0.02 * (df["age"] - 50) - 0.7 * df["treatment"]
+    df["duration"] = rng.exponential(np.exp(-lp) * 8.0)
+    df["event"] = (df["duration"] < 20).astype(int)
+    df["duration"] = df["duration"].clip(upper=20)
+    cph = CoxPHFitter().fit(df, duration_col="duration", event_col="event")
+
+    adapter = LifelinesCoxPHSurvivalAdapter(cph, training_data=df)
+    m = Margins(cph, adapter=adapter, at="overall",
+                method="bootstrap", n_boot=20, n_jobs=1, rng_seed=0)
+
+    times = [2.0, 8.0, 16.0]
+    scens = (
+        [{"atexog": {"treatment": 1}, "prediction_time": t,
+          "label": f"trt=1,t={t}"} for t in times]
+        + [{"atexog": {"treatment": 0}, "prediction_time": t,
+            "label": f"trt=0,t={t}"} for t in times]
+    )
+    W = np.eye(len(scens))
+    curve = m.contrasts(scenarios=scens, contrasts=W)
+
+    est = np.asarray(curve.estimate).ravel()
+    assert est.shape == (len(scens),)
+    # All survival probabilities should lie in (0, 1).
+    assert np.all((est > 0) & (est < 1))
+    # Survival decreases with time for each arm.
+    for arm_start in (0, len(times)):
+        arm = est[arm_start:arm_start + len(times)]
+        assert np.all(np.diff(arm) <= 1e-9), f"Non-monotonic curve: {arm}"
+
+
+def test_survival_prediction_time_rejected_by_non_time_adapter():
+    """A scenario with prediction_time against a non-time-aware adapter
+    should raise a clear error rather than silently ignore the key."""
+    rng = np.random.default_rng(0)
+    n = 80
+    df = pd.DataFrame({"x": rng.normal(size=n)})
+    df["y"] = 1.0 + 0.5 * df["x"] + rng.normal(scale=0.3, size=n)
+    fit = smf.ols("y ~ x", data=df).fit()
+
+    m = Margins(fit, method="delta")
+    with pytest.raises(ValueError, match="prediction_time"):
+        m.contrasts(
+            scenarios=[{"atexog": {"x": 0}, "prediction_time": 5.0}],
+            contrasts=[1.0],
+        )

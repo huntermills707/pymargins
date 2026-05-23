@@ -60,6 +60,10 @@ def _build_prediction_estimand(
     atexog and over values for plot-ready DataFrame construction.
     """
     adapter = adapter if adapter is not None else session.adapter
+    # A scalar prediction_time at this level applies to every atom this
+    # call produces (groups × grid). Per-scenario times for multi-time
+    # curves go through contrasts(scenarios=[...]) instead.
+    estimand_adapter = _scenario_adapter(adapter, scenario)
     base_data = _get_base_data(session, adapter)
     var_meta = adapter.variable_metadata()
     resolver = make_aggregation_resolver(session.at, session.weights)
@@ -99,7 +103,7 @@ def _build_prediction_estimand(
             else:
                 agg_kind = "none" if X_i.shape[0] == 1 else "overall"
             h_atom = make_prediction_estimand(
-                adapter, X_i,
+                estimand_adapter, X_i,
                 aggregate=agg_kind,
                 weights=jnp.asarray(session.weights) if session.weights is not None else None,
                 phi_inv=session.phi_inv,
@@ -157,6 +161,7 @@ def _build_slope_estimand(
     Also returns a list of scenario dicts, one per atom.
     """
     adapter = adapter if adapter is not None else session.adapter
+    estimand_adapter = _scenario_adapter(adapter, scenario)
     base_data = _get_base_data(session, adapter)
     var_meta = adapter.variable_metadata()
     resolver = make_aggregation_resolver(session.at, session.weights)
@@ -198,7 +203,7 @@ def _build_slope_estimand(
 
         for var_name in var_list:
             h_atom = make_slope_estimand(
-                adapter, df, var_name,
+                estimand_adapter, df, var_name,
                 aggregate=agg_kind,
                 weights=jnp.asarray(session.weights) if session.weights is not None else None,
                 phi_inv=session.phi_inv,
@@ -226,6 +231,8 @@ def _build_contrast_estimand(
     base_data = _get_base_data(session, adapter)
 
     scenarios_X = []
+    scenario_predict_fns = []
+    any_per_scenario_predict = False
     for scenario in scenarios:
         df, _ = expand_scenario(
             scenario,
@@ -237,13 +244,39 @@ def _build_contrast_estimand(
         )
         from .._tabular import to_pandas_if_needed
         scenarios_X.append(adapter.design_matrix_from_df(to_pandas_if_needed(df)))
+        scen_adapter = _scenario_adapter(adapter, scenario)
+        if scen_adapter is not adapter:
+            any_per_scenario_predict = True
+        scenario_predict_fns.append(scen_adapter.predict)
 
     return make_linear_combination_estimand(
         adapter,
         scenarios_X=scenarios_X,
         weights=weights_arg,
         phi_inv=session.phi_inv,
+        scenario_predict_fns=scenario_predict_fns if any_per_scenario_predict else None,
     )
+
+
+def _scenario_adapter(adapter, scenario: dict):
+    """Return a (possibly cloned) adapter parameterized for one scenario.
+
+    Currently honors the ``prediction_time`` scenario key on adapters that
+    expose ``with_prediction_time`` (e.g., the lifelines Cox survival
+    adapter). Returns the original adapter when no scenario-level override
+    is requested.
+    """
+    t = scenario.get("prediction_time")
+    if t is None:
+        return adapter
+    if not hasattr(adapter, "with_prediction_time"):
+        raise ValueError(
+            f"Scenario carries 'prediction_time' but adapter "
+            f"{type(adapter).__name__} does not support per-scenario time. "
+            "Use a time-aware adapter (e.g., LifelinesCoxPHSurvivalAdapter) "
+            "or remove 'prediction_time' from the scenario."
+        )
+    return adapter.with_prediction_time(t)
 
 
 def _build_evaluate_estimand(
@@ -257,6 +290,8 @@ def _build_evaluate_estimand(
     base_data = _get_base_data(session, adapter)
 
     scenarios_X = []
+    scenario_predict_fns = []
+    any_per_scenario_predict = False
     for scenario in scenarios:
         df, _ = expand_scenario(
             scenario,
@@ -268,10 +303,15 @@ def _build_evaluate_estimand(
         )
         from .._tabular import to_pandas_if_needed
         scenarios_X.append(adapter.design_matrix_from_df(to_pandas_if_needed(df)))
+        scen_adapter = _scenario_adapter(adapter, scenario)
+        if scen_adapter is not adapter:
+            any_per_scenario_predict = True
+        scenario_predict_fns.append(scen_adapter.predict)
 
     return make_evaluate_estimand(
         adapter,
         scenarios_X=scenarios_X,
         compose=compose,
         phi_inv=session.phi_inv,
+        scenario_predict_fns=scenario_predict_fns if any_per_scenario_predict else None,
     )
