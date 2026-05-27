@@ -8,6 +8,7 @@ linear combinations, and arbitrary differentiable estimands.
 
 from __future__ import annotations
 from typing import Callable, Optional, Union, Any
+import hashlib
 import inspect
 import weakref
 
@@ -32,6 +33,7 @@ from .._scenarios import (
 )
 from .._kappa import session_kappa
 from .._result import MarginsResult, DiagnosticResult
+from .._result._margins import compose_results
 from .._result._text import SummaryString
 from ._estimands import (
     _get_base_data,
@@ -548,6 +550,55 @@ class Margins:
         """Fisher z scale: contrasts on z; reported as correlations."""
         return cls(model, phi=jnp.tanh, phi_inv=jnp.arctanh, **kwargs)
 
+    @classmethod
+    def from_posterior(
+        cls,
+        model,
+        posterior_draws: np.ndarray,
+        *,
+        point_estimate: Optional[np.ndarray] = None,
+        **kwargs,
+    ) -> "Margins":
+        """Construct a Margins session from posterior draws of β.
+
+        The simulation inference path uses the user-supplied draws instead
+        of normal draws around β̂. Useful for PyMC, NumPyro, Stan, etc.
+
+        Parameters
+        ----------
+        posterior_draws : array of shape (n_draws, p)
+        point_estimate : array of shape (p,), optional
+            Reported estimate. Defaults to posterior mean.
+        **kwargs
+            Forwarded to ``Margins.__init__``. ``method`` and ``n_sim``
+            default to ``"simulation"`` and ``n_draws``.
+        """
+        kwargs.setdefault("method", "simulation")
+        kwargs.setdefault("n_sim", posterior_draws.shape[0])
+        self = cls(model, **kwargs)
+
+        draws = np.asarray(posterior_draws)
+        if draws.shape[0] > 1:
+            self._cov_cache = np.cov(draws.T)
+
+        cov = self._cov_cache
+        parts = [
+            str(self.rng_seed),
+            str(self.n_sim),
+            hashlib.sha256(np.asarray(cov).tobytes()).hexdigest()[:16],
+        ]
+        bank_key = hashlib.sha256("|".join(parts).encode()).hexdigest()[:32]
+        self._simulation_draws_cache = (bank_key, draws)
+
+        if point_estimate is not None:
+            pe = np.asarray(point_estimate)
+            self.adapter._posterior_point_estimate = pe
+            orig_coeff = self.adapter.coefficients
+            self.adapter._orig_coefficients = orig_coeff
+            self.adapter.coefficients = lambda: jnp.asarray(pe)
+
+        return self
+
     # -----------------------------------------------------------------------
     # Core entry points
     # -----------------------------------------------------------------------
@@ -748,6 +799,45 @@ class Margins:
         if outcome is not None and self.adapter.n_outcomes > 1:
             result_data = self._slice_by_outcome(result_data, outcome)
         return self._wrap_result(result_data)
+
+    def eyex(self, variable: str, **kwargs) -> MarginsResult:
+        """Elasticity: (∂y/∂x) * x / y, evaluated at the session's ``at``."""
+        return self._elasticity(variable, kind="eyex", **kwargs)
+
+    def eydx(self, variable: str, **kwargs) -> MarginsResult:
+        """Semi-elasticity: (∂y/∂x) / y."""
+        return self._elasticity(variable, kind="eydx", **kwargs)
+
+    def dyex(self, variable: str, **kwargs) -> MarginsResult:
+        """Semi-elasticity: (∂y/∂x) * x."""
+        return self._elasticity(variable, kind="dyex", **kwargs)
+
+    def _elasticity(self, variable, *, kind, clip_near_zero=1e-12, **kwargs):
+        slope = self.dydx(variable, **kwargs)
+        pred_kwargs = {k: v for k, v in kwargs.items() if k != "label"}
+        pred = self.predict(**pred_kwargs)
+        base = self._base_data
+        if hasattr(base, "__getitem__") and variable in base.columns:
+            x_bar = float(np.asarray(base[variable]).mean())
+        else:
+            raise ValueError(
+                f"Cannot compute elasticity: variable {variable!r} not found "
+                f"in training data columns."
+            )
+        fn = {
+            "eyex": lambda t: t[0] * x_bar / jnp.where(
+                jnp.abs(t[1]) < clip_near_zero,
+                jnp.sign(t[1]) * clip_near_zero,
+                t[1],
+            ),
+            "eydx": lambda t: t[0] / jnp.where(
+                jnp.abs(t[1]) < clip_near_zero,
+                jnp.sign(t[1]) * clip_near_zero,
+                t[1],
+            ),
+            "dyex": lambda t: t[0] * x_bar,
+        }[kind]
+        return compose_results([slope, pred], fn=fn, label=f"{kind}({variable})")
 
     def contrasts(
         self,
@@ -1022,6 +1112,53 @@ class Margins:
         if outcome is not None and self.adapter.n_outcomes > 1:
             result_data = self._slice_by_outcome(result_data, outcome)
         return self._wrap_result(result_data)
+
+    def rmst(
+        self,
+        *,
+        horizon: float,
+        atexog: Optional[dict] = None,
+        over: Optional[Union[str, list[str]]] = None,
+        n_grid: int = 80,
+    ) -> MarginsResult:
+        """Restricted mean survival time up to ``horizon``.
+
+        Computed by trapezoidal integration of the survival function on
+        ``n_grid`` evenly spaced times in [0, ``horizon``].
+
+        Parameters
+        ----------
+        horizon : float
+            Upper time limit for integration.
+        atexog : dict, optional
+            Exogenous variable values for the scenario.
+        over : str or list of str, optional
+            Subgroup variable(s).
+        n_grid : int, default 80
+            Number of grid points for integration.
+
+        Returns
+        -------
+        MarginsResult
+        """
+        if not hasattr(self.adapter, "with_prediction_time"):
+            raise ValueError(
+                f"Adapter {type(self.adapter).__name__} does not support "
+                f"per-scenario prediction time; rmst() requires a "
+                f"time-aware survival adapter."
+            )
+        times = np.linspace(0.0, float(horizon), int(n_grid))
+        scenarios = [
+            {"atexog": atexog, "over": over, "prediction_time": float(t)}
+            for t in times
+        ]
+        times_jax = jnp.asarray(times)
+
+        def trapz(s):
+            dt = jnp.diff(times_jax)
+            return jnp.sum(0.5 * (s[:-1] + s[1:]) * dt)
+
+        return self.evaluate(scenarios=scenarios, compose=trapz)
 
     # -----------------------------------------------------------------------
     # Outcome slicing for multi-outcome models

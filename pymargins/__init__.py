@@ -39,7 +39,7 @@ override detection or select a non-default scale.
 """
 
 from .margins import Margins
-from ._result import MarginsResult, TestResult, DiagnosticResult
+from ._result import MarginsResult, TestResult, DiagnosticResult, AdjustedResults, adjust
 from ._adapters import register_adapter
 from ._adapter import (
     ModelAdapter,
@@ -73,6 +73,8 @@ __all__ = [
     "MarginsResult",
     "TestResult",
     "DiagnosticResult",
+    "AdjustedResults",
+    "adjust",
     # Adapter interface (for extension)
     "ModelAdapter",
     "GLMAdapter",

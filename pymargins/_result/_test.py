@@ -4,8 +4,9 @@ Hypothesis test result type.
 """
 
 from __future__ import annotations
-from typing import Optional, Union
+from typing import Optional, Union, Any
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -80,3 +81,103 @@ class TestResult:
             "statistic": stat,
             "p_value": p,
         })
+
+
+# ---------------------------------------------------------------------------
+# Multiple-comparison adjustment
+# ---------------------------------------------------------------------------
+
+@dataclass
+class AdjustedResults:
+    """Container for multiple-comparison corrected p-values.
+
+    Attributes
+    ----------
+    results : MarginsResult or list/dict thereof
+        The original result(s) passed to ``adjust()``.
+    p_raw : array
+        Raw p-values concatenated across all input results.
+    p_adj : array
+        Adjusted p-values.
+    reject : array
+        Boolean rejection decisions at level ``alpha``.
+    method : str
+        Correction method name.
+    alpha : float
+        Significance level used.
+    """
+    results: Any
+    p_raw: np.ndarray
+    p_adj: np.ndarray
+    reject: np.ndarray
+    method: str
+    alpha: float
+
+    def summary(self) -> str:
+        """Human-readable summary table."""
+        lines = [
+            f"Multiple-comparison adjustment ({self.method}, alpha={self.alpha})",
+            "-" * 50,
+            f"{'Index':>6}  {'Raw p':>10}  {'Adj. p':>10}  {'Reject':>8}",
+            "-" * 50,
+        ]
+        for i, (pr, pa, rej) in enumerate(zip(self.p_raw, self.p_adj, self.reject)):
+            lines.append(
+                f"{i:>6}  {pr:>10.4g}  {pa:>10.4g}  {str(rej):>8}"
+            )
+        lines.append("-" * 50)
+        return "\n".join(lines)
+
+    def to_frame(self) -> pd.DataFrame:
+        """Return as a tidy DataFrame."""
+        return pd.DataFrame({
+            "p_raw": self.p_raw,
+            "p_adj": self.p_adj,
+            "reject": self.reject,
+            "method": self.method,
+            "alpha": self.alpha,
+        })
+
+
+def adjust(
+    results,
+    method: str = "holm",
+    *,
+    alpha: float = 0.05,
+):
+    """Apply a multiple-comparison correction to a collection of results.
+
+    Parameters
+    ----------
+    results : MarginsResult, dict, or list
+        Result object(s) carrying test statistics. ``pvalue`` arrays are
+        extracted via ``result.test()``.
+    method : str, default "holm"
+        One of ``"bonferroni"``, ``"holm"``, ``"sidak"``, ``"fdr_bh"``, or
+        any ``statsmodels.stats.multitest`` method name.
+    alpha : float, default 0.05
+        Family-wise error rate or FDR level.
+
+    Returns
+    -------
+    AdjustedResults
+    """
+    from statsmodels.stats.multitest import multipletests
+
+    if hasattr(results, "test") and callable(results.test):
+        rs = [results]
+    elif isinstance(results, dict):
+        rs = list(results.values())
+    else:
+        rs = list(results)
+
+    pvals = np.concatenate([np.atleast_1d(r.test().pvalue) for r in rs])
+    reject, p_adj, _, _ = multipletests(pvals, alpha=alpha, method=method)
+    return AdjustedResults(
+        results=results,
+        p_raw=pvals,
+        p_adj=p_adj,
+        reject=reject,
+        method=method,
+        alpha=alpha,
+    )

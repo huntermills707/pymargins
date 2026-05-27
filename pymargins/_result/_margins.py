@@ -16,6 +16,9 @@ different sessions cannot be composed without explicit scale conversion.
 from __future__ import annotations
 from typing import Optional, Union, Literal, Any, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
+import hashlib
+import pickle
 import weakref
 import warnings
 
@@ -1446,6 +1449,124 @@ class MarginsResult:
             session=None,
             resample_bank_id=self.resample_bank_id,
         )
+
+    # -----------------------------------------------------------------------
+    # Linear hypothesis on an existing vector result
+    # -----------------------------------------------------------------------
+
+    def contrast(
+        self,
+        C: np.ndarray,
+        labels: Optional[list[str]] = None,
+    ) -> "MarginsResult":
+        """Apply a contrast matrix to a vector result.
+
+        Parameters
+        ----------
+        C : ndarray of shape (m, k)
+            Contrast matrix. Each row is a linear combination of the
+            current result's components.
+        labels : list of str, optional
+            Labels for the new m contrasts.
+
+        Returns
+        -------
+        MarginsResult
+            A new length-m vector result with proper joint inference.
+        """
+        if self.gradient is None:
+            raise ValueError(
+                "contrast() requires a delta-method result. For sim/boot, "
+                "apply C to draws_inf manually or use compose_results."
+            )
+        C = jnp.asarray(C)
+        est_inf = (
+            self.phi_inv(self.estimate)
+            if self.phi_inv is not None
+            else self.estimate
+        )
+        new_est_inf = C @ jnp.asarray(est_inf)
+        new_grad = C @ jnp.asarray(self.gradient)  # (m, p)
+        cov = jnp.asarray(self.cov_params)
+        var = jnp.einsum("ij,jk,ik->i", new_grad, cov, new_grad)
+        se = np.asarray(jnp.sqrt(var))
+        z = stats.norm.ppf(0.5 + self.level / 2.0)
+        lo_inf = new_est_inf - z * se
+        hi_inf = new_est_inf + z * se
+        phi = self.phi
+        return MarginsResult(
+            estimate=np.asarray(phi(new_est_inf)) if phi else np.asarray(new_est_inf),
+            std_error=se,
+            conf_int_lower=np.asarray(phi(lo_inf)) if phi else np.asarray(lo_inf),
+            conf_int_upper=np.asarray(phi(hi_inf)) if phi else np.asarray(hi_inf),
+            method=self.method,
+            level=self.level,
+            n_obs=self.n_obs,
+            kappa=self.kappa,
+            estimand_metadata={
+                "labels": labels or [f"contrast[{i}]" for i in range(C.shape[0])]
+            },
+            gradient=np.asarray(new_grad),
+            cov_params=self.cov_params,
+            phi=self.phi,
+            phi_inv=self.phi_inv,
+            session=self.session,
+        )
+
+    # -----------------------------------------------------------------------
+    # Per-observation influence
+    # -----------------------------------------------------------------------
+
+    def influence(self) -> np.ndarray:
+        """Per-observation influence on the estimand.
+
+        For delta-method results, returns the analytical influence
+        ∇h(β̂) · score_i(β̂) when the adapter exposes per-observation
+        scores. For bootstrap results with BCa, returns the cached
+        jackknife θ_{(-i)} − θ̄ vector.
+        """
+        if self.ci_method == "bca" and self.bootstrap_extras:
+            jack = self.bootstrap_extras.get("influence_jackknife")
+            if jack is not None:
+                return np.asarray(jack)
+        if self.gradient is not None and hasattr(self._session_obj(), "adapter"):
+            adapter = self._session_obj().adapter
+            if hasattr(adapter, "score_obs"):
+                S = np.asarray(adapter.score_obs())  # (n, p)
+                return S @ np.asarray(self.gradient)  # (n,) or (n, k)
+        raise NotImplementedError(
+            "Influence requires either a BCa bootstrap result or an "
+            "adapter that exposes score_obs()."
+        )
+
+    # -----------------------------------------------------------------------
+    # Disk persistence
+    # -----------------------------------------------------------------------
+
+    def to_disk(self, path: Union[str, Path], *, format: str = "pickle") -> None:
+        """Persist a materialized result to disk. Auto-materializes."""
+        if format != "pickle":
+            raise ValueError(f"Unsupported format: {format!r}. Only 'pickle' is supported.")
+        obj = self.materialize() if (
+            self.gradient is not None or self.draws is not None or self.session is not None
+        ) else self
+        from .. import __version__
+        with open(path, "wb") as f:
+            pickle.dump({"version": __version__, "result": obj}, f)
+
+    @classmethod
+    def from_disk(cls, path: Union[str, Path]) -> "MarginsResult":
+        """Load a MarginsResult from disk."""
+        with open(path, "rb") as f:
+            blob = pickle.load(f)
+        from .. import __version__
+        if blob.get("version") != __version__:
+            warnings.warn(
+                f"Result was saved with pymargins {blob.get('version')}; "
+                f"current version is {__version__}. Schema may differ.",
+                UserWarning,
+            )
+        return blob["result"]
 
 
 # ---------------------------------------------------------------------------
