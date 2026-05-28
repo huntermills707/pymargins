@@ -812,6 +812,42 @@ class Margins:
         """Semi-elasticity: (∂y/∂x) * x."""
         return self._elasticity(variable, kind="dyex", **kwargs)
 
+    def wtp(
+        self,
+        attribute: str,
+        price: str,
+        **kwargs,
+    ) -> MarginsResult:
+        """Willingness to pay: -(∂U/∂attribute) / (∂U/∂price).
+
+        Parameters
+        ----------
+        attribute : str
+            Continuous attribute variable.
+        price : str
+            Continuous price / cost variable.
+        **kwargs
+            Forwarded to the underlying ``dydx`` calls (``atexog``,
+            ``over``, ``outcome``, etc.).
+
+        Returns
+        -------
+        MarginsResult
+            The WTP ratio with proper joint inference via the delta method.
+
+        Notes
+        -----
+        For multi-outcome models (e.g. MNLogit), slice the result to a
+        single outcome first: ``m.dydx("price").outcome(k)``.
+        """
+        slope_attr = self.dydx(attribute, **kwargs)
+        slope_price = self.dydx(price, **kwargs)
+        return compose_results(
+            [slope_attr, slope_price],
+            fn=lambda t: -t[0] / t[1],
+            label=f"WTP({attribute})",
+        )
+
     def _elasticity(self, variable, *, kind, clip_near_zero=1e-12, **kwargs):
         slope = self.dydx(variable, **kwargs)
         pred_kwargs = {k: v for k, v in kwargs.items() if k != "label"}

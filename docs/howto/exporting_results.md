@@ -10,7 +10,7 @@ kernelspec:
   name: python3
 ---
 
-# Exporting results
+# Exporting and persisting results
 
 
 ```{code-cell} python
@@ -63,10 +63,32 @@ The DataFrame includes scenario columns (e.g. `age`, `female`) when
 available, making it ready for downstream plotting or reporting
 without string parsing.
 
-## Long-term storage with `materialize`
+## Long-term storage with `to_disk` / `from_disk`
 
-To save a result for later analysis without keeping the session and
-gradient machinery alive, call `materialize()`:
+For checkpointing or sharing results between scripts, use the built-in
+pickle persistence methods. They automatically materialize the result
+(so the saved object is self-contained) and include a version check on
+load:
+
+```{code-cell} python
+# Save
+res.to_disk("ame_results.pkl")
+
+# Load in another session
+from pymargins import MarginsResult
+loaded = MarginsResult.from_disk("ame_results.pkl")
+print(loaded.summary())
+```
+
+Materialised results support `.summary()`, `.to_frame()`, `.to_latex()`,
+and `.to_html()`, but they **cannot** recompute CIs at new confidence
+levels or run new hypothesis tests because the gradient and session
+reference are dropped during materialisation.
+
+## In-memory slimming with `materialize`
+
+If you only need to reduce memory inside a single Python session (e.g.
+when accumulating many results in a loop), call `materialize()` directly:
 
 ```{code-cell} python
 slim = res.materialize()           # estimates/SE/CI only; drops gradients
@@ -75,6 +97,6 @@ print(slim.summary())
 
 Materialised results still support arithmetic (`+`, `-`, `*`, `/`,
 `.scaled(by=...)`) for post-hoc combination.  The only thing you lose
-is the ability to call `.conf_int(method="sup-t")` when the original
-session used the delta method (sup-t requires draws, which are
-dropped).
+is the ability to call `.conf_int(level=...)` when the original
+session used the delta method (recomputing CIs at new levels requires
+the gradient, which is dropped).

@@ -15,6 +15,7 @@ different sessions cannot be composed without explicit scale conversion.
 
 from __future__ import annotations
 from typing import Optional, Union, Literal, Any, Callable
+import dataclasses
 from dataclasses import dataclass, field
 from pathlib import Path
 import hashlib
@@ -1513,6 +1514,46 @@ class MarginsResult:
             session=self.session,
         )
 
+    def pairwise_contrasts(
+        self,
+        labels: Optional[list[str]] = None,
+    ) -> "MarginsResult":
+        """All pairwise differences between components of a vector result.
+
+        Parameters
+        ----------
+        labels : list of str, optional
+            Labels for the original k components. If omitted, uses
+            ``estimand_metadata["labels"]`` or generic ``[0], [1], ...``.
+
+        Returns
+        -------
+        MarginsResult
+            A vector result of length ``k*(k-1)/2`` with joint inference.
+            Labels are formatted as ``"j - i"``.
+        """
+        if self.gradient is None:
+            raise ValueError(
+                "pairwise_contrasts() requires a delta-method result."
+            )
+        est = np.atleast_1d(self.estimate)
+        k = int(est.size)
+        if k < 2:
+            raise ValueError("pairwise_contrasts() requires at least 2 components")
+        if labels is None:
+            labels = self.estimand_metadata.get("labels")
+        if labels is None or len(labels) != k:
+            labels = [f"[{i}]" for i in range(k)]
+        from ..scenarios import diff_matrix
+        C = diff_matrix(k, kind="pairwise")
+        new_labels = []
+        row = 0
+        for i in range(k):
+            for j in range(i + 1, k):
+                new_labels.append(f"{labels[j]} - {labels[i]}")
+                row += 1
+        return self.contrast(C, labels=new_labels)
+
     # -----------------------------------------------------------------------
     # Per-observation influence
     # -----------------------------------------------------------------------
@@ -1540,7 +1581,7 @@ class MarginsResult:
         )
 
     # -----------------------------------------------------------------------
-    # Disk persistence
+    # Disk persistence helpers
     # -----------------------------------------------------------------------
 
     def to_disk(self, path: Union[str, Path], *, format: str = "pickle") -> None:
@@ -1551,8 +1592,28 @@ class MarginsResult:
             self.gradient is not None or self.draws is not None or self.session is not None
         ) else self
         from .. import __version__
+        phi_name = _phi_to_name(obj.phi)
+        phi_inv_name = _phi_to_name(obj.phi_inv)
+        if phi_name is None and obj.phi is not None:
+            warnings.warn(
+                "MarginsResult.phi is a custom function and cannot be serialized; "
+                "it will be set to None on load.",
+                UserWarning, stacklevel=2,
+            )
+        if phi_inv_name is None and obj.phi_inv is not None:
+            warnings.warn(
+                "MarginsResult.phi_inv is a custom function and cannot be serialized; "
+                "it will be set to None on load.",
+                UserWarning, stacklevel=2,
+            )
+        obj = dataclasses.replace(obj, session=None, phi=None, phi_inv=None)
         with open(path, "wb") as f:
-            pickle.dump({"version": __version__, "result": obj}, f)
+            pickle.dump({
+                "version": __version__,
+                "result": obj,
+                "phi_name": phi_name,
+                "phi_inv_name": phi_inv_name,
+            }, f)
 
     @classmethod
     def from_disk(cls, path: Union[str, Path]) -> "MarginsResult":
@@ -1566,7 +1627,69 @@ class MarginsResult:
                 f"current version is {__version__}. Schema may differ.",
                 UserWarning,
             )
-        return blob["result"]
+        result = blob["result"]
+        phi = _name_to_phi(blob.get("phi_name"))
+        phi_inv = _name_to_phi(blob.get("phi_inv_name"))
+        return dataclasses.replace(result, phi=phi, phi_inv=phi_inv)
+
+
+# ---------------------------------------------------------------------------
+# Internal: phi serialization helpers for disk persistence
+# ---------------------------------------------------------------------------
+
+_KNOWN_PHI_MAP = {
+    "jax.numpy.exp": ("jax.numpy", "exp"),
+    "jax.numpy.log": ("jax.numpy", "log"),
+    "jax.numpy.expm1": ("jax.numpy", "expm1"),
+    "jax.numpy.tanh": ("jax.numpy", "tanh"),
+    "jax.scipy.special.expit": ("jax.scipy.special", "expit"),
+}
+
+
+def _phi_to_name(phi):
+    """Map a known phi/phi_inv function to a serializable name."""
+    if phi is None:
+        return None
+    # Try to match by identity against known JAX functions
+    try:
+        import jax.numpy as jnp
+        if phi is jnp.exp:
+            return "jax.numpy.exp"
+        if phi is jnp.log:
+            return "jax.numpy.log"
+        if phi is jnp.expm1:
+            return "jax.numpy.expm1"
+        if phi is jnp.tanh:
+            return "jax.numpy.tanh"
+    except Exception:
+        pass
+    try:
+        from jax.scipy.special import expit
+        if phi is expit:
+            return "jax.scipy.special.expit"
+    except Exception:
+        pass
+    # Not a known function — caller will warn
+    return None
+
+
+def _name_to_phi(name):
+    """Reconstruct a phi/phi_inv function from its serialized name."""
+    if name is None:
+        return None
+    module, attr = _KNOWN_PHI_MAP.get(name, (None, None))
+    if module is None:
+        warnings.warn(f"Unknown phi name {name!r}; returning None.", UserWarning)
+        return None
+    try:
+        mod = __import__(module, fromlist=[attr])
+        return getattr(mod, attr)
+    except Exception as exc:
+        warnings.warn(
+            f"Could not reconstruct phi {name!r}: {exc}. Returning None.",
+            UserWarning,
+        )
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -1921,7 +2044,13 @@ def compose_results(
 
         # Jacobian of fn w.r.t. theta
         jac_fn = jax.jacfwd(fn)
-        J = jnp.asarray(jac_fn(theta_inf))  # shape: (n_out, n_results) or (n_results,)
+        is_vector = theta_inf.ndim == 2
+        if is_vector:
+            composed_inf = jnp.asarray(jax.vmap(fn, in_axes=1)(theta_inf))
+            J = jnp.asarray(jax.vmap(jac_fn, in_axes=1)(theta_inf))  # (k, n_results)
+        else:
+            composed_inf = jnp.asarray(fn(theta_inf))
+            J = jnp.asarray(jac_fn(theta_inf))
 
         # Component gradients w.r.t. beta
         grads = [jnp.asarray(r.gradient) for r in results]
@@ -1935,18 +2064,25 @@ def compose_results(
             # fn returns scalar, J is (n_results,)
             J = J[None, :]
 
-        # grads may be 1D (scalar components) or 2D (vector components)
-        # We need to form: combined_grad[j] = Σ_i J[j,i] * grads[i]
         if all(g.ndim == 1 for g in grads):
             # All scalar components
             stacked = jnp.stack(grads, axis=0)  # (n_results, n_params)
             combined_grad = J @ stacked  # (n_out, n_params)
+        elif all(g.ndim == 2 for g in grads):
+            if not is_vector:
+                raise NotImplementedError(
+                    "Vector gradients with scalar theta_inf not supported. "
+                    "For non-elementwise composition of vector results, use evaluate()."
+                )
+            stacked = jnp.stack(grads, axis=0)  # (n_results, k, p)
+            if J.ndim != 2:
+                raise NotImplementedError(
+                    f"Expected J.ndim==2 for vector composition, got {J.ndim}"
+                )
+            combined_grad = jnp.einsum('ij,ijk->jk', J, stacked)  # (k, p)
         else:
-            # Mixed or vector components — flatten each grad to 1D, compute,
-            # then reshape back if needed.  For now, require scalar.
             raise NotImplementedError(
-                "compose_results for vector component gradients is not yet "
-                "implemented.  Compose scalar results only."
+                "Mixed scalar/vector gradients not supported in compose_results."
             )
 
         # Squeeze scalar-output shapes to 0-d for consistency with ordinary
@@ -2052,11 +2188,18 @@ def compose_results(
         stacked = np.stack(draws_list, axis=1)  # (n_draws, n_results, ...)
 
         # Apply fn to each draw
+        is_vector = theta_inf.ndim == 2
         composed_draws_inf = []
-        for b in range(n_draws):
-            theta_b = jnp.asarray(stacked[b, :, 0])  # (n_results,) for scalar
-            val = fn(theta_b)
-            composed_draws_inf.append(np.asarray(val))
+        if is_vector:
+            for b in range(n_draws):
+                theta_b = jnp.asarray(stacked[b, :, :])  # (n_results, k)
+                val = jax.vmap(fn, in_axes=1)(theta_b)  # (k,)
+                composed_draws_inf.append(np.asarray(val))
+        else:
+            for b in range(n_draws):
+                theta_b = jnp.asarray(stacked[b, :, 0])  # (n_results,)
+                val = fn(theta_b)
+                composed_draws_inf.append(np.asarray(val))
         composed_draws_inf = np.stack(composed_draws_inf, axis=0)
         # composed_draws_inf shape: (n_draws,) for scalar fn, (n_draws, m) for vector fn
 

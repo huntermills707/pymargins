@@ -235,6 +235,99 @@ def test_rmst_requires_time_aware_adapter(fit_ols):
         m.rmst(horizon=10.0)
 
 
+# ---------------------------------------------------------------------------
+# 8. WTP
+# ---------------------------------------------------------------------------
+
+def test_wtp_basic(fit_ols):
+    m = Margins.linear_scale(fit_ols, at="mean")
+    wtp = m.wtp("x1", "x2")
+    assert isinstance(wtp, MarginsResult)
+    assert wtp.estimand_metadata.get("labels", [""])[0].startswith("WTP")
+    # WTP = -(∂y/∂x1) / (∂y/∂x2)
+    slope1 = m.dydx("x1")
+    slope2 = m.dydx("x2")
+    expected = -(slope1.estimate / slope2.estimate)
+    np.testing.assert_allclose(wtp.estimate, expected, rtol=1e-5)
+
+
+def test_wtp_honours_atexog(fit_ols):
+    m = Margins.linear_scale(fit_ols, at="mean")
+    wtp = m.wtp("x1", "x2", atexog={"x1": 1.0})
+    assert isinstance(wtp, MarginsResult)
+
+
+# ---------------------------------------------------------------------------
+# 9. diff_matrix
+# ---------------------------------------------------------------------------
+
+def test_diff_matrix_reference():
+    from pymargins import diff_matrix
+    C = diff_matrix(3, kind="reference")
+    assert C.shape == (2, 3)
+    expected = np.array([[-1.0, 1.0, 0.0], [-1.0, 0.0, 1.0]])
+    np.testing.assert_array_equal(C, expected)
+
+
+def test_diff_matrix_pairwise():
+    from pymargins import diff_matrix
+    C = diff_matrix(3, kind="pairwise")
+    assert C.shape == (3, 3)
+    expected = np.array([
+        [-1.0, 1.0, 0.0],
+        [-1.0, 0.0, 1.0],
+        [0.0, -1.0, 1.0],
+    ])
+    np.testing.assert_array_equal(C, expected)
+
+
+def test_diff_matrix_invalid_kind():
+    from pymargins import diff_matrix
+    with pytest.raises(ValueError, match="kind must be"):
+        diff_matrix(3, kind="invalid")
+
+
+# ---------------------------------------------------------------------------
+# 10. pairwise_contrasts
+# ---------------------------------------------------------------------------
+
+def test_pairwise_contrasts_basic(fit_ols):
+    m = Margins.linear_scale(fit_ols, at="mean")
+    r = m.predict(atexog={"x1": [0.0, 1.0, 2.0]})
+    pc = r.pairwise_contrasts()
+    assert pc.estimate.shape == (3,)  # 3*(3-1)/2 = 3
+    assert len(pc.estimand_metadata.get("labels", [])) == 3
+    # Check the contrast matrix was applied correctly
+    expected = [
+        r.estimate[1] - r.estimate[0],
+        r.estimate[2] - r.estimate[0],
+        r.estimate[2] - r.estimate[1],
+    ]
+    np.testing.assert_allclose(pc.estimate, expected, rtol=1e-5)
+
+
+def test_pairwise_contrasts_with_labels(fit_ols):
+    m = Margins.linear_scale(fit_ols, at="mean")
+    r = m.predict(atexog={"x1": [0.0, 1.0]})
+    pc = r.pairwise_contrasts(labels=["low", "high"])
+    assert pc.estimand_metadata["labels"] == ["high - low"]
+
+
+def test_pairwise_contrasts_requires_delta(fit_ols):
+    m = Margins.linear_scale(fit_ols, at="mean", method="simulation")
+    r = m.predict(atexog={"x1": [0.0, 1.0]})
+    with pytest.raises(ValueError, match="delta-method"):
+        r.pairwise_contrasts()
+
+
+def test_pairwise_contrasts_composes_with_adjust(fit_ols):
+    m = Margins.linear_scale(fit_ols, at="mean")
+    r = m.predict(atexog={"x1": [0.0, 1.0, 2.0]})
+    pc = r.pairwise_contrasts()
+    adj = adjust(pc, method="holm")
+    assert len(adj.p_raw) == 3
+
+
 # Note: A full rmst() test would require a survival adapter and lifelines.
 # The adapter-level survival tests already exercise survival predictions,
 # so this smoke test covers the session-level validation path.

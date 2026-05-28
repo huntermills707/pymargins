@@ -62,6 +62,7 @@ from .scenarios import (
     grid,
     did,
     diff,
+    diff_matrix,
     all_pairwise,
 )
 from .matching import PysmatchClient
@@ -96,6 +97,7 @@ __all__ = [
     "grid",
     "did",
     "diff",
+    "diff_matrix",
     "all_pairwise",
     # Matching support
     "PysmatchClient",

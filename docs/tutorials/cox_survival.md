@@ -70,6 +70,39 @@ from the covariate centering lifelines applies internally).  If you
 want the change in the raw HR, use `Margins.linear_scale(...)` and
 interpret the AME as the absolute change in the partial hazard ratio.
 
+## Restricted mean survival time (RMST)
+
+For survival adapters that support per-scenario `prediction_time`,
+`rmst()` integrates the survival function up to a horizon by
+trapezoidal rule:
+
+```{code-cell} python
+from pymargins.adapters import LifelinesCoxPHSurvivalAdapter
+
+m_surv = Margins(
+    cph,
+    adapter=LifelinesCoxPHSurvivalAdapter(cph, training_data=df, prediction_time=365),
+    at="overall",
+    method="bootstrap",
+    n_boot=100,
+)
+
+# RMST at 3 years (1095 days) under treated and control
+rmst_treat   = m_surv.rmst(horizon=1095, atexog={"treated": 1}, n_grid=40)
+rmst_control = m_surv.rmst(horizon=1095, atexog={"treated": 0}, n_grid=40)
+
+print(rmst_treat.summary())
+print(rmst_control.summary())
+
+# Difference with joint inference
+rmst_diff = rmst_treat - rmst_control
+print(rmst_diff.summary())
+```
+
+The default grid is `n_grid=80`. Increase it for a more accurate
+integral (especially when the survival curve changes rapidly) at the
+cost of more prediction evaluations.
+
 ## Plot: forest plot of hazard ratios
 
 ```{code-cell} python
