@@ -71,6 +71,15 @@ class StatsmodelsGLMAdapter(GLMAdapter):
     def coefficients(self) -> jnp.ndarray:
         return jnp.asarray(self.results.params)
 
+    def score_obs(self) -> np.ndarray:
+        """Per-observation score ∂ℓ_i/∂β, shape (n_obs, p).
+
+        Used by :meth:`MarginsResult.influence` to form the analytical
+        empirical influence function of an estimand. Statsmodels GLM
+        exposes this directly; columns sum to ~0 at the MLE (the FOC).
+        """
+        return np.asarray(self.results.model.score_obs(self.results.params))
+
     def covariance(self, vcov_spec: Optional[Any] = None) -> jnp.ndarray:
         """Return Σ̂, dispatching to the requested flavor.
 

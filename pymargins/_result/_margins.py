@@ -1559,25 +1559,63 @@ class MarginsResult:
     # -----------------------------------------------------------------------
 
     def influence(self) -> np.ndarray:
-        """Per-observation influence on the estimand.
+        """Per-observation influence on the estimand (DFBETA sign).
 
-        For delta-method results, returns the analytical influence
-        ∇h(β̂) · score_i(β̂) when the adapter exposes per-observation
-        scores. For bootstrap results with BCa, returns the cached
-        jackknife θ_{(-i)} − θ̄ vector.
+        Returns, for each training observation ``i``, the approximate amount
+        observation ``i`` contributes to the estimate — i.e. ``θ̂ − θ_{(-i)}``,
+        the leave-one-out deletion influence. Positive values mean dropping
+        the observation would pull the estimate down.
+
+        Two routes, returning the same first-order quantity on the
+        **inference scale**:
+
+        * **Delta-method** results use the analytical empirical influence
+          function ``∇h(β̂)ᵀ Σ̂ score_i(β̂)``, where ``score_i`` is the
+          per-observation score from ``adapter.score_obs()`` and ``Σ̂`` the
+          frozen covariance. ``Σ̂ score_i`` is the one-step (infinitesimal
+          jackknife) approximation to ``β̂ − β̂_{(-i)}``.
+        * **BCa bootstrap** results reuse the exact leave-one-out
+          refits cached during acceleration: ``θ̂_inf − θ_{(-i)}``.
+
+        Returns
+        -------
+        ndarray
+            Shape ``(n_obs,)`` for a scalar estimand, ``(n_obs, k)`` for a
+            length-``k`` vector estimand.
+
+        Notes
+        -----
+        Summing the squared influence reconstructs the delta-method variance:
+        ``Σ_i (influence_i)² ≈ ∇hᵀ Σ̂ ∇h`` under a correctly specified model
+        (default ``Σ̂``). With a robust/cluster ``vcov`` the value is the
+        corresponding sandwich influence.
         """
         if self.ci_method == "bca" and self.bootstrap_extras:
             jack = self.bootstrap_extras.get("influence_jackknife")
             if jack is not None:
-                return np.asarray(jack)
-        if self.gradient is not None and hasattr(self._session_obj(), "adapter"):
-            adapter = self._session_obj().adapter
-            if hasattr(adapter, "score_obs"):
-                S = np.asarray(adapter.score_obs())  # (n, p)
-                return S @ np.asarray(self.gradient)  # (n,) or (n, k)
+                theta_minus = np.asarray(jack)  # (n,) or (n, k), inference scale
+                est_inf = (
+                    np.asarray(self.phi_inv(self.estimate))
+                    if self.phi_inv is not None
+                    else np.asarray(self.estimate)
+                )
+                return est_inf - theta_minus
+        if self.gradient is not None and self.cov_params is not None:
+            sess = self._session_obj()
+            adapter = getattr(sess, "adapter", None) if sess is not None else None
+            if adapter is not None and hasattr(adapter, "score_obs"):
+                S = np.asarray(adapter.score_obs())          # (n, p)
+                cov = np.asarray(self.cov_params)            # (p, p)
+                g = np.asarray(self.gradient)                # (p,) or (k, p)
+                beta_infl = S @ cov                          # (n, p) ≈ β̂ − β̂_(−i)
+                if g.ndim == 1:
+                    return beta_infl @ g                     # (n,)
+                return beta_infl @ g.T                       # (n, k)
         raise NotImplementedError(
-            "Influence requires either a BCa bootstrap result or an "
-            "adapter that exposes score_obs()."
+            "Influence requires either a BCa bootstrap result or a "
+            "delta-method result whose adapter exposes score_obs(). The "
+            "statsmodels GLM, OLS, Logit/Probit, and Poisson/NegBin adapters "
+            "support score_obs(); others can add a one-line wrapper."
         )
 
     # -----------------------------------------------------------------------

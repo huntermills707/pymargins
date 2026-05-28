@@ -117,11 +117,63 @@ def test_influence_bca_bootstrap(fit_ols):
     assert infl.shape[0] == n_obs
 
 
-def test_influence_requires_machinery(fit_logit):
-    m = Margins.linear_scale(fit_logit, at="mean", method="delta")
+def test_influence_requires_machinery(fit_ols):
+    # Simulation results have no gradient and are not BCa -> unsupported.
+    m = Margins.linear_scale(fit_ols, at="mean", method="simulation")
     r = m.predict(atexog={"x1": 0.0})
     with pytest.raises(NotImplementedError):
         r.influence()
+
+
+def test_influence_delta_logit_works(fit_logit):
+    m = Margins.linear_scale(fit_logit, at="mean", method="delta")
+    infl = m.dydx("x1").influence()
+    n_obs = len(fit_logit.model.endog)
+    assert infl.shape == (n_obs,)
+
+
+@pytest.fixture
+def df_small():
+    rng = np.random.default_rng(7)
+    n = 60
+    d = pd.DataFrame({"x1": rng.normal(size=n), "x2": rng.normal(size=n)})
+    d["y"] = 1.0 + 0.5 * d["x1"] - 0.3 * d["x2"] + rng.normal(0, 0.5, size=n)
+    return d
+
+
+def test_influence_delta_matches_jackknife(df_small):
+    fit = smf.ols("y ~ x1 + x2", data=df_small).fit()
+    m_delta = Margins.linear_scale(fit, at="mean", method="delta")
+    infl_delta = m_delta.dydx("x1").influence()
+    m_boot = Margins.linear_scale(
+        fit, at="mean", method="bootstrap", n_boot=20, rng_seed=0,
+        bootstrap_config={"ci_method": "bca"},
+    )
+    infl_jack = m_boot.dydx("x1").influence()
+    assert infl_delta.shape == infl_jack.shape == (len(df_small),)
+    # One-step (delta) vs exact LOO (jackknife) differ only by the leverage
+    # factor 1/(1 - h_ii); they agree to first order.
+    corr = np.corrcoef(infl_delta, infl_jack)[0, 1]
+    assert corr > 0.99
+    np.testing.assert_allclose(infl_delta, infl_jack, atol=2e-3, rtol=0.1)
+
+
+def test_influence_reconstructs_robust_variance(df_small):
+    fit = smf.ols("y ~ x1 + x2", data=df_small).fit()
+    m = Margins.linear_scale(fit, at="mean", method="delta")
+    infl = m.dydx("x1").influence()
+    # Sum of squared influence = HC0 sandwich variance of the estimand.
+    m_hc0 = Margins.linear_scale(fit, at="mean", method="delta", vcov="HC0")
+    r_hc0 = m_hc0.dydx("x1")
+    np.testing.assert_allclose(np.sum(infl ** 2), r_hc0.std_error ** 2, rtol=1e-4)
+
+
+def test_influence_vector_estimand_shape(df_small):
+    fit = smf.ols("y ~ x1 + x2", data=df_small).fit()
+    m = Margins.linear_scale(fit, at="mean", method="delta")
+    r = m.predict(atexog={"x1": [0.0, 1.0, 2.0]})
+    infl = r.influence()
+    assert infl.shape == (len(df_small), 3)
 
 
 # ---------------------------------------------------------------------------
