@@ -69,6 +69,23 @@ class StatsmodelsOLSAdapter(LinearPredictionAdapter):
     def coefficients(self) -> jnp.ndarray:
         return jnp.asarray(self.results.params)
 
+    def score_obs(self) -> np.ndarray:
+        """Per-observation score ∂ℓ_i/∂β = x_i (y_i − x_iᵀβ̂) / σ̂², shape (n, p).
+
+        OLS has no ``model.score_obs``; the Gaussian score is formed from the
+        residuals directly. The ``results.scale`` factor cancels against the
+        same factor in ``cov_params`` when forming the influence function, so
+        only plain OLS (unweighted) is supported here.
+        """
+        model_cls = type(self.results.model).__name__
+        if model_cls != "OLS":
+            raise NotImplementedError(
+                f"score_obs() is only implemented for plain OLS, not {model_cls}."
+            )
+        exog = np.asarray(self.results.model.exog)
+        resid = np.asarray(self.results.resid)
+        return exog * (resid / self.results.scale)[:, None]
+
     def covariance(self, vcov_spec: Optional[Any] = None) -> jnp.ndarray:
         """Return Σ̂, dispatching to the requested flavor.
 

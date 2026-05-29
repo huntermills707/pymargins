@@ -101,3 +101,34 @@ ax.legend(title="Outcome", loc="upper right")
 ame = m.dydx("income")
 print(ame.outcome(1).summary())
 ```
+
+## Willingness to pay (WTP)
+
+In discrete-choice models, WTP for an attribute is the ratio of the
+attribute slope to the price slope (with a negative sign because price
+has a negative coefficient):
+
+```{code-cell} python
+# Add a price variable to the data for illustration
+df["price"] = rng.normal(10, 2, n)
+fit_wtp = smf.mnlogit("mode ~ age + income + price", data=df).fit(disp=0)
+m_wtp = Margins.linear_scale(fit_wtp, at="overall")
+
+# WTP for one additional unit of income, in price units
+wtp = m_wtp.wtp("income", "price")
+print(wtp.summary())
+```
+
+For multi-outcome models, slice to a single alternative first:
+
+```{code-cell} python
+wtp_car = m_wtp.dydx("income").outcome(1)
+price_car = m_wtp.dydx("price").outcome(1)
+from pymargins._result._margins import compose_results
+wtp_car_ratio = compose_results(
+    [wtp_car, price_car],
+    fn=lambda t: -t[0] / t[1],
+    label="WTP_car(income)",
+)
+print(wtp_car_ratio.summary())
+```

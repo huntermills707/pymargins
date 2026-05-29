@@ -35,6 +35,8 @@ from __future__ import annotations
 from typing import Optional, Union
 import itertools
 
+import numpy as np
+
 
 # ---------------------------------------------------------------------------
 # Single-variable helpers
@@ -372,6 +374,57 @@ def diff(n: int):
     if n < 2:
         raise ValueError("diff() requires n >= 2")
     return [+1, -1] + [0.0] * (n - 2)
+
+
+def diff_matrix(k: int, kind: str = "reference") -> np.ndarray:
+    """Build a contrast matrix for a k-level factor.
+
+    Parameters
+    ----------
+    k : int
+        Number of levels (must be >= 2).
+    kind : {"reference", "pairwise"}, default "reference"
+        * ``"reference"`` — returns a ``(k-1, k)`` matrix where each row
+          is ``level[i] - level[0]``.
+        * ``"pairwise"`` — returns a ``(k*(k-1)/2, k)`` matrix with all
+          pairwise differences.
+
+    Returns
+    -------
+    ndarray
+
+    Examples
+    --------
+    >>> diff_matrix(3, kind="reference")
+    array([[-1.,  1.,  0.],
+           [-1.,  0.,  1.]])
+    >>> diff_matrix(3, kind="pairwise")
+    array([[-1.,  1.,  0.],
+           [-1.,  0.,  1.],
+           [ 0., -1.,  1.]])
+    """
+    if k < 2:
+        raise ValueError("diff_matrix requires k >= 2")
+    if kind not in ("reference", "pairwise"):
+        raise ValueError(f"kind must be 'reference' or 'pairwise', got {kind!r}")
+
+    if kind == "reference":
+        C = np.zeros((k - 1, k), dtype=float)
+        for i in range(1, k):
+            C[i - 1, 0] = -1.0
+            C[i - 1, i] = +1.0
+        return C
+
+    # pairwise
+    n_contrasts = k * (k - 1) // 2
+    C = np.zeros((n_contrasts, k), dtype=float)
+    row = 0
+    for i in range(k):
+        for j in range(i + 1, k):
+            C[row, i] = -1.0
+            C[row, j] = +1.0
+            row += 1
+    return C
 
 
 def all_pairwise(

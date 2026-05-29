@@ -79,6 +79,15 @@ class StatsmodelsDiscreteCountAdapter(ModelAdapter):
     def coefficients(self) -> jnp.ndarray:
         return jnp.asarray(self.results.params)
 
+    def score_obs(self) -> np.ndarray:
+        """Per-observation score ∂ℓ_i/∂β, shape (n_obs, p).
+
+        For models with an extra dispersion parameter (e.g. NegativeBinomial),
+        the trailing column corresponds to that parameter and aligns with the
+        full ``params``/``cov_params`` dimension.
+        """
+        return np.asarray(self.results.model.score_obs(self.results.params))
+
     def covariance(self, vcov_spec: Optional[Any] = None) -> jnp.ndarray:
         if vcov_spec is None:
             return jnp.asarray(self.results.cov_params())

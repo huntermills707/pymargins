@@ -110,8 +110,9 @@ def _generate_resample_indices(
 def _compute_acceleration_jackknife(adapter, h_factory, h, data, cluster_ids, block_size):
     """Compute BCa acceleration via leave-one-out jackknife.
 
-    Returns None when jackknife is deemed too expensive (n_obs or n_clusters
-    > 200) or for block bootstrap where leave-one-out is not well-defined.
+    Returns (None, None) when jackknife is deemed too expensive (n_obs or
+    n_clusters > 200) or for block bootstrap where leave-one-out is not
+    well-defined.
     """
     kernel_info = split_kernel_partial(h)
     static_kwargs = kernel_info["keywords"] if kernel_info is not None else None
@@ -121,7 +122,7 @@ def _compute_acceleration_jackknife(adapter, h_factory, h, data, cluster_ids, bl
         unique_clusters = np.unique(cluster_ids)
         n_units = len(unique_clusters)
         if n_units > 200:
-            return None
+            return None, None
         theta_minus = []
         for c in unique_clusters:
             mask = cluster_ids != c
@@ -155,10 +156,10 @@ def _compute_acceleration_jackknife(adapter, h_factory, h, data, cluster_ids, bl
                 h_b = h_factory(new_adapter)
                 theta_minus.append(np.asarray(h_b(new_adapter.coefficients())))
     elif block_size is not None:
-        return None
+        return None, None
     else:
         if n_obs > 200:
-            return None
+            return None, None
         theta_minus = []
         for i in range(n_obs):
             mask = np.ones(n_obs, dtype=bool)
@@ -177,7 +178,7 @@ def _compute_acceleration_jackknife(adapter, h_factory, h, data, cluster_ids, bl
     num = np.sum(diffs ** 3, axis=0)
     den = np.sum(diffs ** 2, axis=0)
     a = np.where(den > 0, num / (6.0 * den ** 1.5), 0.0)
-    return a
+    return a, theta_minus
 
 
 def _compute_bca_params(h_draws_inf, estimate, adapter, h_factory, h, data,
@@ -193,10 +194,11 @@ def _compute_bca_params(h_draws_inf, estimate, adapter, h_factory, h, data,
     z0 = stats.norm.ppf(prop)
 
     a = None
+    theta_minus = None
     if bootstrap_config is not None and "acceleration" in bootstrap_config:
         a = np.asarray(bootstrap_config["acceleration"])
     else:
-        a = _compute_acceleration_jackknife(
+        a, theta_minus = _compute_acceleration_jackknife(
             adapter, h_factory, h, data, cluster_ids, block_size,
         )
         if a is None:
@@ -208,7 +210,7 @@ def _compute_bca_params(h_draws_inf, estimate, adapter, h_factory, h, data,
                 "custom acceleration.",
                 UserWarning, stacklevel=4,
             )
-    return z0, a
+    return z0, a, theta_minus
 
 
 def _bca_confint(h_draws_inf, estimate, level, z0, a, phi):
@@ -953,6 +955,7 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
     lower = upper = None
     bca_z0 = None
     bca_a = None
+    bca_theta_minus = None
     studentized_t = None
     se_hat = None
 
@@ -972,7 +975,7 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
         upper = 2 * np.asarray(estimate) - np.quantile(h_draws_inf, alpha, axis=0)
 
     elif ci_method == "bca":
-        bca_z0, bca_a = _compute_bca_params(
+        bca_z0, bca_a, bca_theta_minus = _compute_bca_params(
             h_draws_inf, estimate, adapter, h_factory, h, data,
             cluster_ids, block_size, bootstrap_config,
         )
@@ -1053,6 +1056,8 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
         bootstrap_extras["z0"] = np.asarray(bca_z0)
     if bca_a is not None:
         bootstrap_extras["a"] = np.asarray(bca_a)
+    if bca_theta_minus is not None:
+        bootstrap_extras["influence_jackknife"] = np.asarray(bca_theta_minus)
     if studentized_t is not None:
         bootstrap_extras["t_star"] = np.asarray(studentized_t)
     if se_hat is not None:

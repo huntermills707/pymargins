@@ -39,7 +39,7 @@ override detection or select a non-default scale.
 """
 
 from .margins import Margins
-from ._result import MarginsResult, TestResult, DiagnosticResult
+from ._result import MarginsResult, TestResult, DiagnosticResult, AdjustedResults, adjust
 from ._adapters import register_adapter
 from ._adapter import (
     ModelAdapter,
@@ -62,6 +62,7 @@ from .scenarios import (
     grid,
     did,
     diff,
+    diff_matrix,
     all_pairwise,
 )
 from .matching import PysmatchClient
@@ -73,6 +74,8 @@ __all__ = [
     "MarginsResult",
     "TestResult",
     "DiagnosticResult",
+    "AdjustedResults",
+    "adjust",
     # Adapter interface (for extension)
     "ModelAdapter",
     "GLMAdapter",
@@ -94,6 +97,7 @@ __all__ = [
     "grid",
     "did",
     "diff",
+    "diff_matrix",
     "all_pairwise",
     # Matching support
     "PysmatchClient",

@@ -55,6 +55,7 @@ linearmodels, lifelines, and scikit-learn model classes.
     howto/diff_in_diff
     howto/elasticities
     howto/discrete_changes
+    howto/influence
     howto/kappa_fallback
     howto/custom_adapter
     howto/matching

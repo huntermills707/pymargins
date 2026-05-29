@@ -74,6 +74,10 @@ class StatsmodelsDiscreteBinaryAdapter(ModelAdapter):
     def coefficients(self) -> jnp.ndarray:
         return jnp.asarray(self.results.params)
 
+    def score_obs(self) -> np.ndarray:
+        """Per-observation score ∂ℓ_i/∂β, shape (n_obs, p)."""
+        return np.asarray(self.results.model.score_obs(self.results.params))
+
     def covariance(self, vcov_spec: Optional[Any] = None) -> jnp.ndarray:
         if vcov_spec is None:
             return jnp.asarray(self.results.cov_params())
