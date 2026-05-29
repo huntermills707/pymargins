@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-05-26
+
+### Added
+
+- `Margins.from_posterior()` for constructing sessions from Bayesian posterior
+  draw banks (MCMC samples treated as simulation draws).
+- `MarginsResult.contrast(C)` for testing linear hypotheses `C @ theta = 0`
+  on vector-valued results.
+- `MarginsResult.influence()` exposing per-observation jackknife influence
+  measures (DFBETA-style) for sensitivity diagnostics.
+- `pymargins.adjust()` for multiple-comparison correction on result tables
+  (Holm, Bonferroni, Benjamini–Hochberg FDR, and others via `statsmodels`).
+- Elasticity convenience methods on `MarginsResult`: `eyex()`, `eydx()`,
+  and `dyex()` for semi-elasticity and elasticity transformations.
+- `MarginsResult.to_disk()` / `MarginsResult.from_disk()` for lightweight
+  pickle-based persistence of result objects.
+- `Margins.rmst()` survival convenience wrapper for restricted mean survival
+  time contrasts.
+- New how-to guide: `docs/howto/influence.md` covering jackknife influence
+  diagnostics and leave-one-out sensitivity analysis.
+- Expanded how-to guides for elasticities, simultaneous confidence intervals,
+  and exporting results (Excel/pickle).
+
+### Fixed
+
+- Refreshed Jupyter notebook execution cache for ReadTheDocs builds.
+
 ## [0.1.0] — 2026-05-23
 
 ### Added
@@ -100,6 +127,7 @@ Initial public release on PyPI and Read the Docs.
 - Documentation site with tutorials, how-to guides, API reference,
   and theory/design explanations.
 
-[Unreleased]: https://github.com/huntermills707/pymargins/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/huntermills707/pymargins/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/huntermills707/pymargins/releases/tag/v0.1.1
 [0.1.0]: https://github.com/huntermills707/pymargins/releases/tag/v0.1.0
 [0.0.1]: https://github.com/huntermills707/pymargins/releases/tag/v0.0.1
