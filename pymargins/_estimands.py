@@ -24,12 +24,13 @@ estimand function.
 """
 
 from __future__ import annotations
-from typing import Callable, Optional, Union, Any
+
+from collections.abc import Callable
 from functools import partial
+
 import jax
 import jax.numpy as jnp
 import numpy as np
-
 
 # ---------------------------------------------------------------------------
 # Kernel marker — used by the bootstrap path to detect module-level kernels
@@ -66,6 +67,7 @@ def split_kernel_partial(h):
 # Aggregation helper
 # ---------------------------------------------------------------------------
 
+
 def _aggregate(mu, aggregate, weights):
     """Aggregate per-row predictions according to the rule."""
     if aggregate == "overall" or aggregate == "weighted":
@@ -90,15 +92,16 @@ def _aggregate(mu, aggregate, weights):
 # Prediction estimand (level quantity)
 # ---------------------------------------------------------------------------
 
+
 def make_prediction_estimand(
     adapter,
     X: jnp.ndarray,
     *,
     aggregate: str = "overall",
-    weights: Optional[jnp.ndarray] = None,
-    phi_inv: Optional[Callable] = None,
-    offset: Optional[jnp.ndarray] = None,
-    transform: Optional[Callable] = None,
+    weights: jnp.ndarray | None = None,
+    phi_inv: Callable | None = None,
+    offset: jnp.ndarray | None = None,
+    transform: Callable | None = None,
 ) -> Callable[[jnp.ndarray], jnp.ndarray]:
     """Construct h(β) for an adjusted prediction.
 
@@ -183,6 +186,7 @@ def prediction_kernel(
         value = phi_inv(value)
     return value
 
+
 prediction_kernel.__pymargins_kernel__ = True  # type: ignore[attr-defined]
 
 
@@ -190,16 +194,17 @@ prediction_kernel.__pymargins_kernel__ = True  # type: ignore[attr-defined]
 # Slope estimand (∂μ/∂x_j)
 # ---------------------------------------------------------------------------
 
+
 def make_slope_estimand(
     adapter,
     df,
     var_name: str,
     *,
     aggregate: str = "overall",
-    weights: Optional[jnp.ndarray] = None,
-    phi_inv: Optional[Callable] = None,
-    offset: Optional[jnp.ndarray] = None,
-    transform: Optional[Callable] = None,
+    weights: jnp.ndarray | None = None,
+    phi_inv: Callable | None = None,
+    offset: jnp.ndarray | None = None,
+    transform: Callable | None = None,
     fd_step: float = 1e-6,
 ) -> Callable[[jnp.ndarray], jnp.ndarray]:
     """Construct h(β) for the *total* marginal effect ∂μ/∂v.
@@ -251,9 +256,7 @@ def make_slope_estimand(
     df = as_tabular(df)
 
     if var_name not in df.columns:
-        raise ValueError(
-            f"Variable {var_name!r} not in df.columns: {list(df.columns)}"
-        )
+        raise ValueError(f"Variable {var_name!r} not in df.columns: {list(df.columns)}")
 
     v = np.asarray(df[var_name], dtype=float)
     if not np.all(np.isfinite(v)):
@@ -314,6 +317,7 @@ def slope_kernel(
         value = phi_inv(value)
     return value
 
+
 slope_kernel.__pymargins_kernel__ = True  # type: ignore[attr-defined]
 
 
@@ -321,16 +325,17 @@ slope_kernel.__pymargins_kernel__ = True  # type: ignore[attr-defined]
 # Linear combination across scenarios
 # ---------------------------------------------------------------------------
 
+
 def make_linear_combination_estimand(
     adapter,
     scenarios_X: list[jnp.ndarray],
-    weights: Union[jnp.ndarray, dict[str, jnp.ndarray]],
+    weights: jnp.ndarray | dict[str, jnp.ndarray],
     *,
-    phi_inv: Optional[Callable] = None,
-    scenario_offsets: Optional[list[Optional[jnp.ndarray]]] = None,
+    phi_inv: Callable | None = None,
+    scenario_offsets: list[jnp.ndarray | None] | None = None,
     scenario_aggregate: str = "overall",
-    scenario_weights: Optional[list[Optional[jnp.ndarray]]] = None,
-    scenario_predict_fns: Optional[list[Callable]] = None,
+    scenario_weights: list[jnp.ndarray | None] | None = None,
+    scenario_predict_fns: list[Callable] | None = None,
 ) -> Callable[[jnp.ndarray], jnp.ndarray]:
     """Construct h(β) for a linear combination of predictions across scenarios.
 
@@ -385,7 +390,8 @@ def make_linear_combination_estimand(
     offsets = scenario_offsets if scenario_offsets is not None else [None] * n_scenarios
     sw = scenario_weights if scenario_weights is not None else [None] * n_scenarios
     predict_fns = (
-        scenario_predict_fns if scenario_predict_fns is not None
+        scenario_predict_fns
+        if scenario_predict_fns is not None
         else [adapter.predict] * n_scenarios
     )
 
@@ -413,7 +419,11 @@ def per_scenario_kernel(beta, predict_fn, X, offset, w, scenario_aggregate):
             raise ValueError("scenario_weights must be non-negative")
         if jnp.sum(w) == 0:
             raise ValueError("scenario_weights must not sum to zero")
-        return jnp.sum(w * mu, axis=0) / jnp.sum(w) if mu.ndim > 1 else jnp.sum(w * mu) / jnp.sum(w)
+        return (
+            jnp.sum(w * mu, axis=0) / jnp.sum(w)
+            if mu.ndim > 1
+            else jnp.sum(w * mu) / jnp.sum(w)
+        )
     elif scenario_aggregate == "none":
         return mu[0] if mu.shape[0] == 1 else mu
     else:
@@ -436,18 +446,26 @@ def linear_combination_kernel(
     scenarios to be evaluated against different adapter states (e.g.,
     per-scenario ``prediction_time`` for survival adapters).
     """
-    scenario_values = jnp.stack([
-        per_scenario_kernel(beta, predict_fns[i], scenarios_X[i], offsets[i], sw[i], scenario_aggregate)
-        for i in range(len(scenarios_X))
-    ])
+    scenario_values = jnp.stack(
+        [
+            per_scenario_kernel(
+                beta,
+                predict_fns[i],
+                scenarios_X[i],
+                offsets[i],
+                sw[i],
+                scenario_aggregate,
+            )
+            for i in range(len(scenarios_X))
+        ]
+    )
     if phi_inv is not None:
         scenario_values = phi_inv(scenario_values)
     if isinstance(weights, dict):
-        weight_matrix = jnp.stack([
-            jnp.asarray(weights[name]) for name in weights
-        ])
+        weight_matrix = jnp.stack([jnp.asarray(weights[name]) for name in weights])
         return weight_matrix @ scenario_values
     return jnp.dot(jnp.asarray(weights), scenario_values)
+
 
 linear_combination_kernel.__pymargins_kernel__ = True  # type: ignore[attr-defined]
 
@@ -456,16 +474,17 @@ linear_combination_kernel.__pymargins_kernel__ = True  # type: ignore[attr-defin
 # Arbitrary nonlinear composition
 # ---------------------------------------------------------------------------
 
+
 def make_evaluate_estimand(
     adapter,
     scenarios_X: list[jnp.ndarray],
     compose: Callable[[jnp.ndarray], jnp.ndarray],
     *,
-    phi_inv: Optional[Callable] = None,
-    scenario_offsets: Optional[list[Optional[jnp.ndarray]]] = None,
+    phi_inv: Callable | None = None,
+    scenario_offsets: list[jnp.ndarray | None] | None = None,
     scenario_aggregate: str = "overall",
-    scenario_weights: Optional[list[Optional[jnp.ndarray]]] = None,
-    scenario_predict_fns: Optional[list[Callable]] = None,
+    scenario_weights: list[jnp.ndarray | None] | None = None,
+    scenario_predict_fns: list[Callable] | None = None,
 ) -> Callable[[jnp.ndarray], jnp.ndarray]:
     """Construct h(β) for an arbitrary differentiable composition of scenario
     predictions.
@@ -509,7 +528,8 @@ def make_evaluate_estimand(
     offsets = scenario_offsets if scenario_offsets is not None else [None] * n_scenarios
     sw = scenario_weights if scenario_weights is not None else [None] * n_scenarios
     predict_fns = (
-        scenario_predict_fns if scenario_predict_fns is not None
+        scenario_predict_fns
+        if scenario_predict_fns is not None
         else [adapter.predict] * n_scenarios
     )
 
@@ -536,14 +556,24 @@ def evaluate_kernel(
     scenario_aggregate,
 ):
     """Module-level kernel for arbitrary nonlinear composition estimands."""
-    scenario_values = jnp.stack([
-        per_scenario_kernel(beta, predict_fns[i], scenarios_X[i], offsets[i], sw[i], scenario_aggregate)
-        for i in range(len(scenarios_X))
-    ])
+    scenario_values = jnp.stack(
+        [
+            per_scenario_kernel(
+                beta,
+                predict_fns[i],
+                scenarios_X[i],
+                offsets[i],
+                sw[i],
+                scenario_aggregate,
+            )
+            for i in range(len(scenarios_X))
+        ]
+    )
     result = compose(scenario_values)
     if phi_inv is not None:
         result = phi_inv(result)
     return result
+
 
 evaluate_kernel.__pymargins_kernel__ = True  # type: ignore[attr-defined]
 
@@ -551,6 +581,7 @@ evaluate_kernel.__pymargins_kernel__ = True  # type: ignore[attr-defined]
 # ---------------------------------------------------------------------------
 # Differentiability check
 # ---------------------------------------------------------------------------
+
 
 def is_jax_differentiable(h: Callable, beta: jnp.ndarray) -> bool:
     """Test whether an estimand function is JAX-differentiable at beta.
@@ -581,7 +612,6 @@ def is_jax_differentiable(h: Callable, beta: jnp.ndarray) -> bool:
         True if both ``jax.vmap(h)`` and ``jax.hessian(h)`` (or
         ``jax.jacobian`` for vector estimands) succeed at ``beta``.
     """
-    import jax
     out = h(beta)
     # Narrow to JAX tracer/concretization errors. Avoid catching bare
     # Exception so genuine programming errors in estimand factories

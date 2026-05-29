@@ -1,5 +1,4 @@
-"""Tests for StatsmodelsQuantRegAdapter.
-"""
+"""Tests for StatsmodelsQuantRegAdapter."""
 
 import jax
 import jax.numpy as jnp
@@ -11,24 +10,26 @@ import statsmodels.formula.api as smf
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins._adapters.statsmodels_quantreg import StatsmodelsQuantRegAdapter
-from pymargins._adapter import auto_detect_adapter
 from pymargins import Margins
-
+from pymargins._adapter import auto_detect_adapter
+from pymargins._adapters.statsmodels_quantreg import StatsmodelsQuantRegAdapter
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def df_quantreg():
     """Synthetic data for quantile regression."""
     rng = np.random.default_rng(46)
     n = 200
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+        }
+    )
     df["y"] = 1.0 + 2.0 * df["x1"] - 1.5 * df["x2"] + rng.standard_normal(n)
     return df
 
@@ -49,6 +50,7 @@ def quantreg_fit_formula(df_quantreg):
 # Auto-detection
 # ---------------------------------------------------------------------------
 
+
 def test_auto_detect_formula(quantreg_fit_formula):
     adapter = auto_detect_adapter(quantreg_fit_formula)
     assert isinstance(adapter, StatsmodelsQuantRegAdapter)
@@ -62,6 +64,7 @@ def test_auto_detect_array_requires_training_data(quantreg_fit_array):
 # ---------------------------------------------------------------------------
 # Prediction
 # ---------------------------------------------------------------------------
+
 
 def test_predict_matches_statsmodels(quantreg_fit_formula):
     adapter = StatsmodelsQuantRegAdapter(quantreg_fit_formula)
@@ -89,6 +92,7 @@ def test_predict_jax_differentiable(quantreg_fit_formula):
 # Coefficients and covariance
 # ---------------------------------------------------------------------------
 
+
 def test_coefficients_shape(quantreg_fit_formula):
     adapter = StatsmodelsQuantRegAdapter(quantreg_fit_formula)
     p = len(quantreg_fit_formula.model.exog_names)
@@ -98,7 +102,10 @@ def test_coefficients_shape(quantreg_fit_formula):
 def test_covariance_default(quantreg_fit_formula):
     adapter = StatsmodelsQuantRegAdapter(quantreg_fit_formula)
     cov = adapter.covariance()
-    assert cov.shape == (adapter.coefficients().shape[0], adapter.coefficients().shape[0])
+    assert cov.shape == (
+        adapter.coefficients().shape[0],
+        adapter.coefficients().shape[0],
+    )
 
 
 def test_covariance_rejects_hc(quantreg_fit_formula):
@@ -110,6 +117,7 @@ def test_covariance_rejects_hc(quantreg_fit_formula):
 # ---------------------------------------------------------------------------
 # Design matrix and metadata
 # ---------------------------------------------------------------------------
+
 
 def test_design_matrix_formula(quantreg_fit_formula):
     adapter = StatsmodelsQuantRegAdapter(quantreg_fit_formula)
@@ -130,6 +138,7 @@ def test_variable_metadata(quantreg_fit_formula):
 # End-to-end via Margins session
 # ---------------------------------------------------------------------------
 
+
 def test_margins_predict_aap(quantreg_fit_formula):
     adapter = StatsmodelsQuantRegAdapter(quantreg_fit_formula)
     m = Margins.linear_scale(quantreg_fit_formula, adapter=adapter)
@@ -148,6 +157,7 @@ def test_margins_dydx(quantreg_fit_formula):
 # ---------------------------------------------------------------------------
 # Refit
 # ---------------------------------------------------------------------------
+
 
 def test_refit_formula(quantreg_fit_formula):
     adapter = StatsmodelsQuantRegAdapter(quantreg_fit_formula)
@@ -174,6 +184,7 @@ def test_refit_array(quantreg_fit_array, df_quantreg):
 # ---------------------------------------------------------------------------
 # Quantile preservation
 # ---------------------------------------------------------------------------
+
 
 def test_quantile_preserved(quantreg_fit_formula):
     adapter = StatsmodelsQuantRegAdapter(quantreg_fit_formula)

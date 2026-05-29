@@ -6,7 +6,9 @@ Inherits predict() from LinearPredictionAdapter (simple X @ beta).
 """
 
 from __future__ import annotations
-from typing import Optional, Any
+
+from typing import Any
+
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
@@ -14,10 +16,10 @@ import statsmodels.api as sm
 
 from .._adapter import LinearPredictionAdapter, VariableInfo
 from ._common import (
-    extract_training_data,
-    design_matrix_from_df,
-    column_index_of_variable,
     build_variable_metadata,
+    column_index_of_variable,
+    design_matrix_from_df,
+    extract_training_data,
 )
 
 
@@ -33,7 +35,7 @@ class StatsmodelsQuantRegAdapter(LinearPredictionAdapter):
         The data the model was fit on.
     """
 
-    def __init__(self, results, training_data: Optional[pd.DataFrame] = None):
+    def __init__(self, results, training_data: pd.DataFrame | None = None):
         self.results = results
         self._training_data = extract_training_data(results, training_data)
         self._exog_names = list(results.model.exog_names)
@@ -64,7 +66,7 @@ class StatsmodelsQuantRegAdapter(LinearPredictionAdapter):
     def coefficients(self) -> jnp.ndarray:
         return jnp.asarray(self.results.params)
 
-    def covariance(self, vcov_spec: Optional[Any] = None) -> jnp.ndarray:
+    def covariance(self, vcov_spec: Any | None = None) -> jnp.ndarray:
         if vcov_spec is None:
             return jnp.asarray(self.results.cov_params())
 
@@ -85,7 +87,9 @@ class StatsmodelsQuantRegAdapter(LinearPredictionAdapter):
 
     def column_index_of_variable(self, variable_name: str) -> int:
         return column_index_of_variable(
-            self._exog_names, self.variable_metadata(), variable_name,
+            self._exog_names,
+            self.variable_metadata(),
+            variable_name,
         )
 
     def variable_metadata(self) -> dict[str, VariableInfo]:
@@ -97,11 +101,16 @@ class StatsmodelsQuantRegAdapter(LinearPredictionAdapter):
     # Bootstrap support
     # -----------------------------------------------------------------------
 
-    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "StatsmodelsQuantRegAdapter":
+    def refit(
+        self, resampled_data: pd.DataFrame, *, index=None
+    ) -> StatsmodelsQuantRegAdapter:
         formula = getattr(self.results.model, "formula", None)
         if formula is not None:
             from statsmodels.formula.api import quantreg as smf_quantreg
-            new_results = smf_quantreg(formula, data=resampled_data).fit(q=self._quantile)
+
+            new_results = smf_quantreg(formula, data=resampled_data).fit(
+                q=self._quantile
+            )
             return StatsmodelsQuantRegAdapter(new_results, training_data=resampled_data)
 
         endog_name = getattr(self.results.model, "endog_names", None)

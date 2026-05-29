@@ -8,19 +8,20 @@ so we use WrappedFDAdapter with the model's native predict method.
 """
 
 from __future__ import annotations
-from typing import Optional, Any
+
+from typing import Any
+
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
-import statsmodels.api as sm
 import statsmodels.miscmodels.ordinal_model as om
 
-from .._adapter import WrappedFDAdapter, VariableInfo
+from .._adapter import VariableInfo, WrappedFDAdapter
 from ._common import (
-    extract_training_data,
-    design_matrix_from_df,
-    column_index_of_variable,
     build_variable_metadata,
+    column_index_of_variable,
+    design_matrix_from_df,
+    extract_training_data,
     validate_vcov_spec,
 )
 
@@ -37,7 +38,7 @@ class StatsmodelsOrderedAdapter(WrappedFDAdapter):
         The data the model was fit on.
     """
 
-    def __init__(self, results, training_data: Optional[pd.DataFrame] = None):
+    def __init__(self, results, training_data: pd.DataFrame | None = None):
         self.results = results
         self._training_data = extract_training_data(results, training_data)
         # OrderedModel's exog_names includes both covariates and thresholds.
@@ -73,7 +74,7 @@ class StatsmodelsOrderedAdapter(WrappedFDAdapter):
         return self._n_outcomes
 
     @property
-    def outcome_labels(self) -> Optional[list[str]]:
+    def outcome_labels(self) -> list[str] | None:
         return self._outcome_labels
 
     def attach(self, session) -> None:
@@ -88,7 +89,7 @@ class StatsmodelsOrderedAdapter(WrappedFDAdapter):
     def coefficients(self) -> jnp.ndarray:
         return jnp.asarray(self.results.params)
 
-    def covariance(self, vcov_spec: Optional[Any] = None) -> jnp.ndarray:
+    def covariance(self, vcov_spec: Any | None = None) -> jnp.ndarray:
         if vcov_spec is None:
             return jnp.asarray(self.results.cov_params())
 
@@ -110,7 +111,8 @@ class StatsmodelsOrderedAdapter(WrappedFDAdapter):
                 if groups is None:
                     raise ValueError("cluster vcov requires 'groups' in the spec dict.")
                 return self._refit_and_extract_cov(
-                    cov_type="cluster", cov_kwds={"groups": groups},
+                    cov_type="cluster",
+                    cov_kwds={"groups": groups},
                 )
             raise ValueError(f"Unsupported vcov dict type: {kind!r}")
 
@@ -139,7 +141,9 @@ class StatsmodelsOrderedAdapter(WrappedFDAdapter):
 
     def column_index_of_variable(self, variable_name: str) -> int:
         return column_index_of_variable(
-            self._design_exog_names, self.variable_metadata(), variable_name,
+            self._design_exog_names,
+            self.variable_metadata(),
+            variable_name,
         )
 
     def variable_metadata(self) -> dict[str, VariableInfo]:
@@ -157,11 +161,15 @@ class StatsmodelsOrderedAdapter(WrappedFDAdapter):
         endog = self.results.model.endog
         exog = self.results.model.exog
         new_results = om.OrderedModel(
-            endog, exog, distr=self._distr,
+            endog,
+            exog,
+            distr=self._distr,
         ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False)
         return jnp.asarray(new_results.cov_params())
 
-    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "StatsmodelsOrderedAdapter":
+    def refit(
+        self, resampled_data: pd.DataFrame, *, index=None
+    ) -> StatsmodelsOrderedAdapter:
         # OrderedModel does not have a formula API in statsmodels, so we
         # always refit using the array API.
         endog_name = getattr(self.results.model, "endog_names", None)

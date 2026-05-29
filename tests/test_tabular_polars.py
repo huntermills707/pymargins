@@ -15,10 +15,10 @@ from pymargins._tabular import (
     to_pandas_if_needed,
 )
 
-
 # ---------------------------------------------------------------------------
 # Construction & introspection
 # ---------------------------------------------------------------------------
+
 
 def test_polars_tabular_columns():
     df = polars.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]})
@@ -43,6 +43,7 @@ def test_polars_tabular_dtypes():
 # ---------------------------------------------------------------------------
 # Column access
 # ---------------------------------------------------------------------------
+
 
 def test_polars_tabular_getitem():
     df = polars.DataFrame({"a": [1, 2, 3], "b": [4.0, 5.0, 6.0]})
@@ -80,6 +81,7 @@ def test_polars_tabular_with_column_new():
 # Row slicing (iloc)
 # ---------------------------------------------------------------------------
 
+
 def test_polars_tabular_iloc_int_list():
     df = polars.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]})
     tab = PolarsTabular(df)
@@ -109,6 +111,7 @@ def test_polars_tabular_iloc_scalar():
 # Groupby
 # ---------------------------------------------------------------------------
 
+
 def test_polars_tabular_groupby_single_key():
     df = polars.DataFrame({"a": [1, 1, 2, 2], "b": [10, 20, 30, 40]})
     tab = PolarsTabular(df)
@@ -127,11 +130,13 @@ def test_polars_tabular_groupby_single_key():
 
 
 def test_polars_tabular_groupby_multi_key():
-    df = polars.DataFrame({
-        "a": [1, 1, 2, 2],
-        "b": ["x", "y", "x", "y"],
-        "c": [10, 20, 30, 40],
-    })
+    df = polars.DataFrame(
+        {
+            "a": [1, 1, 2, 2],
+            "b": ["x", "y", "x", "y"],
+            "c": [10, 20, 30, 40],
+        }
+    )
     tab = PolarsTabular(df)
     groups = list(tab.groupby(["a", "b"]))
     assert len(groups) == 4
@@ -145,6 +150,7 @@ def test_polars_tabular_groupby_multi_key():
 # Concat
 # ---------------------------------------------------------------------------
 
+
 def test_polars_tabular_concat():
     t1 = PolarsTabular(polars.DataFrame({"a": [1, 2]}))
     t2 = PolarsTabular(polars.DataFrame({"a": [3, 4]}))
@@ -156,6 +162,7 @@ def test_polars_tabular_concat():
 # ---------------------------------------------------------------------------
 # Conversion
 # ---------------------------------------------------------------------------
+
 
 def test_polars_tabular_to_pandas():
     df = polars.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]})
@@ -180,6 +187,7 @@ def test_polars_tabular_to_pandas_patsy_safe_dtypes():
 # Protocol conformance
 # ---------------------------------------------------------------------------
 
+
 def test_polars_tabular_is_runtime_checkable():
     tab = PolarsTabular(polars.DataFrame({"a": [1]}))
     assert isinstance(tab, TabularData)
@@ -188,6 +196,7 @@ def test_polars_tabular_is_runtime_checkable():
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
+
 
 def test_as_tabular_from_polars():
     df = polars.DataFrame({"a": [1, 2]})
@@ -215,6 +224,7 @@ def test_as_tabular_raises_on_bad_type():
 # ---------------------------------------------------------------------------
 # concat_tables mixed backends
 # ---------------------------------------------------------------------------
+
 
 def test_concat_tables_polars_only():
     t1 = PolarsTabular(polars.DataFrame({"a": [1]}))
@@ -250,6 +260,7 @@ def test_concat_tables_empty_raises():
 # to_pandas_if_needed
 # ---------------------------------------------------------------------------
 
+
 def test_to_pandas_if_needed_polars():
     tab = PolarsTabular(polars.DataFrame({"a": [1]}))
     pdf = to_pandas_if_needed(tab)
@@ -265,6 +276,7 @@ def test_to_pandas_if_needed_pandas():
 # ---------------------------------------------------------------------------
 # Escape hatches
 # ---------------------------------------------------------------------------
+
 
 def test_polars_tabular_copy():
     t1 = PolarsTabular(polars.DataFrame({"a": [1, 2]}))

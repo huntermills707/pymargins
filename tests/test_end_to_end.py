@@ -15,21 +15,23 @@ jax.config.update("jax_enable_x64", True)
 
 from pymargins import Margins
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def df_logit():
     """Synthetic data for a logit model."""
     rng = np.random.default_rng(42)
     n = 300
-    df = pd.DataFrame({
-        "age": rng.normal(50, 10, size=n),
-        "treatment": rng.binomial(1, 0.5, size=n),
-        "sex": rng.choice(["M", "F"], size=n),
-    })
+    df = pd.DataFrame(
+        {
+            "age": rng.normal(50, 10, size=n),
+            "treatment": rng.binomial(1, 0.5, size=n),
+            "sex": rng.choice(["M", "F"], size=n),
+        }
+    )
     eta = -2.0 + 0.05 * df["age"] + 0.8 * df["treatment"] + 0.3 * (df["sex"] == "M")
     prob = 1.0 / (1.0 + np.exp(-eta))
     df["y"] = (rng.uniform(size=n) < prob).astype(float)
@@ -48,6 +50,7 @@ def fit_logit(df_logit):
 # ---------------------------------------------------------------------------
 # 0.4 — Wire up Margins to the adapter
 # ---------------------------------------------------------------------------
+
 
 def test_margins_construction_log_scale(fit_logit):
     m = Margins.log_scale(fit_logit)
@@ -74,6 +77,7 @@ def test_margins_diagnose(fit_logit):
 # ---------------------------------------------------------------------------
 # 0.5 — Smoke test: relative risk via log_scale
 # ---------------------------------------------------------------------------
+
 
 def test_relative_risk_contrast(fit_logit):
     """Compute a relative risk: exp(log(p_treat=1) - log(p_treat=0))."""
@@ -144,8 +148,8 @@ def test_contrast_vector_named(fit_logit):
             {"atexog": {"treatment": 0, "sex": "F"}, "label": "CF"},
         ],
         contrasts={
-            "treatment_effect_male":   [+1, -1,  0,  0],
-            "treatment_effect_female": [ 0,  0, +1, -1],
+            "treatment_effect_male": [+1, -1, 0, 0],
+            "treatment_effect_female": [0, 0, +1, -1],
         },
     )
 
@@ -184,8 +188,8 @@ def test_result_joint_test(fit_logit):
             {"atexog": {"treatment": 0, "sex": "F"}},
         ],
         contrasts={
-            "male":   [+1, -1,  0,  0],
-            "female": [ 0,  0, +1, -1],
+            "male": [+1, -1, 0, 0],
+            "female": [0, 0, +1, -1],
         },
     )
 
@@ -199,6 +203,7 @@ def test_result_joint_test(fit_logit):
 # ---------------------------------------------------------------------------
 # Additional coverage for testing gaps
 # ---------------------------------------------------------------------------
+
 
 def test_evaluate_nnt(fit_logit):
     """Nonlinear composition: NNT = 1/(p_control - p_treated)."""
@@ -217,7 +222,9 @@ def test_evaluate_nnt(fit_logit):
 
 def test_simulation_method(fit_logit):
     """Explicit simulation method should produce valid CIs."""
-    m = Margins.linear_scale(fit_logit, at="typical", method="simulation", n_sim=2000, rng_seed=42)
+    m = Margins.linear_scale(
+        fit_logit, at="typical", method="simulation", n_sim=2000, rng_seed=42
+    )
 
     rr = m.contrasts(
         scenarios=[
@@ -235,7 +242,9 @@ def test_simulation_method(fit_logit):
 
 def test_bootstrap_method(fit_logit):
     """Bootstrap method should produce valid CIs via refit."""
-    m = Margins.linear_scale(fit_logit, at="typical", method="bootstrap", n_boot=50, rng_seed=42)
+    m = Margins.linear_scale(
+        fit_logit, at="typical", method="bootstrap", n_boot=50, rng_seed=42
+    )
 
     rd = m.contrasts(
         scenarios=[
@@ -254,7 +263,7 @@ def test_predict_with_transform(fit_logit):
     """Per-row transform applied before aggregation."""
     m = Margins.linear_scale(fit_logit, at="overall")
 
-    pred = m.predict(atexog={"treatment": 1}, transform=lambda mu: mu ** 2)
+    pred = m.predict(atexog={"treatment": 1}, transform=lambda mu: mu**2)
     assert np.isfinite(float(pred.estimate))
     # Squared probabilities should be smaller than raw probabilities
     pred_raw = m.predict(atexog={"treatment": 1})
@@ -327,7 +336,6 @@ def test_test_one_sided_alternatives():
     m = Margins.linear_scale(fit, at="overall")
     pred = m.predict(atexog={"x": [0.0]})
 
-    test_two = pred.test(alternative="two-sided")
     test_greater = pred.test(alternative="greater")
     test_less = pred.test(alternative="less")
 
@@ -363,10 +371,12 @@ def test_dydx_with_over(fit_logit):
 
 def test_empty_training_data_raises():
     """Empty training data should raise a clear error during model fitting or in pymargins."""
-    df_empty = pd.DataFrame({
-        "x": pd.Series([], dtype=float),
-        "y": pd.Series([], dtype=float),
-    })
+    df_empty = pd.DataFrame(
+        {
+            "x": pd.Series([], dtype=float),
+            "y": pd.Series([], dtype=float),
+        }
+    )
     with pytest.raises(ValueError):
         smf.glm("y ~ x", data=df_empty, family=sm.families.Binomial()).fit()
 

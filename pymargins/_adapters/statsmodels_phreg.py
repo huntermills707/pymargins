@@ -9,17 +9,19 @@ does not enter the hazard ratio.
 """
 
 from __future__ import annotations
-from typing import Optional, Any
+
+from typing import Any
+
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
 from .._adapter import ModelAdapter, VariableInfo
 from ._common import (
-    extract_training_data,
-    design_matrix_from_df,
-    column_index_of_variable,
     build_variable_metadata,
+    column_index_of_variable,
+    design_matrix_from_df,
+    extract_training_data,
     validate_vcov_spec,
 )
 
@@ -38,7 +40,7 @@ class StatsmodelsPHRegAdapter(ModelAdapter):
         formula API and does not store training data.
     """
 
-    def __init__(self, results, training_data: Optional[pd.DataFrame] = None):
+    def __init__(self, results, training_data: pd.DataFrame | None = None):
         self.results = results
         self._training_data = extract_training_data(results, training_data)
         self._exog_names = list(results.model.exog_names)
@@ -71,7 +73,7 @@ class StatsmodelsPHRegAdapter(ModelAdapter):
     def coefficients(self) -> jnp.ndarray:
         return jnp.asarray(self.results.params)
 
-    def covariance(self, vcov_spec: Optional[Any] = None) -> jnp.ndarray:
+    def covariance(self, vcov_spec: Any | None = None) -> jnp.ndarray:
         if vcov_spec is None:
             return jnp.asarray(self.results.cov_params())
 
@@ -86,8 +88,8 @@ class StatsmodelsPHRegAdapter(ModelAdapter):
 
         if isinstance(vcov_spec, dict):
             raise ValueError(
-                f"StatsmodelsPHRegAdapter does not support vcov dict. "
-                f"Use None (default cov_params) or a user-supplied ndarray."
+                "StatsmodelsPHRegAdapter does not support vcov dict. "
+                "Use None (default cov_params) or a user-supplied ndarray."
             )
 
         raise ValueError(f"Unsupported vcov_spec: {vcov_spec!r}")
@@ -100,7 +102,7 @@ class StatsmodelsPHRegAdapter(ModelAdapter):
         self,
         beta: jnp.ndarray,
         X: jnp.ndarray,
-        offset: Optional[jnp.ndarray] = None,
+        offset: jnp.ndarray | None = None,
     ) -> jnp.ndarray:
         eta = jnp.asarray(X) @ beta
         if offset is not None:
@@ -116,7 +118,9 @@ class StatsmodelsPHRegAdapter(ModelAdapter):
 
     def column_index_of_variable(self, variable_name: str) -> int:
         return column_index_of_variable(
-            self._exog_names, self.variable_metadata(), variable_name,
+            self._exog_names,
+            self.variable_metadata(),
+            variable_name,
         )
 
     def variable_metadata(self) -> dict[str, VariableInfo]:
@@ -128,7 +132,9 @@ class StatsmodelsPHRegAdapter(ModelAdapter):
     # Bootstrap support
     # -----------------------------------------------------------------------
 
-    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "StatsmodelsPHRegAdapter":
+    def refit(
+        self, resampled_data: pd.DataFrame, *, index=None
+    ) -> StatsmodelsPHRegAdapter:
         from statsmodels.duration.hazard_regression import PHReg
 
         # Find duration (endog) and status columns
@@ -170,7 +176,7 @@ class StatsmodelsPHRegAdapter(ModelAdapter):
         status_candidates = []
         for col in non_exog_cols:
             unique_vals = df[col].dropna().unique()
-            if set(unique_vals).issubset({0, 1, True, False}):
+            if set(unique_vals).issubset({0, 1}):
                 status_candidates.append(col)
 
         if len(status_candidates) == 0:

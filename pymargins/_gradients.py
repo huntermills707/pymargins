@@ -29,13 +29,14 @@ which estimand, which scenario, which session scale — are resolved upstream.
 """
 
 from __future__ import annotations
-from typing import Callable, Literal
+
 import warnings
+from collections.abc import Callable
+from typing import Any, Literal
 
 import jax
 import jax.numpy as jnp
 import numpy as np
-
 
 # ---------------------------------------------------------------------------
 # Type aliases
@@ -47,6 +48,7 @@ GradientBackend = Literal["autodiff", "fd", "wrapped_fd"]
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def gradient(
     h: Callable[[jnp.ndarray], jnp.ndarray],
@@ -313,6 +315,7 @@ def make_predict_with_fd_jvp(
     arguments and an offset would need to be a traced array (not a static
     ``nondiff_argnum``) to support differentiation through it.
     """
+
     @jax.custom_jvp
     def predict_wrapped(beta, X):
         return jnp.asarray(predict_native(np.asarray(beta), X))
@@ -378,10 +381,12 @@ def make_predict_with_fd_jvp(
                     e_ij = np.zeros_like(X_np)
                     e_ij[i, j] = fd_step
                     f_plus = np.atleast_1d(predict_native(beta_np, X_np + e_ij)).ravel()
-                    f_minus = np.atleast_1d(predict_native(beta_np, X_np - e_ij)).ravel()
+                    f_minus = np.atleast_1d(
+                        predict_native(beta_np, X_np - e_ij)
+                    ).ravel()
                     J_X[:, i, j] = (f_plus - f_minus) / (2 * fd_step)
             J_X_jax = jnp.asarray(J_X)
-            deriv_X = jnp.einsum('oij,ij->o', J_X_jax, X_dot)
+            deriv_X = jnp.einsum("oij,ij->o", J_X_jax, X_dot)
             deriv_X = deriv_X.reshape(original_shape)
 
         deriv = deriv_beta + deriv_X
@@ -416,15 +421,18 @@ def _jax_link_inverse(link):
             return jnp.exp
         return lambda z: jnp.where(z <= 0, 0.0, jnp.power(z, 1.0 / p))
     if name == "InversePower":
-        return lambda z: jnp.where(jnp.abs(z) < 1e-12, jnp.where(z >= 0, 1e12, -1e12), 1.0 / z)
+        return lambda z: jnp.where(
+            jnp.abs(z) < 1e-12, jnp.where(z >= 0, 1e12, -1e12), 1.0 / z
+        )
     if name == "InverseSquared":
         return lambda z: jnp.where(z <= 0, 0.0, 1.0 / jnp.sqrt(z))
     if name == "Sqrt":
-        return lambda z: z ** 2
+        return lambda z: z**2
     if name == "Cauchy":
         return lambda z: 0.5 + (1.0 / jnp.pi) * jnp.arctan(z)
     if name == "NegativeBinomial":
         alpha = float(getattr(link, "alpha", 1.0))
+
         def nb_inv(z):
             ez = jnp.exp(z)
             denom = alpha * (ez - 1.0) + 1.0
@@ -434,6 +442,7 @@ def _jax_link_inverse(link):
                 denom,
             )
             return ez / denom
+
         return nb_inv
     raise NotImplementedError(f"No JAX mapping for link {name!r}")
 
@@ -442,13 +451,15 @@ def _jax_link_inverse_deriv(link):
     """Return a JAX-native link inverse derivative for common statsmodels links."""
     name = type(link).__name__
     if name == "Logit":
+
         def deriv(z):
             s = jax.nn.sigmoid(z)
             return s * (1.0 - s)
+
         return deriv
     if name == "Probit":
         c = 1.0 / jnp.sqrt(2.0 * jnp.pi)
-        return lambda z: c * jnp.exp(-0.5 * z ** 2)
+        return lambda z: c * jnp.exp(-0.5 * z**2)
     if name == "CLogLog":
         return lambda z: jnp.exp(z - jnp.exp(z))
     if name == "LogLog":
@@ -466,15 +477,16 @@ def _jax_link_inverse_deriv(link):
             return jnp.exp
         return lambda z: jnp.where(z <= 0, 0.0, jnp.power(z, 1.0 / p - 1.0) / p)
     if name == "InversePower":
-        return lambda z: jnp.where(jnp.abs(z) < 1e-12, -1e24, -1.0 / (z ** 2))
+        return lambda z: jnp.where(jnp.abs(z) < 1e-12, -1e24, -1.0 / (z**2))
     if name == "InverseSquared":
-        return lambda z: jnp.where(z <= 0, 0.0, -0.5 / (z ** 1.5))
+        return lambda z: jnp.where(z <= 0, 0.0, -0.5 / (z**1.5))
     if name == "Sqrt":
         return lambda z: 2.0 * z
     if name == "Cauchy":
-        return lambda z: 1.0 / (jnp.pi * (1.0 + z ** 2))
+        return lambda z: 1.0 / (jnp.pi * (1.0 + z**2))
     if name == "NegativeBinomial":
         alpha = float(getattr(link, "alpha", 1.0))
+
         def deriv(z):
             ez = jnp.exp(z)
             denom = alpha * (ez - 1.0) + 1.0
@@ -483,7 +495,8 @@ def _jax_link_inverse_deriv(link):
                 jnp.where(denom >= 0, 1e-12, -1e-12),
                 denom,
             )
-            return ez / (denom ** 2)
+            return ez / (denom**2)
+
         return deriv
     raise NotImplementedError(f"No JAX mapping for link derivative {name!r}")
 
@@ -581,6 +594,7 @@ def make_glm_jvp_wrapper(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _gradient_autodiff(h, beta):
     """Use JAX autodiff to compute the gradient. Dispatches to grad or

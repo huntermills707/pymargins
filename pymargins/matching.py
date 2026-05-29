@@ -16,9 +16,8 @@ etc.) can write their own wrapper by exposing the same three attributes:
 from __future__ import annotations
 
 import logging
-from typing import Optional, Any
+from typing import Any
 
-import numpy as np
 import pandas as pd
 
 from ._tabular import to_pandas_if_needed
@@ -73,8 +72,8 @@ class PysmatchClient:
         self,
         matcher: Any,
         treatment_col: str,
-        fit_scores_kwds: Optional[dict] = None,
-        match_kwds: Optional[dict] = None,
+        fit_scores_kwds: dict | None = None,
+        match_kwds: dict | None = None,
     ):
         try:
             import pysmatch  # noqa: F401

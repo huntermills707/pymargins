@@ -5,9 +5,10 @@ Export, formatting, and reporting methods for MarginsResult.
 """
 
 from __future__ import annotations
-from typing import Any, Optional
+
 import re
 import warnings
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -15,10 +16,10 @@ import pandas as pd
 from ._margins import MarginsResult
 from ._text import SummaryString
 
-
 # ---------------------------------------------------------------------------
 # Summary / reporting helpers
 # ---------------------------------------------------------------------------
+
 
 def _summary_rows(self: MarginsResult):
     """Build per-row summary data as a list of dicts.
@@ -82,7 +83,7 @@ def summary(
     star_levels: tuple[float, float, float] = (0.01, 0.05, 0.10),
     float_fmt: str = ".4f",
     pvalue_fmt: str = ".3f",
-    max_rows: Optional[int] = None,
+    max_rows: int | None = None,
 ) -> str:
     """Human-readable summary including diagnostics.
 
@@ -125,7 +126,7 @@ def summary(
     if has_stat:
         stat_header = rows[0].get("stat_label", "z") if rows else "z"
         data_keys.extend([("statistic", stat_header), ("pvalue", "P>|z|")])
-    data_keys.append(("ci", f"[{self.level*100:.0f}% Conf. Int.]"))
+    data_keys.append(("ci", f"[{self.level * 100:.0f}% Conf. Int.]"))
 
     def _fmt(key, row):
         if key == "ci":
@@ -195,9 +196,7 @@ def summary(
         k = np.asarray(self.kappa)
         if not np.all(np.isnan(k)):
             kappa_str = (
-                f"{float(k):.3f}"
-                if k.ndim == 0
-                else f"max={float(np.nanmax(k)):.3f}"
+                f"{float(k):.3f}" if k.ndim == 0 else f"max={float(np.nanmax(k)):.3f}"
             )
             footers.append(f"κ: {kappa_str}")
     if self.delta_sim_disagreement is not None:
@@ -296,7 +295,11 @@ def to_frame(self: MarginsResult) -> pd.DataFrame:
     # Scenario columns
     scenarios = self.estimand_metadata.get("scenarios")
     kind = self.estimand_metadata.get("kind")
-    if scenarios is not None and len(scenarios) == n and kind in ("prediction", "slope", None):
+    if (
+        scenarios is not None
+        and len(scenarios) == n
+        and kind in ("prediction", "slope", None)
+    ):
         all_keys = sorted(set().union(*(s.keys() for s in scenarios)))
         for key in all_keys:
             col_values = [s.get(key, np.nan) for s in scenarios]
@@ -311,8 +314,8 @@ def to_latex(
     star_levels: tuple[float, float, float] = (0.01, 0.05, 0.10),
     float_fmt: str = ".4f",
     pvalue_fmt: str = ".3f",
-    caption: Optional[str] = None,
-    label: Optional[str] = None,
+    caption: str | None = None,
+    label: str | None = None,
 ) -> str:
     """LaTeX tabular representation of the result.
 
@@ -342,7 +345,7 @@ def to_latex(
     if has_stat:
         stat_header = rows[0].get("stat_label", "z") if rows else "z"
         data_keys.extend([("statistic", stat_header), ("pvalue", "P>|z|")])
-    data_keys.append(("ci", f"[{self.level*100:.0f}\\% Conf. Int.]"))
+    data_keys.append(("ci", f"[{self.level * 100:.0f}\\% Conf. Int.]"))
 
     def _fmt(key, row):
         if key == "ci":
@@ -388,7 +391,7 @@ def to_html(
     star_levels: tuple[float, float, float] = (0.01, 0.05, 0.10),
     float_fmt: str = ".4f",
     pvalue_fmt: str = ".3f",
-    caption: Optional[str] = None,
+    caption: str | None = None,
 ) -> str:
     """HTML table representation of the result.
 
@@ -416,7 +419,7 @@ def to_html(
     if has_stat:
         stat_header = rows[0].get("stat_label", "z") if rows else "z"
         data_keys.extend([("statistic", stat_header), ("pvalue", "P>|z|")])
-    data_keys.append(("ci", f"[{self.level*100:.0f}% Conf. Int.]"))
+    data_keys.append(("ci", f"[{self.level * 100:.0f}% Conf. Int.]"))
 
     def _fmt(key, row):
         if key == "ci":
@@ -436,7 +439,11 @@ def to_html(
     if caption:
         lines.append(f"<caption>{caption}</caption>")
     lines.append("<thead>")
-    lines.append("<tr>" + "".join(f"<th>{h}</th>" for h in ([""] + [h for _, h in data_keys])) + "</tr>")
+    lines.append(
+        "<tr>"
+        + "".join(f"<th>{h}</th>" for h in ([""] + [h for _, h in data_keys]))
+        + "</tr>"
+    )
     lines.append("</thead>")
     lines.append("<tbody>")
     for r in rows:

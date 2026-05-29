@@ -27,20 +27,28 @@ Design questions handled here
 """
 
 from __future__ import annotations
-from typing import Optional, Union, Any
+
 from itertools import product
+
 import numpy as np
+import pandas as pd
 
-from ._tabular import TabularData, PandasTabular, PolarsTabular, as_tabular, concat_tables
-
+from ._tabular import (
+    PandasTabular,
+    PolarsTabular,
+    TabularData,
+    as_tabular,
+    concat_tables,
+)
 
 # ---------------------------------------------------------------------------
 # Scenario expansion
 # ---------------------------------------------------------------------------
 
+
 def expand_scenario(
     scenario: dict,
-    base_data: Union[pd.DataFrame, TabularData],
+    base_data: pd.DataFrame | TabularData,
     aggregation_resolver,
     variable_metadata: dict,
 ) -> tuple[TabularData, dict]:
@@ -130,6 +138,7 @@ def expand_scenario(
     n_grid = len(grid_rows)
     if isinstance(background, PandasTabular):
         import pandas as pd
+
         bg_df = background._df
         n_bg = len(bg_df)
         if n_grid == 1 and not grid_keys:
@@ -143,6 +152,7 @@ def expand_scenario(
             expanded = PandasTabular(tiled)
     elif isinstance(background, PolarsTabular):
         from ._tabular import _pl
+
         bg_df = background._df
         n_bg = len(bg_df)
         if n_grid == 1 and not grid_keys:
@@ -161,7 +171,7 @@ def expand_scenario(
         pieces = []
         for grid_row in grid_rows:
             block = background
-            for k, v in zip(grid_keys, grid_row):
+            for k, v in zip(grid_keys, grid_row, strict=False):
                 block = block.with_column(k, v)
             pieces.append(block)
         expanded = concat_tables(pieces)
@@ -180,6 +190,7 @@ def expand_scenario(
 # ---------------------------------------------------------------------------
 # Aggregation resolver
 # ---------------------------------------------------------------------------
+
 
 def make_aggregation_resolver(at, weights=None):
     """Build a resolver function that turns the session's `at` setting
@@ -227,6 +238,7 @@ def make_aggregation_resolver(at, weights=None):
             spec = _resolve_var_spec(at, var_name, info)
             result[var_name] = _summarize_column(col, spec, info, weights)
         import pandas as pd
+
         return as_tabular(pd.DataFrame([result]))
 
     return resolver
@@ -287,6 +299,7 @@ def _summarize_column(col, spec, info, weights):
 # ---------------------------------------------------------------------------
 # Weighted summary helpers (NumPy-based, since this isn't in the autodiff path)
 # ---------------------------------------------------------------------------
+
 
 def _weighted_mean(col, weights):
     arr = np.asarray(col)
@@ -355,7 +368,11 @@ def _weighted_mode(col, weights):
     else:
         # String / object columns: check for None or NaN without requiring pandas
         for val in arr:
-            if val is None or val is np.nan or (isinstance(val, float) and np.isnan(val)):
+            if (
+                val is None
+                or val is np.nan
+                or (isinstance(val, float) and np.isnan(val))
+            ):
                 raise ValueError("Input data contains NaN or Inf values")
     if weights is None:
         # Use np.unique with return_counts for numpy arrays
@@ -374,6 +391,7 @@ def _weighted_mode(col, weights):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _to_list(value):
     """Normalize a value or list-of-values to a list."""
     if isinstance(value, (list, tuple, np.ndarray)):
@@ -381,7 +399,7 @@ def _to_list(value):
     return [value]
 
 
-def _auto_label_from_atexog(atexog: Optional[dict]) -> Optional[str]:
+def _auto_label_from_atexog(atexog: dict | None) -> str | None:
     """Build a readable label from an atexog dict, e.g. {'x': 1, 'y': 2} → 'x=1, y=2'."""
     if not atexog:
         return None

@@ -1,28 +1,29 @@
-"""Tests for LifelinesCoxTimeVaryingAdapter.
-"""
+"""Tests for LifelinesCoxTimeVaryingAdapter."""
 
 import jax
-import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import pytest
+
 pytest.importorskip("lifelines")
 from lifelines import CoxTimeVaryingFitter
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins._adapters.lifelines_coxtimevarying import LifelinesCoxTimeVaryingAdapter
 from pymargins import Margins
+from pymargins._adapters.lifelines_coxtimevarying import LifelinesCoxTimeVaryingAdapter
 
 
 @pytest.fixture
 def df_survival_tv():
     rng = np.random.default_rng(42)
     n = 200
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+        }
+    )
     hazard = np.exp(0.5 + 0.3 * df["x1"] - 0.2 * df["x2"])
     T = rng.exponential(1.0 / hazard)
     E = (rng.random(n) < 0.8).astype(int)
@@ -36,7 +37,9 @@ def df_survival_tv():
 @pytest.fixture
 def ctv_fit(df_survival_tv):
     ctv = CoxTimeVaryingFitter(penalizer=0.1)
-    ctv.fit(df_survival_tv, id_col="id", start_col="start", stop_col="stop", event_col="E")
+    ctv.fit(
+        df_survival_tv, id_col="id", start_col="start", stop_col="stop", event_col="E"
+    )
     return ctv
 
 

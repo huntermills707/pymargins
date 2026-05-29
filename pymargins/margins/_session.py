@@ -7,48 +7,50 @@ linear combinations, and arbitrary differentiable estimands.
 """
 
 from __future__ import annotations
-from typing import Callable, Optional, Union, Any
+
 import hashlib
 import inspect
-import weakref
-
 import warnings
+from collections.abc import Callable
+from typing import Any
 
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
 from .._adapter import (
+    InferenceMethod,
     ModelAdapter,
     auto_detect_adapter,
-    InferenceMethod,
 )
 from .._gradients import GradientBackend
-from .._inference import InferenceConfig
-from . import run_inference
-from .._scenarios import (
-    expand_scenario,
-    make_aggregation_resolver,
-    _auto_label_from_atexog,
-)
 from .._kappa import session_kappa
-from .._result import MarginsResult, DiagnosticResult
+from .._result import DiagnosticResult, MarginsResult
 from .._result._margins import compose_results
 from .._result._text import SummaryString
+from .._scenarios import (
+    _auto_label_from_atexog,
+)
+from . import run_inference
+from ._atoms import (
+    _enumerate_groups,
+    _finalize_atoms,
+    _format_atom_label,
+    _slice_by_outcome,
+)
 from ._estimands import (
-    _get_base_data,
-    _build_prediction_estimand,
-    _build_slope_estimand,
     _build_contrast_estimand,
     _build_evaluate_estimand,
+    _build_prediction_estimand,
+    _build_slope_estimand,
+    _get_base_data,
 )
-from ._atoms import _enumerate_groups, _format_atom_label, _finalize_atoms, _slice_by_outcome
-from ._inference_glue import _inference_config, _frozen_cov, _wrap_result
-
+from ._inference_glue import _frozen_cov, _inference_config, _wrap_result
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _validate_callable_arity(fn: Callable, name: str, min_positional: int = 1) -> None:
     """Validate that ``fn`` accepts at least ``min_positional`` positional args.
@@ -78,12 +80,12 @@ def _validate_callable_arity(fn: Callable, name: str, min_positional: int = 1) -
 # Type aliases
 # ---------------------------------------------------------------------------
 
-AtSpec = Union[str, dict, Callable]
-ContrastSpec = Union[
-    list[float],                  # single contrast
-    dict[str, list[float]],       # multiple named contrasts
-    np.ndarray,                   # contrast matrix
-]
+AtSpec = str | dict | Callable
+ContrastSpec = (
+    list[float]  # single contrast
+    | dict[str, list[float]]  # multiple named contrasts
+    | np.ndarray  # contrast matrix
+)
 
 
 # ---------------------------------------------------------------------------
@@ -204,11 +206,18 @@ class Margins:
         models or when customizing predict semantics.
     """
 
-    _FROZEN_AFTER_CACHE = frozenset({
-        "method", "n_boot", "rng_seed", "n_sim",
-        "cluster", "block_size", "bootstrap_config",
-        "matching",
-    })
+    _FROZEN_AFTER_CACHE = frozenset(
+        {
+            "method",
+            "n_boot",
+            "rng_seed",
+            "n_sim",
+            "cluster",
+            "block_size",
+            "bootstrap_config",
+            "matching",
+        }
+    )
 
     def __setattr__(self, name, value):
         if name in self._FROZEN_AFTER_CACHE and self._any_cache_materialized():
@@ -239,45 +248,56 @@ class Margins:
         self,
         model,
         *,
-        phi: Optional[Callable] = _NOT_GIVEN,
-        phi_inv: Optional[Callable] = _NOT_GIVEN,
-        vcov: Optional[Union[str, np.ndarray, dict]] = _NOT_GIVEN,
-        weights: Optional[np.ndarray] = _NOT_GIVEN,
+        phi: Callable | None = _NOT_GIVEN,
+        phi_inv: Callable | None = _NOT_GIVEN,
+        vcov: str | np.ndarray | dict | None = _NOT_GIVEN,
+        weights: np.ndarray | None = _NOT_GIVEN,
         at: AtSpec = _NOT_GIVEN,
         level: float = _NOT_GIVEN,
         method: InferenceMethod = _NOT_GIVEN,
         kappa_threshold: float = _NOT_GIVEN,
-        rng_seed: Optional[int] = _NOT_GIVEN,
+        rng_seed: int | None = _NOT_GIVEN,
         n_sim: int = _NOT_GIVEN,
         n_boot: int = _NOT_GIVEN,
         n_jobs: int = _NOT_GIVEN,
         gradient_backend: GradientBackend = _NOT_GIVEN,
         fd_step: float = _NOT_GIVEN,
         diagnostics: bool = _NOT_GIVEN,
-        cluster: Optional[Any] = _NOT_GIVEN,
-        block_size: Optional[int] = _NOT_GIVEN,
-        bootstrap_config: Optional[dict] = _NOT_GIVEN,
+        cluster: Any | None = _NOT_GIVEN,
+        block_size: int | None = _NOT_GIVEN,
+        bootstrap_config: dict | None = _NOT_GIVEN,
         progress_bar: bool = _NOT_GIVEN,
-        matching: Optional[Any] = _NOT_GIVEN,
-        formula: Optional[str] = _NOT_GIVEN,
-        data: Optional[pd.DataFrame] = _NOT_GIVEN,
+        matching: Any | None = _NOT_GIVEN,
+        formula: str | None = _NOT_GIVEN,
+        data: pd.DataFrame | None = _NOT_GIVEN,
         strict: bool = False,
-        adapter: Optional[ModelAdapter] = None,
+        adapter: ModelAdapter | None = None,
     ):
         # Strict mode: every config argument must be explicitly given
         if strict:
             for name, value in [
-                ("phi", phi), ("phi_inv", phi_inv), ("vcov", vcov),
-                ("weights", weights), ("at", at), ("level", level),
-                ("method", method), ("kappa_threshold", kappa_threshold),
-                ("rng_seed", rng_seed), ("n_sim", n_sim), ("n_boot", n_boot),
-                ("n_jobs", n_jobs), ("gradient_backend", gradient_backend),
-                ("fd_step", fd_step), ("diagnostics", diagnostics),
-                ("cluster", cluster), ("block_size", block_size),
+                ("phi", phi),
+                ("phi_inv", phi_inv),
+                ("vcov", vcov),
+                ("weights", weights),
+                ("at", at),
+                ("level", level),
+                ("method", method),
+                ("kappa_threshold", kappa_threshold),
+                ("rng_seed", rng_seed),
+                ("n_sim", n_sim),
+                ("n_boot", n_boot),
+                ("n_jobs", n_jobs),
+                ("gradient_backend", gradient_backend),
+                ("fd_step", fd_step),
+                ("diagnostics", diagnostics),
+                ("cluster", cluster),
+                ("block_size", block_size),
                 ("bootstrap_config", bootstrap_config),
                 ("progress_bar", progress_bar),
                 ("matching", matching),
-                ("formula", formula), ("data", data),
+                ("formula", formula),
+                ("data", data),
             ]:
                 if value is _NOT_GIVEN:
                     raise ValueError(
@@ -306,7 +326,9 @@ class Margins:
             raise ValueError(
                 f"n_jobs must be a positive integer or -1 (all CPUs), got {n_jobs}"
             )
-        gradient_backend = "auto" if gradient_backend is _NOT_GIVEN else gradient_backend
+        gradient_backend = (
+            "auto" if gradient_backend is _NOT_GIVEN else gradient_backend
+        )
         fd_step = 1e-6 if fd_step is _NOT_GIVEN else fd_step
         diagnostics = True if diagnostics is _NOT_GIVEN else diagnostics
         cluster = None if cluster is _NOT_GIVEN else cluster
@@ -319,9 +341,7 @@ class Margins:
 
         # Validation: phi/phi_inv must come as a pair
         if (phi is None) != (phi_inv is None):
-            raise ValueError(
-                "phi and phi_inv must be provided together (or neither)."
-            )
+            raise ValueError("phi and phi_inv must be provided together (or neither).")
 
         # Validation: numeric session parameters
         if not (0.0 < level < 1.0):
@@ -378,7 +398,9 @@ class Margins:
         # Validate matching object
         if self.matching is not None:
             if not hasattr(self.matching, "matched_data"):
-                raise ValueError("matching object must have a 'matched_data' attribute.")
+                raise ValueError(
+                    "matching object must have a 'matched_data' attribute."
+                )
             if not hasattr(self.matching, "cluster_ids"):
                 raise ValueError("matching object must have a 'cluster_ids' attribute.")
 
@@ -416,7 +438,8 @@ class Margins:
                         "Standard errors may be anti-conservative because matched-set "
                         "dependence is ignored. Consider vcov='cluster' or omitting "
                         "vcov to use the matching object's cluster_ids.",
-                        UserWarning, stacklevel=2,
+                        UserWarning,
+                        stacklevel=2,
                     )
 
             # Validate that bootstrap users have rematch()
@@ -495,12 +518,12 @@ class Margins:
     # -----------------------------------------------------------------------
 
     @classmethod
-    def linear_scale(cls, model, **kwargs) -> "Margins":
+    def linear_scale(cls, model, **kwargs) -> Margins:
         """Identity scale: contrasts are absolute differences. The default."""
         return cls(model, phi=None, phi_inv=None, **kwargs)
 
     @classmethod
-    def from_formula(cls, model, formula: str, data: pd.DataFrame, **kwargs) -> "Margins":
+    def from_formula(cls, model, formula: str, data: pd.DataFrame, **kwargs) -> Margins:
         """Construct a Margins session with an explicit formula.
 
         For models fit without native formula support (array-fit statsmodels,
@@ -527,7 +550,7 @@ class Margins:
         return cls(model, formula=formula, data=data, **kwargs)
 
     @classmethod
-    def log_scale(cls, model, **kwargs) -> "Margins":
+    def log_scale(cls, model, **kwargs) -> Margins:
         """Log scale: contrasts are log-ratios; reported as ratios.
 
         Use for relative risks, fold-change, rate ratios, hazard ratios.
@@ -536,17 +559,18 @@ class Margins:
         return cls(model, phi=jnp.exp, phi_inv=jnp.log, **kwargs)
 
     @classmethod
-    def logit_scale(cls, model, **kwargs) -> "Margins":
+    def logit_scale(cls, model, **kwargs) -> Margins:
         """Logit scale: contrasts are log-odds-ratios; reported as ORs.
 
         Predictions reported as probabilities with asymmetric CIs naturally
         bounded in (0, 1).
         """
         from jax.scipy.special import expit, logit
+
         return cls(model, phi=expit, phi_inv=logit, **kwargs)
 
     @classmethod
-    def correlation_scale(cls, model, **kwargs) -> "Margins":
+    def correlation_scale(cls, model, **kwargs) -> Margins:
         """Fisher z scale: contrasts on z; reported as correlations."""
         return cls(model, phi=jnp.tanh, phi_inv=jnp.arctanh, **kwargs)
 
@@ -556,9 +580,9 @@ class Margins:
         model,
         posterior_draws: np.ndarray,
         *,
-        point_estimate: Optional[np.ndarray] = None,
+        point_estimate: np.ndarray | None = None,
         **kwargs,
-    ) -> "Margins":
+    ) -> Margins:
         """Construct a Margins session from posterior draws of β.
 
         The simulation inference path uses the user-supplied draws instead
@@ -606,11 +630,11 @@ class Margins:
     def predict(
         self,
         *,
-        atexog: Optional[Union[dict, "pd.DataFrame"]] = None,
-        over: Optional[Union[str, list[str]]] = None,
-        transform: Optional[Callable] = None,
-        label: Optional[str] = None,
-        outcome: Optional[Union[int, list[int]]] = None,
+        atexog: dict | pd.DataFrame | None = None,
+        over: str | list[str] | None = None,
+        transform: Callable | None = None,
+        label: str | None = None,
+        outcome: int | list[int] | None = None,
     ) -> MarginsResult:
         """Adjusted prediction (level quantity).
 
@@ -669,7 +693,9 @@ class Margins:
         """
         if transform is not None:
             if not callable(transform):
-                raise TypeError(f"transform must be callable, got {type(transform).__name__}")
+                raise TypeError(
+                    f"transform must be callable, got {type(transform).__name__}"
+                )
             _validate_callable_arity(transform, "transform", min_positional=1)
         if atexog is not None and hasattr(atexog, "iloc"):
             scenario = {"data": atexog, "over": over, "label": label}
@@ -698,11 +724,16 @@ class Margins:
             meta["_over_values"] = _over_values
         h_factory = None
         if config.method == "bootstrap":
-            h_factory = lambda new_adapter: self._build_prediction_estimand(
-                scenario, transform, adapter=new_adapter
-            )[0]
+
+            def h_factory(new_adapter):
+                return self._build_prediction_estimand(
+                    scenario, transform, adapter=new_adapter
+                )[0]
+
         result_data = run_inference(
-            h, self.adapter, config,
+            h,
+            self.adapter,
+            config,
             estimand_metadata=meta,
             h_factory=h_factory,
         )
@@ -712,13 +743,13 @@ class Margins:
 
     def dydx(
         self,
-        variables: Union[str, list[str]],
+        variables: str | list[str],
         *,
-        atexog: Optional[Union[dict, "pd.DataFrame"]] = None,
-        over: Optional[Union[str, list[str]]] = None,
-        transform: Optional[Callable] = None,
-        label: Optional[str] = None,
-        outcome: Optional[Union[int, list[int]]] = None,
+        atexog: dict | pd.DataFrame | None = None,
+        over: str | list[str] | None = None,
+        transform: Callable | None = None,
+        label: str | None = None,
+        outcome: int | list[int] | None = None,
     ) -> MarginsResult:
         """Slope (∂μ/∂x_j) for continuous covariates.
 
@@ -748,7 +779,9 @@ class Margins:
         """
         if transform is not None:
             if not callable(transform):
-                raise TypeError(f"transform must be callable, got {type(transform).__name__}")
+                raise TypeError(
+                    f"transform must be callable, got {type(transform).__name__}"
+                )
             _validate_callable_arity(transform, "transform", min_positional=1)
         var_list = [variables] if isinstance(variables, str) else list(variables)
         for v in var_list:
@@ -788,11 +821,16 @@ class Margins:
             meta["_over_values"] = _over_values
         h_factory = None
         if config.method == "bootstrap":
-            h_factory = lambda new_adapter: self._build_slope_estimand(
-                scenario, var_list, transform, adapter=new_adapter
-            )[0]
+
+            def h_factory(new_adapter):
+                return self._build_slope_estimand(
+                    scenario, var_list, transform, adapter=new_adapter
+                )[0]
+
         result_data = run_inference(
-            h, self.adapter, config,
+            h,
+            self.adapter,
+            config,
             estimand_metadata=meta,
             h_factory=h_factory,
         )
@@ -861,15 +899,22 @@ class Margins:
                 f"in training data columns."
             )
         fn = {
-            "eyex": lambda t: t[0] * x_bar / jnp.where(
-                jnp.abs(t[1]) < clip_near_zero,
-                jnp.sign(t[1]) * clip_near_zero,
-                t[1],
+            "eyex": lambda t: (
+                t[0]
+                * x_bar
+                / jnp.where(
+                    jnp.abs(t[1]) < clip_near_zero,
+                    jnp.sign(t[1]) * clip_near_zero,
+                    t[1],
+                )
             ),
-            "eydx": lambda t: t[0] / jnp.where(
-                jnp.abs(t[1]) < clip_near_zero,
-                jnp.sign(t[1]) * clip_near_zero,
-                t[1],
+            "eydx": lambda t: (
+                t[0]
+                / jnp.where(
+                    jnp.abs(t[1]) < clip_near_zero,
+                    jnp.sign(t[1]) * clip_near_zero,
+                    t[1],
+                )
             ),
             "dyex": lambda t: t[0] * x_bar,
         }[kind]
@@ -880,7 +925,7 @@ class Margins:
         *,
         scenarios: list[dict],
         contrasts: ContrastSpec,
-        outcome: Optional[Union[int, list[int]]] = None,
+        outcome: int | list[int] | None = None,
     ) -> MarginsResult:
         """Linear combination(s) of predictions across scenarios.
 
@@ -964,7 +1009,9 @@ class Margins:
                 for i in range(contrasts.shape[0])
             }
             labels = list(weights_arg.keys())
-        elif isinstance(contrasts, list) and contrasts and isinstance(contrasts[0], list):
+        elif (
+            isinstance(contrasts, list) and contrasts and isinstance(contrasts[0], list)
+        ):
             # list-of-lists: validate and convert to jnp.ndarray
             contrasts_arr = jnp.asarray(contrasts)
             if contrasts_arr.ndim != 2:
@@ -1015,12 +1062,22 @@ class Margins:
 
         h_factory = None
         if config.method == "bootstrap":
-            h_factory = lambda new_adapter: self._build_contrast_estimand(
-                scenarios, weights_arg, adapter=new_adapter
-            )
+
+            def h_factory(new_adapter):
+                return self._build_contrast_estimand(
+                    scenarios, weights_arg, adapter=new_adapter
+                )
+
         result_data = run_inference(
-            h, self.adapter, config,
-            estimand_metadata={"kind": "contrasts", "labels": labels, "scenarios": scenarios, "at": self.at},
+            h,
+            self.adapter,
+            config,
+            estimand_metadata={
+                "kind": "contrasts",
+                "labels": labels,
+                "scenarios": scenarios,
+                "at": self.at,
+            },
             h_factory=h_factory,
         )
         if outcome is not None and self.adapter.n_outcomes > 1:
@@ -1032,7 +1089,7 @@ class Margins:
         *,
         scenarios: list[dict],
         compose: Callable,
-        outcome: Optional[Union[int, list[int]]] = None,
+        outcome: int | list[int] | None = None,
     ) -> MarginsResult:
         """Arbitrary differentiable function of scenario predictions.
 
@@ -1137,12 +1194,22 @@ class Margins:
         ]
         h_factory = None
         if config.method == "bootstrap":
-            h_factory = lambda new_adapter: self._build_evaluate_estimand(
-                scenarios, compose, adapter=new_adapter
-            )
+
+            def h_factory(new_adapter):
+                return self._build_evaluate_estimand(
+                    scenarios, compose, adapter=new_adapter
+                )
+
         result_data = run_inference(
-            h, self.adapter, config,
-            estimand_metadata={"kind": "evaluate", "labels": labels, "scenarios": scenarios, "at": self.at},
+            h,
+            self.adapter,
+            config,
+            estimand_metadata={
+                "kind": "evaluate",
+                "labels": labels,
+                "scenarios": scenarios,
+                "at": self.at,
+            },
             h_factory=h_factory,
         )
         if outcome is not None and self.adapter.n_outcomes > 1:
@@ -1153,8 +1220,8 @@ class Margins:
         self,
         *,
         horizon: float,
-        atexog: Optional[dict] = None,
-        over: Optional[Union[str, list[str]]] = None,
+        atexog: dict | None = None,
+        over: str | list[str] | None = None,
         n_grid: int = 80,
     ) -> MarginsResult:
         """Restricted mean survival time up to ``horizon``.
@@ -1185,8 +1252,7 @@ class Margins:
             )
         times = np.linspace(0.0, float(horizon), int(n_grid))
         scenarios = [
-            {"atexog": atexog, "over": over, "prediction_time": float(t)}
-            for t in times
+            {"atexog": atexog, "over": over, "prediction_time": float(t)} for t in times
         ]
         times_jax = jnp.asarray(times)
 
@@ -1200,7 +1266,6 @@ class Margins:
     # Outcome slicing for multi-outcome models
     # -----------------------------------------------------------------------
 
-
     # -----------------------------------------------------------------------
     # Diagnostics and reporting
     # -----------------------------------------------------------------------
@@ -1208,7 +1273,7 @@ class Margins:
     def diagnose(
         self,
         n_samples: int = 50,
-        rng_seed: Optional[int] = None,
+        rng_seed: int | None = None,
     ) -> DiagnosticResult:
         """Session-level κ diagnostic across the design space.
 
@@ -1245,8 +1310,7 @@ class Margins:
         n = len(base)
         sample_idx = rng.choice(n, size=min(n_samples, n), replace=False)
         sample_X = [
-            self.adapter.design_matrix_from_df(base.iloc[[i]])[0]
-            for i in sample_idx
+            self.adapter.design_matrix_from_df(base.iloc[[i]])[0] for i in sample_idx
         ]
 
         beta = self.adapter.coefficients()
@@ -1256,13 +1320,18 @@ class Margins:
         def h_factory(x_row):
             x_arr = jnp.atleast_2d(x_row)
             phi_inv = self.phi_inv
+
             def h(beta_):
                 mu = self.adapter.predict(beta_, x_arr)[0]
                 return phi_inv(mu) if phi_inv is not None else mu
+
             return h
 
         diag_dict = session_kappa(
-            h_factory, beta, Sigma, sample_X,
+            h_factory,
+            beta,
+            Sigma,
+            sample_X,
             backend=self.gradient_backend,
             fd_step=self.fd_step,
         )
@@ -1335,12 +1404,6 @@ class Margins:
         """
         return self._get_base_data(self.adapter)
 
-
-
-
-
-
-
     # -----------------------------------------------------------------------
     # Re-bound helpers from sibling modules
     # -----------------------------------------------------------------------
@@ -1357,6 +1420,3 @@ class Margins:
     _wrap_result = _wrap_result
     _format_atom_label = staticmethod(_format_atom_label)
     _finalize_atoms = staticmethod(_finalize_atoms)
-
-
-

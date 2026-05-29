@@ -13,26 +13,34 @@ import statsmodels.formula.api as smf
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins._adapters.statsmodels_ols import StatsmodelsOLSAdapter
-from pymargins._adapter import auto_detect_adapter
 from pymargins import Margins
-
+from pymargins._adapter import auto_detect_adapter
+from pymargins._adapters.statsmodels_ols import StatsmodelsOLSAdapter
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def df_ols():
     rng = np.random.default_rng(42)
     n = 200
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-        "treatment": rng.binomial(1, 0.5, n),
-        "region": rng.choice(["north", "south", "east", "west"], size=n),
-    })
-    df["y"] = 1.0 + 0.5 * df["x1"] - 0.3 * df["x2"] + 0.8 * df["treatment"] + rng.standard_normal(n) * 0.5
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+            "treatment": rng.binomial(1, 0.5, n),
+            "region": rng.choice(["north", "south", "east", "west"], size=n),
+        }
+    )
+    df["y"] = (
+        1.0
+        + 0.5 * df["x1"]
+        - 0.3 * df["x2"]
+        + 0.8 * df["treatment"]
+        + rng.standard_normal(n) * 0.5
+    )
     return df
 
 
@@ -59,6 +67,7 @@ def fit_wls_formula(df_ols):
 # 1. Construction and auto-detection
 # ---------------------------------------------------------------------------
 
+
 def test_auto_detect_ols(fit_ols_formula):
     adapter = auto_detect_adapter(fit_ols_formula)
     assert isinstance(adapter, StatsmodelsOLSAdapter)
@@ -72,6 +81,7 @@ def test_auto_detect_wls(fit_wls_formula):
 def test_auto_detect_array_fit_ols(df_ols):
     """Array-fit OLS should auto-detect via RegressionResultsWrapper."""
     from pymargins._adapters import _detect_adapter_class
+
     X = df_ols[["x1", "x2", "treatment"]].copy()
     X = sm.add_constant(X)
     y = df_ols["y"].values
@@ -86,8 +96,10 @@ def test_auto_detect_array_fit_ols(df_ols):
 def test_auto_detect_wls_wrapper():
     """WLS results use RegressionResultsWrapper and map to StatsmodelsOLSAdapter."""
     from pymargins._adapters import _detect_adapter_class
+
     class FakeWLSResult:
         pass
+
     FakeWLSResult.__module__ = "statsmodels.regression"
     FakeWLSResult.__name__ = "RegressionResultsWrapper"
     cls = _detect_adapter_class(FakeWLSResult())
@@ -97,8 +109,10 @@ def test_auto_detect_wls_wrapper():
 def test_auto_detect_gls_wrapper():
     """GLS results use RegressionResultsWrapper and map to StatsmodelsOLSAdapter."""
     from pymargins._adapters import _detect_adapter_class
+
     class FakeGLSResult:
         pass
+
     FakeGLSResult.__module__ = "statsmodels.regression"
     FakeGLSResult.__name__ = "RegressionResultsWrapper"
     cls = _detect_adapter_class(FakeGLSResult())
@@ -108,24 +122,34 @@ def test_auto_detect_gls_wrapper():
 def test_auto_detect_logit_wrapper():
     """LogitResultsWrapper should map to StatsmodelsDiscreteBinaryAdapter."""
     from pymargins._adapters import _detect_adapter_class
+
     class FakeLogitResult:
         pass
+
     FakeLogitResult.__module__ = "statsmodels.discrete"
     FakeLogitResult.__name__ = "LogitResultsWrapper"
     cls = _detect_adapter_class(FakeLogitResult())
-    from pymargins._adapters.statsmodels_discrete_binary import StatsmodelsDiscreteBinaryAdapter
+    from pymargins._adapters.statsmodels_discrete_binary import (
+        StatsmodelsDiscreteBinaryAdapter,
+    )
+
     assert cls is StatsmodelsDiscreteBinaryAdapter
 
 
 def test_auto_detect_probit_wrapper():
     """ProbitResultsWrapper should map to StatsmodelsDiscreteBinaryAdapter."""
     from pymargins._adapters import _detect_adapter_class
+
     class FakeProbitResult:
         pass
+
     FakeProbitResult.__module__ = "statsmodels.discrete"
     FakeProbitResult.__name__ = "ProbitResultsWrapper"
     cls = _detect_adapter_class(FakeProbitResult())
-    from pymargins._adapters.statsmodels_discrete_binary import StatsmodelsDiscreteBinaryAdapter
+    from pymargins._adapters.statsmodels_discrete_binary import (
+        StatsmodelsDiscreteBinaryAdapter,
+    )
+
     assert cls is StatsmodelsDiscreteBinaryAdapter
 
 
@@ -155,6 +179,7 @@ def test_adapter_training_data_array_requires_explicit(fit_ols_array, df_ols):
 # ---------------------------------------------------------------------------
 # 2. Covariance / vcov flavors
 # ---------------------------------------------------------------------------
+
 
 def test_covariance_default(fit_ols_formula):
     adapter = StatsmodelsOLSAdapter(fit_ols_formula)
@@ -190,6 +215,7 @@ def test_covariance_cluster_via_refit(fit_ols_formula, df_ols):
 # 3. Prediction
 # ---------------------------------------------------------------------------
 
+
 def test_predict_matches_statsmodels(fit_ols_formula):
     adapter = StatsmodelsOLSAdapter(fit_ols_formula)
     beta = adapter.coefficients()
@@ -202,6 +228,7 @@ def test_predict_matches_statsmodels(fit_ols_formula):
 # ---------------------------------------------------------------------------
 # 4. Design matrix construction
 # ---------------------------------------------------------------------------
+
 
 def test_design_matrix_from_df_formula(fit_ols_formula, df_ols):
     adapter = StatsmodelsOLSAdapter(fit_ols_formula)
@@ -223,6 +250,7 @@ def test_design_matrix_from_df_array(fit_ols_array, df_ols):
 # ---------------------------------------------------------------------------
 # 5. Variable metadata and column lookup
 # ---------------------------------------------------------------------------
+
 
 def test_variable_metadata(fit_ols_formula):
     adapter = StatsmodelsOLSAdapter(fit_ols_formula)
@@ -259,6 +287,7 @@ def test_column_index_categorical_raises(fit_ols_formula):
 # ---------------------------------------------------------------------------
 # 6. Bootstrap / refit
 # ---------------------------------------------------------------------------
+
 
 def test_refit_formula(fit_ols_formula, df_ols):
     adapter = StatsmodelsOLSAdapter(fit_ols_formula)
@@ -299,11 +328,18 @@ def test_refit_wls_preserves_weights(fit_wls_formula, df_ols):
 # 7. End-to-end bootstrap with array-fit adapter
 # ---------------------------------------------------------------------------
 
+
 def test_bootstrap_end_to_end_array_fit(fit_ols_array, df_ols):
     """Bootstrap CI should work end-to-end with an array-fit OLS adapter."""
     adapter = StatsmodelsOLSAdapter(fit_ols_array, training_data=df_ols)
-    m = Margins.linear_scale(fit_ols_array, adapter=adapter, at="typical",
-                              method="bootstrap", n_boot=50, rng_seed=42)
+    m = Margins.linear_scale(
+        fit_ols_array,
+        adapter=adapter,
+        at="typical",
+        method="bootstrap",
+        n_boot=50,
+        rng_seed=42,
+    )
     rd = m.contrasts(
         scenarios=[
             {"atexog": {"treatment": 1}},
@@ -321,15 +357,21 @@ def test_bootstrap_end_to_end_array_fit(fit_ols_array, df_ols):
 # Attach-time validation (IMPLEMENTATION_GUIDE.md §2.3)
 # ---------------------------------------------------------------------------
 
+
 def test_attach_rejects_unsupported_vcov_string(fit_ols_formula):
     adapter = StatsmodelsOLSAdapter(fit_ols_formula)
-    with pytest.raises(ValueError, match="StatsmodelsOLSAdapter does not support vcov='HAC'"):
+    with pytest.raises(
+        ValueError, match="StatsmodelsOLSAdapter does not support vcov='HAC'"
+    ):
         Margins(fit_ols_formula, adapter=adapter, vcov="HAC")
 
 
 def test_attach_rejects_unsupported_vcov_dict(fit_ols_formula):
     adapter = StatsmodelsOLSAdapter(fit_ols_formula)
-    with pytest.raises(ValueError, match="StatsmodelsOLSAdapter does not support vcov dict with type='hac'"):
+    with pytest.raises(
+        ValueError,
+        match="StatsmodelsOLSAdapter does not support vcov dict with type='hac'",
+    ):
         Margins(fit_ols_formula, adapter=adapter, vcov={"type": "hac"})
 
 
@@ -356,6 +398,7 @@ def test_attach_accepts_supported_vcov(fit_ols_formula):
     assert m3.vcov_spec is cov
     # JAX array
     import jax.numpy as jnp
+
     cov_jax = jnp.eye(len(fit_ols_formula.params))
     m4 = Margins(fit_ols_formula, adapter=adapter, vcov=cov_jax)
     assert m4.vcov_spec is cov_jax
@@ -364,5 +407,7 @@ def test_attach_accepts_supported_vcov(fit_ols_formula):
 def test_attach_validates_phi_phi_inv(fit_ols_formula):
     """ModelAdapter.attach validates phi and phi_inv are inverses for OLS too."""
     adapter = StatsmodelsOLSAdapter(fit_ols_formula)
-    with pytest.raises(ValueError, match="phi and phi_inv do not appear to be inverses"):
+    with pytest.raises(
+        ValueError, match="phi and phi_inv do not appear to be inverses"
+    ):
         Margins(fit_ols_formula, adapter=adapter, phi=jnp.exp, phi_inv=jnp.exp)

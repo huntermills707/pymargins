@@ -1,12 +1,13 @@
 from __future__ import annotations
-from typing import Optional
+
 import warnings
+
 import jax
 import jax.numpy as jnp
 import numpy as np
-from .._kappa import kappa, kappa_vector
+
 from .._estimands import is_jax_differentiable
-from ._config import InferenceConfig
+from .._kappa import kappa, kappa_vector
 
 
 def _generate_simulation_draws(beta, Sigma, rng, n_sim):
@@ -34,7 +35,9 @@ def _generate_simulation_draws(beta, Sigma, rng, n_sim):
     return draws
 
 
-def _run_simulation(h, adapter, config, estimand_metadata, *, fallback_reason=None, skip_kappa=False):
+def _run_simulation(
+    h, adapter, config, estimand_metadata, *, fallback_reason=None, skip_kappa=False
+):
     """Krinsky–Robb simulation: sample β̃ ~ N(β̂, Σ̂), evaluate h, take
     quantiles for CIs."""
     beta = adapter.coefficients()
@@ -73,13 +76,25 @@ def _run_simulation(h, adapter, config, estimand_metadata, *, fallback_reason=No
     if not skip_kappa and config.diagnostics and is_jax_differentiable(h, beta):
         try:
             if jnp.ndim(estimate) == 0:
-                k = kappa(h, beta, Sigma,
-                          backend=config.gradient_backend, fd_step=config.fd_step)
+                k = kappa(
+                    h,
+                    beta,
+                    Sigma,
+                    backend=config.gradient_backend,
+                    fd_step=config.fd_step,
+                )
             else:
-                k = kappa_vector(h, beta, Sigma,
-                                 backend=config.gradient_backend, fd_step=config.fd_step)
+                k = kappa_vector(
+                    h,
+                    beta,
+                    Sigma,
+                    backend=config.gradient_backend,
+                    fd_step=config.fd_step,
+                )
         except (ValueError, TypeError, jax.errors.JAXTypeError) as exc:
-            warnings.warn(f"kappa diagnostic failed: {exc}", RuntimeWarning)
+            warnings.warn(
+                f"kappa diagnostic failed: {exc}", RuntimeWarning, stacklevel=2
+            )
 
     # Apply phi to draws and estimate for reporting
     if config.phi is not None:

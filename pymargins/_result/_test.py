@@ -4,19 +4,19 @@ Hypothesis test result type.
 """
 
 from __future__ import annotations
-from typing import Optional, Union, Any
+
 from dataclasses import dataclass, field
-from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
 from ._text import SummaryString
 
-
 # ---------------------------------------------------------------------------
 # Hypothesis test result
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class TestResult:
@@ -46,10 +46,11 @@ class TestResult:
     estimand_metadata : dict
         Carried over from the source MarginsResult for output formatting.
     """
+
     statistic: np.ndarray
     pvalue: np.ndarray
-    df: Optional[int] = None
-    null_value: Union[np.ndarray, float] = 0.0
+    df: int | None = None
+    null_value: np.ndarray | float = 0.0
     alternative: str = "two-sided"
     method: str = "wald"
     estimand_metadata: dict = field(default_factory=dict)
@@ -67,7 +68,7 @@ class TestResult:
             lines.append(f"  Statistic: {float(stat[0]):.4f}")
             lines.append(f"  P-value:   {float(p[0]):.4g}")
         else:
-            for i, (s, pv) in enumerate(zip(stat, p)):
+            for i, (s, pv) in enumerate(zip(stat, p, strict=False)):
                 lines.append(f"  [{i}] stat={s:.4f}, p={pv:.4g}")
         if self.df is not None:
             lines.append(f"  df: {self.df}")
@@ -77,15 +78,18 @@ class TestResult:
         """Return as a tidy DataFrame, one row per estimand component."""
         stat = np.atleast_1d(self.statistic)
         p = np.atleast_1d(self.pvalue)
-        return pd.DataFrame({
-            "statistic": stat,
-            "p_value": p,
-        })
+        return pd.DataFrame(
+            {
+                "statistic": stat,
+                "p_value": p,
+            }
+        )
 
 
 # ---------------------------------------------------------------------------
 # Multiple-comparison adjustment
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class AdjustedResults:
@@ -106,6 +110,7 @@ class AdjustedResults:
     alpha : float
         Significance level used.
     """
+
     results: Any
     p_raw: np.ndarray
     p_adj: np.ndarray
@@ -121,22 +126,24 @@ class AdjustedResults:
             f"{'Index':>6}  {'Raw p':>10}  {'Adj. p':>10}  {'Reject':>8}",
             "-" * 50,
         ]
-        for i, (pr, pa, rej) in enumerate(zip(self.p_raw, self.p_adj, self.reject)):
-            lines.append(
-                f"{i:>6}  {pr:>10.4g}  {pa:>10.4g}  {str(rej):>8}"
-            )
+        for i, (pr, pa, rej) in enumerate(
+            zip(self.p_raw, self.p_adj, self.reject, strict=False)
+        ):
+            lines.append(f"{i:>6}  {pr:>10.4g}  {pa:>10.4g}  {str(rej):>8}")
         lines.append("-" * 50)
         return "\n".join(lines)
 
     def to_frame(self) -> pd.DataFrame:
         """Return as a tidy DataFrame."""
-        return pd.DataFrame({
-            "p_raw": self.p_raw,
-            "p_adj": self.p_adj,
-            "reject": self.reject,
-            "method": self.method,
-            "alpha": self.alpha,
-        })
+        return pd.DataFrame(
+            {
+                "p_raw": self.p_raw,
+                "p_adj": self.p_adj,
+                "reject": self.reject,
+                "method": self.method,
+                "alpha": self.alpha,
+            }
+        )
 
 
 def adjust(

@@ -6,6 +6,6 @@ continue to work unchanged.
 """
 
 from .._inference import run_inference
-from ._session import Margins, _NOT_GIVEN
+from ._session import _NOT_GIVEN, Margins
 
 __all__ = ["Margins", "run_inference", "_NOT_GIVEN"]

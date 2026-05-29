@@ -22,36 +22,37 @@ Ground-truth checks implemented
 """
 
 import jax
+
 jax.config.update("jax_enable_x64", True)
 
-import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import pytest
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
+from pymargins import Margins
 from pymargins._adapters.statsmodels_gee import StatsmodelsGEEAdapter
 from pymargins._adapters.statsmodels_mixedlm import StatsmodelsMixedLMAdapter
-from pymargins._adapters.statsmodels_glm import StatsmodelsGLMAdapter
-from pymargins import Margins
-
 
 # ---------------------------------------------------------------------------
 # 1. GEE vs GLM correctness
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def df_gee_glm():
     """Synthetic clustered data."""
     rng = np.random.default_rng(42)
     n = 200
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-        "treatment": rng.binomial(1, 0.5, n),
-        "group": np.repeat(np.arange(20), 10),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+            "treatment": rng.binomial(1, 0.5, n),
+            "group": np.repeat(np.arange(20), 10),
+        }
+    )
     # Binary outcome
     eta = 0.5 + 0.3 * df["x1"] - 0.2 * df["x2"] + 0.8 * df["treatment"]
     df["y_bin"] = (rng.uniform(size=n) < (1 / (1 + np.exp(-eta)))).astype(float)
@@ -170,22 +171,29 @@ def test_gee_logit_contrast_matches_glm(df_gee_glm):
 # 2. MixedLM correctness
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def df_mixedlm():
     """Synthetic data with clusters for linear mixed models."""
     rng = np.random.default_rng(43)
     n = 200
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-        "treatment": rng.binomial(1, 0.5, n),
-        "group": np.repeat(np.arange(20), 10),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+            "treatment": rng.binomial(1, 0.5, n),
+            "group": np.repeat(np.arange(20), 10),
+        }
+    )
     # Random intercept per group
     group_effect = rng.standard_normal(20)[df["group"].values]
     df["y"] = (
-        1.0 + 0.5 * df["x1"] - 0.3 * df["x2"] + 0.8 * df["treatment"]
-        + group_effect + rng.standard_normal(n) * 0.5
+        1.0
+        + 0.5 * df["x1"]
+        - 0.3 * df["x2"]
+        + 0.8 * df["treatment"]
+        + group_effect
+        + rng.standard_normal(n) * 0.5
     )
     return df
 
@@ -254,6 +262,7 @@ def test_mixedlm_contrast_equals_coefficient(df_mixedlm):
 # ---------------------------------------------------------------------------
 # 3. Adapter-specific ground-truth tests
 # ---------------------------------------------------------------------------
+
 
 def test_gee_adapter_predict_matches_native(df_gee_glm):
     """StatsmodelsGEEAdapter.predict() should match statsmodels GEE.predict()."""

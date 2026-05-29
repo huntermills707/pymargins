@@ -1,29 +1,32 @@
 """Tests for Track B — Formula interface for formula-less adapters."""
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
-import warnings
 
 from pymargins import Margins
-from pymargins._formula import FormulaSpec, _has_derived_terms
 from pymargins._adapters.statsmodels_ols import StatsmodelsOLSAdapter
-
+from pymargins._formula import FormulaSpec, _has_derived_terms
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def df_poly():
     rng = np.random.default_rng(42)
     n = 300
-    df = pd.DataFrame({
-        "age": rng.normal(50, 10, size=n),
-        "treat": rng.binomial(1, 0.5, size=n),
-    })
+    df = pd.DataFrame(
+        {
+            "age": rng.normal(50, 10, size=n),
+            "treat": rng.binomial(1, 0.5, size=n),
+        }
+    )
     df["y"] = (
         10.0
         + 0.2 * df["age"]
@@ -38,12 +41,14 @@ def df_poly():
 def fit_array_ols_poly(df_poly):
     """Array-fit OLS with I(age**2) — the silently-wrong path without formula=."""
     df_poly["I(age ** 2)"] = df_poly["age"] ** 2
-    X = pd.DataFrame({
-        "Intercept": 1.0,
-        "age": df_poly["age"],
-        "treat": df_poly["treat"],
-        "I(age ** 2)": df_poly["I(age ** 2)"],
-    })
+    X = pd.DataFrame(
+        {
+            "Intercept": 1.0,
+            "age": df_poly["age"],
+            "treat": df_poly["treat"],
+            "I(age ** 2)": df_poly["I(age ** 2)"],
+        }
+    )
     y = df_poly["y"]
     return sm.OLS(y, X).fit()
 
@@ -57,6 +62,7 @@ def fit_formula_ols_poly(df_poly):
 # ---------------------------------------------------------------------------
 # FormulaSpec unit tests
 # ---------------------------------------------------------------------------
+
 
 def test_formula_spec_builds_and_round_trips(df_poly):
     spec = FormulaSpec("y ~ age + treat + I(age**2)", df_poly)
@@ -102,6 +108,7 @@ def test_formula_spec_verification_fails_on_wrong_formula(df_poly):
 # _has_derived_terms
 # ---------------------------------------------------------------------------
 
+
 def test_has_derived_terms_detects_interactions():
     assert _has_derived_terms(["age", "treat", "age:treat"])
     assert not _has_derived_terms(["age", "treat", "Intercept"])
@@ -116,6 +123,7 @@ def test_has_derived_terms_detects_polynomials():
 # Margins.from_formula constructor
 # ---------------------------------------------------------------------------
 
+
 def test_from_formula_classmethod(fit_array_ols_poly, df_poly):
     m = Margins.from_formula(
         fit_array_ols_poly,
@@ -128,6 +136,7 @@ def test_from_formula_classmethod(fit_array_ols_poly, df_poly):
 # ---------------------------------------------------------------------------
 # dydx correctness: array-fit + formula should match formula-fit
 # ---------------------------------------------------------------------------
+
 
 def test_dydx_array_fit_with_formula_matches_formula_fit(
     fit_array_ols_poly, fit_formula_ols_poly, df_poly
@@ -168,6 +177,7 @@ def test_dydx_array_fit_without_formula_warns_on_derived_terms(
 # predict() / evaluate() arity validation
 # ---------------------------------------------------------------------------
 
+
 def test_predict_transform_arity_validation(fit_formula_ols_poly):
     m = Margins.linear_scale(fit_formula_ols_poly, at="mean")
     with pytest.raises(ValueError, match="transform must accept at least"):
@@ -186,6 +196,7 @@ def test_evaluate_compose_arity_validation(fit_formula_ols_poly):
 # ---------------------------------------------------------------------------
 # joint_test / run_test negative tests
 # ---------------------------------------------------------------------------
+
 
 def test_joint_test_neither_gradient_nor_draws(fit_formula_ols_poly):
     m = Margins.linear_scale(fit_formula_ols_poly, at="mean")
@@ -208,6 +219,7 @@ def test_run_test_neither_gradient_nor_draws(fit_formula_ols_poly):
 # Track B wrinkles
 # ---------------------------------------------------------------------------
 
+
 def test_formula_spec_stateful_transform_center():
     """B.5 Wrinkle 1: centered terms reuse training mean, not recompute."""
     rng = np.random.default_rng(42)
@@ -227,10 +239,12 @@ def test_formula_spec_stateful_transform_center():
 def test_formula_spec_pins_categorical_levels():
     """B.5 Wrinkle 2: FormulaSpec keeps full training level set on subset data."""
     rng = np.random.default_rng(42)
-    train = pd.DataFrame({
-        "cat": rng.choice(["A", "B", "C"], size=100),
-        "y": rng.normal(size=100),
-    })
+    train = pd.DataFrame(
+        {
+            "cat": rng.choice(["A", "B", "C"], size=100),
+            "y": rng.normal(size=100),
+        }
+    )
     spec = FormulaSpec("y ~ C(cat)", train)
     # Full design has 3 columns: Intercept + 2 dummies (patsy drops one level)
     X_full = np.asarray(spec.get_model_matrix(train))

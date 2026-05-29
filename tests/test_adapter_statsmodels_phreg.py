@@ -1,5 +1,4 @@
-"""Tests for StatsmodelsPHRegAdapter.
-"""
+"""Tests for StatsmodelsPHRegAdapter."""
 
 import jax
 import jax.numpy as jnp
@@ -10,24 +9,26 @@ from statsmodels.duration.hazard_regression import PHReg
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins._adapters.statsmodels_phreg import StatsmodelsPHRegAdapter
-from pymargins._adapter import auto_detect_adapter
 from pymargins import Margins
-
+from pymargins._adapter import auto_detect_adapter
+from pymargins._adapters.statsmodels_phreg import StatsmodelsPHRegAdapter
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def df_survival():
     """Synthetic survival data."""
     rng = np.random.default_rng(42)
     n = 200
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+        }
+    )
     hazard = np.exp(0.5 + 0.3 * df["x1"] - 0.2 * df["x2"])
     df["T"] = rng.exponential(1.0 / hazard)
     df["E"] = (rng.random(n) < 0.8).astype(int)
@@ -47,6 +48,7 @@ def phreg_fit(df_survival):
 # Fixtures (additional)
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def phreg_fit_formula(df_survival):
     return PHReg.from_formula(
@@ -57,6 +59,7 @@ def phreg_fit_formula(df_survival):
 # ---------------------------------------------------------------------------
 # Auto-detection
 # ---------------------------------------------------------------------------
+
 
 def test_auto_detect_requires_training_data(phreg_fit):
     with pytest.raises(ValueError, match="training_data"):
@@ -72,6 +75,7 @@ def test_auto_detect_formula(phreg_fit_formula):
 # Construction and core data access
 # ---------------------------------------------------------------------------
 
+
 def test_adapter_coefficients(phreg_fit, df_survival):
     adapter = StatsmodelsPHRegAdapter(phreg_fit, training_data=df_survival)
     beta = adapter.coefficients()
@@ -86,6 +90,7 @@ def test_adapter_coefficients(phreg_fit, df_survival):
 # ---------------------------------------------------------------------------
 # Prediction
 # ---------------------------------------------------------------------------
+
 
 def test_predict_matches_statsmodels(phreg_fit, df_survival):
     adapter = StatsmodelsPHRegAdapter(phreg_fit, training_data=df_survival)
@@ -118,6 +123,7 @@ def test_predict_jax_differentiable(phreg_fit, df_survival):
 # Coefficients and covariance
 # ---------------------------------------------------------------------------
 
+
 def test_coefficients_shape(phreg_fit, df_survival):
     adapter = StatsmodelsPHRegAdapter(phreg_fit, training_data=df_survival)
     assert adapter.coefficients().shape == (2,)
@@ -145,6 +151,7 @@ def test_covariance_ndarray_override(phreg_fit, df_survival):
 # ---------------------------------------------------------------------------
 # Design matrix and metadata
 # ---------------------------------------------------------------------------
+
 
 def test_design_matrix(phreg_fit, df_survival):
     adapter = StatsmodelsPHRegAdapter(phreg_fit, training_data=df_survival)
@@ -178,6 +185,7 @@ def test_variable_metadata_is_cached(phreg_fit, df_survival):
 # End-to-end via Margins session
 # ---------------------------------------------------------------------------
 
+
 def test_margins_predict(phreg_fit, df_survival):
     adapter = StatsmodelsPHRegAdapter(phreg_fit, training_data=df_survival)
     m = Margins.log_scale(phreg_fit, adapter=adapter)
@@ -197,10 +205,17 @@ def test_margins_dydx(phreg_fit, df_survival):
 # Bootstrap end-to-end
 # ---------------------------------------------------------------------------
 
+
 def test_bootstrap_end_to_end(phreg_fit, df_survival):
     adapter = StatsmodelsPHRegAdapter(phreg_fit, training_data=df_survival)
-    m = Margins.log_scale(phreg_fit, adapter=adapter, at="typical",
-                          method="bootstrap", n_boot=50, rng_seed=42)
+    m = Margins.log_scale(
+        phreg_fit,
+        adapter=adapter,
+        at="typical",
+        method="bootstrap",
+        n_boot=50,
+        rng_seed=42,
+    )
     rd = m.dydx("x1")
     assert rd.method == "bootstrap"
     assert np.isfinite(float(rd.estimate))
@@ -212,16 +227,25 @@ def test_bootstrap_end_to_end(phreg_fit, df_survival):
 # Attach-time validation
 # ---------------------------------------------------------------------------
 
+
 def test_attach_rejects_unsupported_vcov_string(phreg_fit, df_survival):
     adapter = StatsmodelsPHRegAdapter(phreg_fit, training_data=df_survival)
-    with pytest.raises(ValueError, match="StatsmodelsPHRegAdapter does not support vcov='HC0'"):
+    with pytest.raises(
+        ValueError, match="StatsmodelsPHRegAdapter does not support vcov='HC0'"
+    ):
         Margins(phreg_fit, adapter=adapter, vcov="HC0")
 
 
 def test_attach_rejects_unsupported_vcov_dict(phreg_fit, df_survival):
     adapter = StatsmodelsPHRegAdapter(phreg_fit, training_data=df_survival)
-    with pytest.raises(ValueError, match="StatsmodelsPHRegAdapter does not support vcov dict"):
-        Margins(phreg_fit, adapter=adapter, vcov={"type": "cluster", "groups": df_survival["E"]})
+    with pytest.raises(
+        ValueError, match="StatsmodelsPHRegAdapter does not support vcov dict"
+    ):
+        Margins(
+            phreg_fit,
+            adapter=adapter,
+            vcov={"type": "cluster", "groups": df_survival["E"]},
+        )
 
 
 def test_attach_accepts_supported_vcov(phreg_fit, df_survival):
@@ -238,6 +262,7 @@ def test_attach_accepts_supported_vcov(phreg_fit, df_survival):
 # ---------------------------------------------------------------------------
 # Refit
 # ---------------------------------------------------------------------------
+
 
 def test_refit(phreg_fit, df_survival):
     adapter = StatsmodelsPHRegAdapter(phreg_fit, training_data=df_survival)

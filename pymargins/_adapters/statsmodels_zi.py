@@ -23,30 +23,31 @@ count side supports patsy via ``_build_count_matrix``, but
 """
 
 from __future__ import annotations
-from typing import Optional, Any
+
+from typing import Any
+
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
-import statsmodels.api as sm
 
 from .._adapter import ModelAdapter, VariableInfo
 from ._common import (
-    extract_training_data,
-    column_index_of_variable,
     build_variable_metadata,
+    column_index_of_variable,
+    extract_training_data,
     validate_vcov_spec,
 )
-
 
 _EXTRA_PARAM_NAMES = {"alpha", "p", "theta"}
 
 
 def _zi_model_cls(model_cls_name: str):
     from statsmodels.discrete.count_model import (
-        ZeroInflatedPoisson,
-        ZeroInflatedNegativeBinomialP,
         ZeroInflatedGeneralizedPoisson,
+        ZeroInflatedNegativeBinomialP,
+        ZeroInflatedPoisson,
     )
+
     dispatch = {
         "ZeroInflatedPoisson": ZeroInflatedPoisson,
         "ZeroInflatedNegativeBinomialP": ZeroInflatedNegativeBinomialP,
@@ -71,7 +72,7 @@ class StatsmodelsZIAdapter(ModelAdapter):
         The data the model was fit on.
     """
 
-    def __init__(self, results, training_data: Optional[pd.DataFrame] = None):
+    def __init__(self, results, training_data: pd.DataFrame | None = None):
         self.results = results
         self._training_data = extract_training_data(results, training_data)
 
@@ -94,9 +95,7 @@ class StatsmodelsZIAdapter(ModelAdapter):
             extra_names = [f"extra_{i}" for i in range(n_extra)]
             all_names = infl_names + count_names + extra_names
         # Inflation params are first in the vector and prefixed with "inflate_"
-        self._infl_param_names = [
-            n for n in all_names if n.startswith("inflate_")
-        ]
+        self._infl_param_names = [n for n in all_names if n.startswith("inflate_")]
         # Count params are the non-inflate params that map to exog columns
         count_and_extra = [n for n in all_names if not n.startswith("inflate_")]
         self._count_param_names = count_and_extra[: self._k_count]
@@ -143,7 +142,7 @@ class StatsmodelsZIAdapter(ModelAdapter):
     def coefficients(self) -> jnp.ndarray:
         return jnp.asarray(self.results.params)
 
-    def covariance(self, vcov_spec: Optional[Any] = None) -> jnp.ndarray:
+    def covariance(self, vcov_spec: Any | None = None) -> jnp.ndarray:
         if vcov_spec is None:
             return jnp.asarray(self.results.cov_params())
 
@@ -165,7 +164,8 @@ class StatsmodelsZIAdapter(ModelAdapter):
                 if groups is None:
                     raise ValueError("cluster vcov requires 'groups' in the spec dict.")
                 return self._refit_and_extract_cov(
-                    cov_type="cluster", cov_kwds={"groups": groups},
+                    cov_type="cluster",
+                    cov_kwds={"groups": groups},
                 )
             raise ValueError(f"Unsupported vcov dict type: {kind!r}")
 
@@ -179,7 +179,7 @@ class StatsmodelsZIAdapter(ModelAdapter):
         self,
         beta: jnp.ndarray,
         X: jnp.ndarray,
-        offset: Optional[jnp.ndarray] = None,
+        offset: jnp.ndarray | None = None,
     ) -> jnp.ndarray:
         X_arr = jnp.asarray(X)
         k_infl = self._k_inflate
@@ -215,11 +215,12 @@ class StatsmodelsZIAdapter(ModelAdapter):
     def _build_infl_matrix(self, df: pd.DataFrame) -> jnp.ndarray:
         names = self._infl_names
         aligned = df.reindex(columns=names)
-        missing = [n for n in names if n not in df.columns and n not in ("const", "Intercept")]
+        missing = [
+            n for n in names if n not in df.columns and n not in ("const", "Intercept")
+        ]
         if missing:
             raise ValueError(
-                f"Missing inflation columns: {missing}. "
-                f"Available: {list(df.columns)}."
+                f"Missing inflation columns: {missing}. Available: {list(df.columns)}."
             )
         if "const" in names or "Intercept" in names:
             intercept_name = "const" if "const" in names else "Intercept"
@@ -232,17 +233,19 @@ class StatsmodelsZIAdapter(ModelAdapter):
     def _build_count_matrix(self, df: pd.DataFrame) -> jnp.ndarray:
         if self._has_design_info:
             from patsy import dmatrix
+
             design_info = self.results.model.data.design_info
             X_np = np.asarray(dmatrix(design_info, df, return_type="matrix"))
             return jnp.asarray(X_np)
 
         names = self._count_param_names
         aligned = df.reindex(columns=names)
-        missing = [n for n in names if n not in df.columns and n not in ("const", "Intercept")]
+        missing = [
+            n for n in names if n not in df.columns and n not in ("const", "Intercept")
+        ]
         if missing:
             raise ValueError(
-                f"Missing count columns: {missing}. "
-                f"Available: {list(df.columns)}."
+                f"Missing count columns: {missing}. Available: {list(df.columns)}."
             )
         if "const" in names or "Intercept" in names:
             intercept_name = "const" if "const" in names else "Intercept"
@@ -254,7 +257,9 @@ class StatsmodelsZIAdapter(ModelAdapter):
 
     def column_index_of_variable(self, variable_name: str) -> int:
         return column_index_of_variable(
-            self._exog_names, self.variable_metadata(), variable_name,
+            self._exog_names,
+            self.variable_metadata(),
+            variable_name,
         )
 
     def variable_metadata(self) -> dict[str, VariableInfo]:
@@ -274,7 +279,9 @@ class StatsmodelsZIAdapter(ModelAdapter):
         if formula is not None:
             if cov_kwds and "groups" in cov_kwds:
                 groups = cov_kwds["groups"]
-                if hasattr(groups, "__len__") and len(groups) != len(self._training_data):
+                if hasattr(groups, "__len__") and len(groups) != len(
+                    self._training_data
+                ):
                     raise ValueError(
                         f"groups length ({len(groups)}) must match training_data "
                         f"length ({len(self._training_data)})."
@@ -289,9 +296,15 @@ class StatsmodelsZIAdapter(ModelAdapter):
             exog_infl = self._training_data[infl_cols] if infl_cols else None
             kwargs = {"exog_infl": exog_infl, **fit_kwargs}
 
-            new_results = _zi_model_cls(model_cls_name).from_formula(
-                formula, data=self._training_data, **kwargs,
-            ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False)
+            new_results = (
+                _zi_model_cls(model_cls_name)
+                .from_formula(
+                    formula,
+                    data=self._training_data,
+                    **kwargs,
+                )
+                .fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False)
+            )
             return jnp.asarray(new_results.cov_params())
 
         # Array-fit refit
@@ -299,11 +312,16 @@ class StatsmodelsZIAdapter(ModelAdapter):
         exog = self.results.model.exog
         exog_infl = self.results.model.exog_infl
         new_results = _zi_model_cls(model_cls_name)(
-            endog, exog, exog_infl=exog_infl, **fit_kwargs,
+            endog,
+            exog,
+            exog_infl=exog_infl,
+            **fit_kwargs,
         ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False)
         return jnp.asarray(new_results.cov_params())
 
-    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "StatsmodelsZIAdapter":
+    def refit(
+        self, resampled_data: pd.DataFrame, *, index=None
+    ) -> StatsmodelsZIAdapter:
         formula = getattr(self.results.model, "formula", None)
         fit_kwargs = self._collect_original_fit_kwargs()
         if index is not None:
@@ -323,9 +341,15 @@ class StatsmodelsZIAdapter(ModelAdapter):
             exog_infl = resampled_data[infl_cols] if infl_cols else None
             kwargs = {"exog_infl": exog_infl, **fit_kwargs}
 
-            new_results = _zi_model_cls(model_cls_name).from_formula(
-                formula, data=resampled_data, **kwargs,
-            ).fit(disp=False)
+            new_results = (
+                _zi_model_cls(model_cls_name)
+                .from_formula(
+                    formula,
+                    data=resampled_data,
+                    **kwargs,
+                )
+                .fit(disp=False)
+            )
             return StatsmodelsZIAdapter(new_results, training_data=resampled_data)
 
         # Array-fit refit
@@ -350,7 +374,9 @@ class StatsmodelsZIAdapter(ModelAdapter):
             )
         exog_df = resampled_data[count_cols]
         if "const" in self._count_param_names or "Intercept" in self._count_param_names:
-            intercept_name = "const" if "const" in self._count_param_names else "Intercept"
+            intercept_name = (
+                "const" if "const" in self._count_param_names else "Intercept"
+            )
             if intercept_name not in exog_df.columns:
                 exog_df = exog_df.copy()
                 exog_df.insert(0, "const", 1.0)
@@ -370,7 +396,10 @@ class StatsmodelsZIAdapter(ModelAdapter):
 
         endog = resampled_data[endog_name].values
         new_results = _zi_model_cls(model_cls_name)(
-            endog, exog_df, exog_infl=exog_infl_df, **fit_kwargs,
+            endog,
+            exog_df,
+            exog_infl=exog_infl_df,
+            **fit_kwargs,
         ).fit(disp=False)
         return StatsmodelsZIAdapter(new_results, training_data=resampled_data)
 

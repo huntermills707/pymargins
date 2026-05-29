@@ -4,7 +4,6 @@ import numpy as np
 import pandas as pd
 import pytest
 from sklearn.linear_model import LinearRegression
-from sklearn.ensemble import GradientBoostingRegressor
 
 from pymargins import Margins
 from pymargins._adapters.sklearn_bootstrap import SklearnBootstrapAdapter
@@ -14,10 +13,12 @@ from pymargins._adapters.sklearn_bootstrap import SklearnBootstrapAdapter
 def df_sklearn():
     rng = np.random.default_rng(42)
     n = 100
-    df = pd.DataFrame({
-        "age": rng.normal(50, 10, size=n),
-        "treat": rng.binomial(1, 0.5, size=n),
-    })
+    df = pd.DataFrame(
+        {
+            "age": rng.normal(50, 10, size=n),
+            "treat": rng.binomial(1, 0.5, size=n),
+        }
+    )
     df["age_sq"] = df["age"] ** 2
     df["y"] = (
         10.0
@@ -41,6 +42,7 @@ def fit_sklearn_linear(df_sklearn):
 # ---------------------------------------------------------------------------
 # Constructor and basic properties
 # ---------------------------------------------------------------------------
+
 
 def test_adapter_coefficients_is_dummy(fit_sklearn_linear):
     model, X, y = fit_sklearn_linear
@@ -69,6 +71,7 @@ def test_adapter_design_matrix_column_selection(fit_sklearn_linear, df_sklearn):
 # ---------------------------------------------------------------------------
 # Formula interface
 # ---------------------------------------------------------------------------
+
 
 def test_adapter_with_formula_correct_dydx(fit_sklearn_linear, df_sklearn):
     """B.6 Acceptance: sklearn with formula= yields correct dydx."""
@@ -106,6 +109,7 @@ def test_adapter_without_formula_raises_on_derived_terms(df_sklearn):
 # Bootstrap inference
 # ---------------------------------------------------------------------------
 
+
 def test_bootstrap_predict(fit_sklearn_linear, df_sklearn):
     model, X, y = fit_sklearn_linear
     adapter = SklearnBootstrapAdapter(model, X_train=X, y_train=y)
@@ -120,6 +124,7 @@ def test_bootstrap_predict(fit_sklearn_linear, df_sklearn):
 # ---------------------------------------------------------------------------
 # B.4 verification
 # ---------------------------------------------------------------------------
+
 
 def test_formula_verification_catches_intercept_mismatch(df_sklearn):
     """If model was trained WITH intercept but formula suppresses it, raise."""
@@ -143,6 +148,7 @@ def test_formula_verification_catches_intercept_mismatch(df_sklearn):
 # ---------------------------------------------------------------------------
 # Refit
 # ---------------------------------------------------------------------------
+
 
 def test_refit_produces_new_model(fit_sklearn_linear, df_sklearn):
     model, X, y = fit_sklearn_linear

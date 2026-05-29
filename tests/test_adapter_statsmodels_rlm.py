@@ -1,5 +1,4 @@
-"""Tests for StatsmodelsRLMAdapter.
-"""
+"""Tests for StatsmodelsRLMAdapter."""
 
 import jax
 import jax.numpy as jnp
@@ -11,24 +10,26 @@ import statsmodels.formula.api as smf
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins._adapters.statsmodels_rlm import StatsmodelsRLMAdapter
-from pymargins._adapter import auto_detect_adapter
 from pymargins import Margins
-
+from pymargins._adapter import auto_detect_adapter
+from pymargins._adapters.statsmodels_rlm import StatsmodelsRLMAdapter
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def df_rlm():
     """Synthetic data for RLM."""
     rng = np.random.default_rng(45)
     n = 200
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+        }
+    )
     df["y"] = 1.0 + 2.0 * df["x1"] - 1.5 * df["x2"] + rng.standard_normal(n)
     # Add some outliers
     df.loc[rng.choice(n, size=10, replace=False), "y"] += 20.0
@@ -37,9 +38,7 @@ def df_rlm():
 
 @pytest.fixture
 def rlm_fit_array(df_rlm):
-    return sm.RLM(
-        df_rlm["y"], sm.add_constant(df_rlm[["x1", "x2"]])
-    ).fit()
+    return sm.RLM(df_rlm["y"], sm.add_constant(df_rlm[["x1", "x2"]])).fit()
 
 
 @pytest.fixture
@@ -50,6 +49,7 @@ def rlm_fit_formula(df_rlm):
 # ---------------------------------------------------------------------------
 # Auto-detection
 # ---------------------------------------------------------------------------
+
 
 def test_auto_detect_formula(rlm_fit_formula):
     adapter = auto_detect_adapter(rlm_fit_formula)
@@ -64,6 +64,7 @@ def test_auto_detect_array_requires_training_data(rlm_fit_array):
 # ---------------------------------------------------------------------------
 # Prediction
 # ---------------------------------------------------------------------------
+
 
 def test_predict_matches_statsmodels(rlm_fit_formula):
     adapter = StatsmodelsRLMAdapter(rlm_fit_formula)
@@ -91,6 +92,7 @@ def test_predict_jax_differentiable(rlm_fit_formula):
 # Coefficients and covariance
 # ---------------------------------------------------------------------------
 
+
 def test_coefficients_shape(rlm_fit_formula):
     adapter = StatsmodelsRLMAdapter(rlm_fit_formula)
     p = len(rlm_fit_formula.model.exog_names)
@@ -100,7 +102,10 @@ def test_coefficients_shape(rlm_fit_formula):
 def test_covariance_default(rlm_fit_formula):
     adapter = StatsmodelsRLMAdapter(rlm_fit_formula)
     cov = adapter.covariance()
-    assert cov.shape == (adapter.coefficients().shape[0], adapter.coefficients().shape[0])
+    assert cov.shape == (
+        adapter.coefficients().shape[0],
+        adapter.coefficients().shape[0],
+    )
 
 
 def test_covariance_user_supplied(rlm_fit_formula):
@@ -119,6 +124,7 @@ def test_covariance_rejects_hc(rlm_fit_formula):
 # ---------------------------------------------------------------------------
 # Design matrix and metadata
 # ---------------------------------------------------------------------------
+
 
 def test_design_matrix_formula(rlm_fit_formula):
     adapter = StatsmodelsRLMAdapter(rlm_fit_formula)
@@ -139,6 +145,7 @@ def test_variable_metadata(rlm_fit_formula):
 # End-to-end via Margins session
 # ---------------------------------------------------------------------------
 
+
 def test_margins_predict_aap(rlm_fit_formula):
     adapter = StatsmodelsRLMAdapter(rlm_fit_formula)
     m = Margins.linear_scale(rlm_fit_formula, adapter=adapter)
@@ -157,6 +164,7 @@ def test_margins_dydx(rlm_fit_formula):
 # ---------------------------------------------------------------------------
 # Refit
 # ---------------------------------------------------------------------------
+
 
 def test_refit_formula(rlm_fit_formula):
     adapter = StatsmodelsRLMAdapter(rlm_fit_formula)

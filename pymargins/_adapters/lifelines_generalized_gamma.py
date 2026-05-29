@@ -14,17 +14,18 @@ Only bootstrap inference is supported.
 """
 
 from __future__ import annotations
-from typing import Optional, Any
+
+from typing import Any
+
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
-from .._adapter import WrappedFDAdapter, VariableInfo
+from .._adapter import VariableInfo, WrappedFDAdapter
 from ._common import (
-    extract_training_data,
-    design_matrix_from_df,
-    column_index_of_variable,
     build_variable_metadata,
+    column_index_of_variable,
+    extract_training_data,
     validate_vcov_spec,
 )
 
@@ -50,8 +51,8 @@ class LifelinesGeneralizedGammaAdapter(WrappedFDAdapter):
     def __init__(
         self,
         results,
-        training_data: Optional[pd.DataFrame] = None,
-        prediction_time: Optional[float] = None,
+        training_data: pd.DataFrame | None = None,
+        prediction_time: float | None = None,
     ):
         self.results = results
         self._training_data = extract_training_data(results, training_data)
@@ -105,7 +106,7 @@ class LifelinesGeneralizedGammaAdapter(WrappedFDAdapter):
     def coefficients(self) -> jnp.ndarray:
         return jnp.asarray(self.results.params_.values)
 
-    def covariance(self, vcov_spec: Optional[Any] = None) -> jnp.ndarray:
+    def covariance(self, vcov_spec: Any | None = None) -> jnp.ndarray:
         if vcov_spec is None:
             return jnp.asarray(self.results.variance_matrix_)
 
@@ -129,13 +130,13 @@ class LifelinesGeneralizedGammaAdapter(WrappedFDAdapter):
         avoiding mutation of the original fitter (which is not thread-safe).
         """
         X_np = np.asarray(X)
-        n_obs = X_np.shape[0]
         t = self._prediction_time
 
         # lifelines predict_survival_function uses the stored params.
         # We need to evaluate at beta_np. Create a shallow copy to avoid
         # mutating the original fitter (critical for thread-safe bootstrap).
         from copy import copy
+
         fitter_copy = copy(self.results)
         fitter_copy.params_ = pd.Series(
             beta_np,
@@ -151,7 +152,11 @@ class LifelinesGeneralizedGammaAdapter(WrappedFDAdapter):
     # -----------------------------------------------------------------------
 
     def design_matrix_from_df(self, df: pd.DataFrame) -> jnp.ndarray:
-        missing_cols = [col for col in self._exog_names if col not in df.columns and col not in ("const", "Intercept")]
+        missing_cols = [
+            col
+            for col in self._exog_names
+            if col not in df.columns and col not in ("const", "Intercept")
+        ]
         if missing_cols:
             raise ValueError(
                 f"Missing columns required by the model's exog_names: {missing_cols}. "
@@ -166,7 +171,9 @@ class LifelinesGeneralizedGammaAdapter(WrappedFDAdapter):
 
     def column_index_of_variable(self, variable_name: str) -> int:
         return column_index_of_variable(
-            self._exog_names, self.variable_metadata(), variable_name,
+            self._exog_names,
+            self.variable_metadata(),
+            variable_name,
         )
 
     def variable_metadata(self) -> dict[str, VariableInfo]:
@@ -178,7 +185,9 @@ class LifelinesGeneralizedGammaAdapter(WrappedFDAdapter):
     # Bootstrap support
     # -----------------------------------------------------------------------
 
-    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "LifelinesGeneralizedGammaAdapter":
+    def refit(
+        self, resampled_data: pd.DataFrame, *, index=None
+    ) -> LifelinesGeneralizedGammaAdapter:
         from lifelines import GeneralizedGammaRegressionFitter
 
         df = resampled_data.reset_index(drop=True)

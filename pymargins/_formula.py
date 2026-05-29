@@ -34,11 +34,12 @@ Resolution order in ``design_matrix_from_df``:
 """
 
 from __future__ import annotations
-from typing import Optional
+
 import warnings
+
+import jax.numpy as jnp
 import numpy as np
 import pandas as pd
-import jax.numpy as jnp
 
 
 class FormulaSpec:
@@ -51,7 +52,7 @@ class FormulaSpec:
     """
 
     def __init__(self, formula: str, training_data: pd.DataFrame):
-        from patsy import dmatrix, ModelDesc
+        from patsy import ModelDesc, dmatrix
 
         if not isinstance(formula, str):
             raise TypeError(f"formula must be a string, got {type(formula).__name__}")

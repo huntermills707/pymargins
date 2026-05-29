@@ -47,16 +47,25 @@ def make_data(n=5000, seed=42):
         + 2.6 * (agegrp == 6).astype(float)
     )
     diabetes = rng.binomial(1, 1 / (1 + np.exp(-lp)))
-    bp = 110 + 0.4 * age + 2.5 * black + 1.2 * female + 0.5 * bmi + rng.normal(0, 8, size=n)
-    return pd.DataFrame({
-        "diabetes": diabetes,
-        "bp": bp,
-        "black": black,
-        "female": female,
-        "age": age,
-        "agegrp": agegrp,
-        "bmi": bmi,
-    })
+    bp = (
+        110
+        + 0.4 * age
+        + 2.5 * black
+        + 1.2 * female
+        + 0.5 * bmi
+        + rng.normal(0, 8, size=n)
+    )
+    return pd.DataFrame(
+        {
+            "diabetes": diabetes,
+            "bp": bp,
+            "black": black,
+            "female": female,
+            "age": age,
+            "agegrp": agegrp,
+            "bmi": bmi,
+        }
+    )
 
 
 def _print_section(title, subtitle=""):
@@ -92,20 +101,22 @@ if __name__ == "__main__":
     # Helper: build a 1-row DataFrame at typical (median) values
     def typical_row(overrides=None):
         overrides = overrides or {}
-        return pd.DataFrame({
-            "black": [overrides.get("black", median_vals["black"])],
-            "female": [overrides.get("female", median_vals["female"])],
-            "agegrp": [overrides.get("agegrp", median_vals["agegrp"])],
-            "bmi": [overrides.get("bmi", median_vals["bmi"])],
-            "age": [overrides.get("age", median_vals["age"])],
-        })
+        return pd.DataFrame(
+            {
+                "black": [overrides.get("black", median_vals["black"])],
+                "female": [overrides.get("female", median_vals["female"])],
+                "agegrp": [overrides.get("agegrp", median_vals["agegrp"])],
+                "bmi": [overrides.get("bmi", median_vals["bmi"])],
+                "age": [overrides.get("age", median_vals["age"])],
+            }
+        )
 
     # =====================================================================
     # 2. Adjusted Predictions at the Means (APM)
     # =====================================================================
     _print_section(
         "2. ADJUSTED PREDICTIONS AT THE MEANS (APM)",
-        "Stata: margins agegrp, atmeans  (pymargins uses median = 'typical')"
+        "Stata: margins agegrp, atmeans  (pymargins uses median = 'typical')",
     )
     apm = []
     for g in range(1, 7):
@@ -118,10 +129,7 @@ if __name__ == "__main__":
     # =====================================================================
     # 3. Average Adjusted Predictions (AAP)
     # =====================================================================
-    _print_section(
-        "3. AVERAGE ADJUSTED PREDICTIONS (AAP)",
-        "Stata: margins agegrp"
-    )
+    _print_section("3. AVERAGE ADJUSTED PREDICTIONS (AAP)", "Stata: margins agegrp")
     aap = []
     for g in range(1, 7):
         tmp = df.copy()
@@ -137,7 +145,7 @@ if __name__ == "__main__":
     # =====================================================================
     _print_section(
         "4. PREDICTIONS AT REPRESENTATIVE VALUES",
-        "Stata: margins, at(age=(20 50 70)) atmeans"
+        "Stata: margins, at(age=(20 50 70)) atmeans",
     )
     repr_preds = []
     for a in [20, 50, 70]:
@@ -152,7 +160,7 @@ if __name__ == "__main__":
     # =====================================================================
     _print_section(
         "5. MARGINAL EFFECTS AT THE MEANS (MEM) — age",
-        "Stata: margins, dydx(age) atmeans"
+        "Stata: margins, dydx(age) atmeans",
     )
     mem = fit_logit.get_margeff(at="mean")
     mem_summary = mem.summary_frame()
@@ -163,8 +171,7 @@ if __name__ == "__main__":
     # 6. Average Marginal Effects (AME) — continuous
     # =====================================================================
     _print_section(
-        "6. AVERAGE MARGINAL EFFECTS (AME) — age",
-        "Stata: margins, dydx(age)"
+        "6. AVERAGE MARGINAL EFFECTS (AME) — age", "Stata: margins, dydx(age)"
     )
     ame = fit_logit.get_margeff(at="overall")
     ame_summary = ame.summary_frame()
@@ -175,8 +182,7 @@ if __name__ == "__main__":
     # 7. Discrete changes for dummy variables
     # =====================================================================
     _print_section(
-        "7. DISCRETE CHANGE (MARGINAL EFFECT) — black",
-        "Stata: margins, dydx(black)"
+        "7. DISCRETE CHANGE (MARGINAL EFFECT) — black", "Stata: margins, dydx(black)"
     )
     # get_margeff with dummy=True gives the probability difference
     disc = fit_logit.get_margeff(at="overall", dummy=True)
@@ -219,7 +225,7 @@ if __name__ == "__main__":
     # =====================================================================
     _print_section(
         "8. MARGINAL EFFECTS AT REPRESENTATIVE VALUES (MER)",
-        "Stata: margins, dydx(black) at(female=(0 1))"
+        "Stata: margins, dydx(black) at(female=(0 1))",
     )
 
     # Effect of black for females = 0 (males)
@@ -283,9 +289,13 @@ if __name__ == "__main__":
         print(f"Repr age={row['age']:<35} {_fmt(row['pred']):>12}")
     print(f"MEM age{'':<39} {_fmt(mem_summary.loc['age', 'dy/dx']):>12}")
     print(f"AME age{'':<39} {_fmt(ame_summary.loc['age', 'dy/dx']):>12}")
-    print(f"Discrete black (prob diff){'':<24} {_fmt(disc_summary.loc['C(black)[T.1]', 'dy/dx']):>12}")
+    print(
+        f"Discrete black (prob diff){'':<24} {_fmt(disc_summary.loc['C(black)[T.1]', 'dy/dx']):>12}"
+    )
     print(f"Discrete black (risk ratio){'':<23} {_fmt(rr_black):>12}")
-    print(f"Discrete female atmeans (prob diff){'':<15} {_fmt(disc_mem_summary.loc['C(female)[T.1]', 'dy/dx']):>12}")
+    print(
+        f"Discrete female atmeans (prob diff){'':<15} {_fmt(disc_mem_summary.loc['C(female)[T.1]', 'dy/dx']):>12}"
+    )
     print(f"Discrete female atmeans (risk ratio){'':<14} {_fmt(rr_female):>12}")
     print(f"MER black | female=0 (prob diff){'':<18} {_fmt(rd_m):>12}")
     print(f"MER black | female=0 (risk ratio){'':<17} {_fmt(rr_m):>12}")

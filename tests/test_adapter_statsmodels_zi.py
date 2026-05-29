@@ -1,22 +1,21 @@
 """Tests for statsmodels zero-inflated count model adapters."""
 
+import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import pytest
-import jax.numpy as jnp
-
 from statsmodels.discrete.count_model import (
-    ZeroInflatedPoisson,
     ZeroInflatedNegativeBinomialP,
+    ZeroInflatedPoisson,
 )
 
 from pymargins import Margins
 from pymargins._adapters.statsmodels_zi import StatsmodelsZIAdapter
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def zi_data():
@@ -54,8 +53,11 @@ def zinb_data():
 # Auto-detection
 # ---------------------------------------------------------------------------
 
+
 def test_auto_detect_zip(zi_data):
-    mod = ZeroInflatedPoisson.from_formula("y ~ x", exog_infl=zi_data[["z"]], data=zi_data)
+    mod = ZeroInflatedPoisson.from_formula(
+        "y ~ x", exog_infl=zi_data[["z"]], data=zi_data
+    )
     res = mod.fit(disp=False)
     m = Margins(res)
     assert isinstance(m.adapter, StatsmodelsZIAdapter)
@@ -63,7 +65,9 @@ def test_auto_detect_zip(zi_data):
 
 def test_auto_detect_zinb(zinb_data):
     mod = ZeroInflatedNegativeBinomialP.from_formula(
-        "y ~ x", exog_infl=zinb_data[["z"]], data=zinb_data,
+        "y ~ x",
+        exog_infl=zinb_data[["z"]],
+        data=zinb_data,
     )
     res = mod.fit(disp=False)
     m = Margins(res)
@@ -74,8 +78,11 @@ def test_auto_detect_zinb(zinb_data):
 # Coefficients & covariance
 # ---------------------------------------------------------------------------
 
+
 def test_coefficients_shape(zi_data):
-    mod = ZeroInflatedPoisson.from_formula("y ~ x", exog_infl=zi_data[["z"]], data=zi_data)
+    mod = ZeroInflatedPoisson.from_formula(
+        "y ~ x", exog_infl=zi_data[["z"]], data=zi_data
+    )
     res = mod.fit(disp=False)
     adapter = StatsmodelsZIAdapter(res)
     coef = adapter.coefficients()
@@ -84,7 +91,9 @@ def test_coefficients_shape(zi_data):
 
 
 def test_covariance_default(zi_data):
-    mod = ZeroInflatedPoisson.from_formula("y ~ x", exog_infl=zi_data[["z"]], data=zi_data)
+    mod = ZeroInflatedPoisson.from_formula(
+        "y ~ x", exog_infl=zi_data[["z"]], data=zi_data
+    )
     res = mod.fit(disp=False)
     adapter = StatsmodelsZIAdapter(res)
     cov = adapter.covariance()
@@ -95,8 +104,11 @@ def test_covariance_default(zi_data):
 # Predictions
 # ---------------------------------------------------------------------------
 
+
 def test_predict_matches_native_zip(zi_data):
-    mod = ZeroInflatedPoisson.from_formula("y ~ x", exog_infl=zi_data[["z"]], data=zi_data)
+    mod = ZeroInflatedPoisson.from_formula(
+        "y ~ x", exog_infl=zi_data[["z"]], data=zi_data
+    )
     res = mod.fit(disp=False)
     adapter = StatsmodelsZIAdapter(res)
 
@@ -110,7 +122,9 @@ def test_predict_matches_native_zip(zi_data):
 
 def test_predict_matches_native_zinb(zinb_data):
     mod = ZeroInflatedNegativeBinomialP.from_formula(
-        "y ~ x", exog_infl=zinb_data[["z"]], data=zinb_data,
+        "y ~ x",
+        exog_infl=zinb_data[["z"]],
+        data=zinb_data,
     )
     res = mod.fit(disp=False)
     adapter = StatsmodelsZIAdapter(res)
@@ -127,8 +141,11 @@ def test_predict_matches_native_zinb(zinb_data):
 # JAX differentiability
 # ---------------------------------------------------------------------------
 
+
 def test_jax_differentiability(zi_data):
-    mod = ZeroInflatedPoisson.from_formula("y ~ x", exog_infl=zi_data[["z"]], data=zi_data)
+    mod = ZeroInflatedPoisson.from_formula(
+        "y ~ x", exog_infl=zi_data[["z"]], data=zi_data
+    )
     res = mod.fit(disp=False)
     adapter = StatsmodelsZIAdapter(res)
 
@@ -136,6 +153,7 @@ def test_jax_differentiability(zi_data):
     beta = adapter.coefficients()
 
     import jax
+
     grad = jax.grad(lambda b: jnp.mean(adapter.predict(b, X)))(beta)
     assert grad.shape == beta.shape
     assert jnp.all(jnp.isfinite(grad))
@@ -145,8 +163,11 @@ def test_jax_differentiability(zi_data):
 # End-to-end via Margins session
 # ---------------------------------------------------------------------------
 
+
 def test_margins_predict_zip(zi_data):
-    mod = ZeroInflatedPoisson.from_formula("y ~ x", exog_infl=zi_data[["z"]], data=zi_data)
+    mod = ZeroInflatedPoisson.from_formula(
+        "y ~ x", exog_infl=zi_data[["z"]], data=zi_data
+    )
     res = mod.fit(disp=False)
     m = Margins(res)
 
@@ -156,7 +177,9 @@ def test_margins_predict_zip(zi_data):
 
 
 def test_margins_dydx_zip(zi_data):
-    mod = ZeroInflatedPoisson.from_formula("y ~ x", exog_infl=zi_data[["z"]], data=zi_data)
+    mod = ZeroInflatedPoisson.from_formula(
+        "y ~ x", exog_infl=zi_data[["z"]], data=zi_data
+    )
     res = mod.fit(disp=False)
     m = Margins(res)
 
@@ -175,8 +198,11 @@ def test_margins_dydx_zip(zi_data):
 # Bootstrap refit
 # ---------------------------------------------------------------------------
 
+
 def test_bootstrap_refit_zip(zi_data):
-    mod = ZeroInflatedPoisson.from_formula("y ~ x", exog_infl=zi_data[["z"]], data=zi_data)
+    mod = ZeroInflatedPoisson.from_formula(
+        "y ~ x", exog_infl=zi_data[["z"]], data=zi_data
+    )
     res = mod.fit(disp=False)
     adapter = StatsmodelsZIAdapter(res)
 
@@ -190,8 +216,11 @@ def test_bootstrap_refit_zip(zi_data):
 # Variable metadata
 # ---------------------------------------------------------------------------
 
+
 def test_variable_metadata(zi_data):
-    mod = ZeroInflatedPoisson.from_formula("y ~ x", exog_infl=zi_data[["z"]], data=zi_data)
+    mod = ZeroInflatedPoisson.from_formula(
+        "y ~ x", exog_infl=zi_data[["z"]], data=zi_data
+    )
     res = mod.fit(disp=False)
     adapter = StatsmodelsZIAdapter(res)
 
@@ -206,8 +235,11 @@ def test_variable_metadata(zi_data):
 # Column index lookup
 # ---------------------------------------------------------------------------
 
+
 def test_column_index_of_variable(zi_data):
-    mod = ZeroInflatedPoisson.from_formula("y ~ x", exog_infl=zi_data[["z"]], data=zi_data)
+    mod = ZeroInflatedPoisson.from_formula(
+        "y ~ x", exog_infl=zi_data[["z"]], data=zi_data
+    )
     res = mod.fit(disp=False)
     adapter = StatsmodelsZIAdapter(res)
 
@@ -220,8 +252,11 @@ def test_column_index_of_variable(zi_data):
 # Custom covariance
 # ---------------------------------------------------------------------------
 
+
 def test_covariance_hc3(zi_data):
-    mod = ZeroInflatedPoisson.from_formula("y ~ x", exog_infl=zi_data[["z"]], data=zi_data)
+    mod = ZeroInflatedPoisson.from_formula(
+        "y ~ x", exog_infl=zi_data[["z"]], data=zi_data
+    )
     res = mod.fit(disp=False)
     adapter = StatsmodelsZIAdapter(res)
     cov = adapter.covariance("HC3")
@@ -230,7 +265,9 @@ def test_covariance_hc3(zi_data):
 
 
 def test_attach_invalid_vcov(zi_data):
-    mod = ZeroInflatedPoisson.from_formula("y ~ x", exog_infl=zi_data[["z"]], data=zi_data)
+    mod = ZeroInflatedPoisson.from_formula(
+        "y ~ x", exog_infl=zi_data[["z"]], data=zi_data
+    )
     res = mod.fit(disp=False)
     with pytest.raises(ValueError, match="does not support vcov"):
         Margins(res, vcov="HAC")
@@ -240,8 +277,11 @@ def test_attach_invalid_vcov(zi_data):
 # Design matrix error paths
 # ---------------------------------------------------------------------------
 
+
 def test_design_matrix_missing_columns(zi_data):
-    mod = ZeroInflatedPoisson.from_formula("y ~ x", exog_infl=zi_data[["z"]], data=zi_data)
+    mod = ZeroInflatedPoisson.from_formula(
+        "y ~ x", exog_infl=zi_data[["z"]], data=zi_data
+    )
     res = mod.fit(disp=False)
     adapter = StatsmodelsZIAdapter(res)
 
@@ -254,18 +294,20 @@ def test_design_matrix_missing_columns(zi_data):
 # Array-fit refit
 # ---------------------------------------------------------------------------
 
+
 def test_refit_array_fit(zi_data):
     """Array-fit refit works when DataFrame columns match statsmodels names."""
-    import statsmodels.api as sm
     endog = zi_data["y"].values
     # Build a DataFrame whose columns match the generic names statsmodels
     # assigns to array-fit exog arrays (x1, x2, ...).
-    df_arr = pd.DataFrame({
-        "y": endog,
-        "const": 1.0,
-        "x1": zi_data["x"].values,
-        "z1": zi_data["z"].values,
-    })
+    df_arr = pd.DataFrame(
+        {
+            "y": endog,
+            "const": 1.0,
+            "x1": zi_data["x"].values,
+            "z1": zi_data["z"].values,
+        }
+    )
     exog = df_arr[["const", "x1"]].values
     exog_infl = df_arr[["const", "z1"]].values
     mod = ZeroInflatedPoisson(endog, exog, exog_infl=exog_infl)

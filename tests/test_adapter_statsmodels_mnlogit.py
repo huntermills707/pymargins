@@ -1,5 +1,4 @@
-"""Tests for StatsmodelsMNLogitAdapter.
-"""
+"""Tests for StatsmodelsMNLogitAdapter."""
 
 import jax
 import jax.numpy as jnp
@@ -11,26 +10,28 @@ import statsmodels.formula.api as smf
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins._adapters.statsmodels_mnlogit import StatsmodelsMNLogitAdapter
-from pymargins._adapter import auto_detect_adapter
 from pymargins import Margins
-
+from pymargins._adapter import auto_detect_adapter
+from pymargins._adapters.statsmodels_mnlogit import StatsmodelsMNLogitAdapter
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def df_mnlogit():
     """Synthetic data for multinomial logit."""
     rng = np.random.default_rng(42)
     n = 300
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-        "treatment": rng.binomial(1, 0.5, n),
-        "region": rng.choice(["north", "south", "east", "west"], size=n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+            "treatment": rng.binomial(1, 0.5, n),
+            "region": rng.choice(["north", "south", "east", "west"], size=n),
+        }
+    )
     # Generate a 3-category outcome
     eta0 = 0.5 + 0.3 * df["x1"] - 0.2 * df["x2"]
     eta1 = 0.2 - 0.1 * df["x1"] + 0.4 * df["treatment"]
@@ -52,12 +53,15 @@ def mnlogit_fit_array(df_mnlogit):
 @pytest.fixture
 def mnlogit_fit_formula(df_mnlogit):
     """Formula-fit MNLogit."""
-    return smf.mnlogit("y ~ x1 + x2 + treatment + C(region)", data=df_mnlogit).fit(disp=False)
+    return smf.mnlogit("y ~ x1 + x2 + treatment + C(region)", data=df_mnlogit).fit(
+        disp=False
+    )
 
 
 # ---------------------------------------------------------------------------
 # Auto-detection
 # ---------------------------------------------------------------------------
+
 
 def test_auto_detect_formula(mnlogit_fit_formula):
     adapter = auto_detect_adapter(mnlogit_fit_formula)
@@ -73,6 +77,7 @@ def test_auto_detect_array_requires_training_data(mnlogit_fit_array):
 # Coefficients and covariance
 # ---------------------------------------------------------------------------
 
+
 def test_coefficients_shape(mnlogit_fit_formula):
     adapter = StatsmodelsMNLogitAdapter(mnlogit_fit_formula)
     p = len(mnlogit_fit_formula.model.exog_names)
@@ -83,18 +88,25 @@ def test_coefficients_shape(mnlogit_fit_formula):
 def test_covariance_default(mnlogit_fit_formula):
     adapter = StatsmodelsMNLogitAdapter(mnlogit_fit_formula)
     cov = adapter.covariance()
-    assert cov.shape == (adapter.coefficients().shape[0], adapter.coefficients().shape[0])
+    assert cov.shape == (
+        adapter.coefficients().shape[0],
+        adapter.coefficients().shape[0],
+    )
 
 
 def test_covariance_hc(mnlogit_fit_formula):
     adapter = StatsmodelsMNLogitAdapter(mnlogit_fit_formula)
     cov = adapter.covariance("HC0")
-    assert cov.shape == (adapter.coefficients().shape[0], adapter.coefficients().shape[0])
+    assert cov.shape == (
+        adapter.coefficients().shape[0],
+        adapter.coefficients().shape[0],
+    )
 
 
 # ---------------------------------------------------------------------------
 # Prediction
 # ---------------------------------------------------------------------------
+
 
 def test_predict_shape_and_sum_to_one(mnlogit_fit_formula):
     adapter = StatsmodelsMNLogitAdapter(mnlogit_fit_formula)
@@ -102,9 +114,7 @@ def test_predict_shape_and_sum_to_one(mnlogit_fit_formula):
     X = adapter.design_matrix_from_df(df[:10])
     probs = adapter.predict(adapter.coefficients(), X)
     assert probs.shape == (10, adapter.n_outcomes)
-    np.testing.assert_array_almost_equal(
-        np.asarray(probs.sum(axis=1)), np.ones(10)
-    )
+    np.testing.assert_array_almost_equal(np.asarray(probs.sum(axis=1)), np.ones(10))
 
 
 def test_predict_matches_statsmodels(mnlogit_fit_formula):
@@ -133,6 +143,7 @@ def test_predict_jax_differentiable(mnlogit_fit_formula):
 # ---------------------------------------------------------------------------
 # Design matrix and metadata
 # ---------------------------------------------------------------------------
+
 
 def test_design_matrix_formula(mnlogit_fit_formula):
     adapter = StatsmodelsMNLogitAdapter(mnlogit_fit_formula)
@@ -172,6 +183,7 @@ def test_column_index_raises_for_categorical(mnlogit_fit_formula):
 # End-to-end via Margins session
 # ---------------------------------------------------------------------------
 
+
 def test_margins_predict_aap(mnlogit_fit_formula):
     adapter = StatsmodelsMNLogitAdapter(mnlogit_fit_formula)
     m = Margins.linear_scale(mnlogit_fit_formula, adapter=adapter)
@@ -191,6 +203,7 @@ def test_margins_dydx(mnlogit_fit_formula):
 # ---------------------------------------------------------------------------
 # Refit
 # ---------------------------------------------------------------------------
+
 
 def test_refit_formula(mnlogit_fit_formula):
     adapter = StatsmodelsMNLogitAdapter(mnlogit_fit_formula)
@@ -217,6 +230,7 @@ def test_refit_array(mnlogit_fit_array, df_mnlogit):
 # ---------------------------------------------------------------------------
 # Outcome subsetting
 # ---------------------------------------------------------------------------
+
 
 def test_predict_outcome_subset(mnlogit_fit_formula):
     adapter = StatsmodelsMNLogitAdapter(mnlogit_fit_formula)
@@ -262,9 +276,11 @@ def test_result_outcome_helper_by_label(mnlogit_fit_formula):
 # Attach validation
 # ---------------------------------------------------------------------------
 
+
 def test_attach_rejects_bad_vcov(mnlogit_fit_formula):
     adapter = StatsmodelsMNLogitAdapter(mnlogit_fit_formula)
     from unittest.mock import MagicMock
+
     session = MagicMock()
     session.vcov_spec = "HAC"
     with pytest.raises(ValueError, match="HAC"):

@@ -10,7 +10,9 @@ multinomial linear predictors in JAX.
 """
 
 from __future__ import annotations
-from typing import Optional, Any
+
+from typing import Any
+
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
@@ -18,10 +20,12 @@ import statsmodels.api as sm
 
 from .._adapter import ModelAdapter, VariableInfo
 from ._common import (
-    extract_training_data,
-    design_matrix_from_df as _common_design_matrix_from_df,
-    column_index_of_variable,
     build_variable_metadata,
+    column_index_of_variable,
+    extract_training_data,
+)
+from ._common import (
+    design_matrix_from_df as _common_design_matrix_from_df,
 )
 
 
@@ -37,7 +41,7 @@ class StatsmodelsNominalGEEAdapter(ModelAdapter):
         The data the model was fit on.
     """
 
-    def __init__(self, results, training_data: Optional[pd.DataFrame] = None):
+    def __init__(self, results, training_data: pd.DataFrame | None = None):
         self.results = results
         self._training_data = extract_training_data(results, training_data)
 
@@ -58,7 +62,7 @@ class StatsmodelsNominalGEEAdapter(ModelAdapter):
 
         # Standard names from the first block of params
         self._std_exog_names = []
-        for name in param_names[:self._p_std]:
+        for name in param_names[: self._p_std]:
             base = name.rsplit("[", 1)[0]
             self._std_exog_names.append(base)
 
@@ -68,9 +72,7 @@ class StatsmodelsNominalGEEAdapter(ModelAdapter):
             idx = i * self._p_std
             name = param_names[idx]
             if "[" not in name or "]" not in name:
-                raise ValueError(
-                    f"Expected category suffix in param name {name!r}."
-                )
+                raise ValueError(f"Expected category suffix in param name {name!r}.")
             cat_str = name.split("[", 1)[1].rsplit("]", 1)[0]
             cat = float(cat_str) if "." in cat_str else int(cat_str)
             self._param_cats.append(cat)
@@ -97,7 +99,7 @@ class StatsmodelsNominalGEEAdapter(ModelAdapter):
         return self._K
 
     @property
-    def outcome_labels(self) -> Optional[list[str]]:
+    def outcome_labels(self) -> list[str] | None:
         return self._outcome_labels
 
     @property
@@ -115,7 +117,15 @@ class StatsmodelsNominalGEEAdapter(ModelAdapter):
     def attach(self, session) -> None:
         vcov = getattr(session, "vcov_spec", None)
         if isinstance(vcov, str):
-            if vcov.lower() not in ("naive", "robust", "robust_bc", "hc0", "hc1", "hc2", "hc3"):
+            if vcov.lower() not in (
+                "naive",
+                "robust",
+                "robust_bc",
+                "hc0",
+                "hc1",
+                "hc2",
+                "hc3",
+            ):
                 raise ValueError(
                     f"StatsmodelsNominalGEEAdapter does not support vcov={vcov!r}. "
                     f"Supported strings: 'naive', 'robust', 'robust_bc'."
@@ -141,7 +151,7 @@ class StatsmodelsNominalGEEAdapter(ModelAdapter):
     def coefficients(self) -> jnp.ndarray:
         return jnp.asarray(self.results.params.values)
 
-    def covariance(self, vcov_spec: Optional[Any] = None) -> jnp.ndarray:
+    def covariance(self, vcov_spec: Any | None = None) -> jnp.ndarray:
         if vcov_spec is None:
             return jnp.asarray(self.results.cov_params())
 
@@ -182,7 +192,7 @@ class StatsmodelsNominalGEEAdapter(ModelAdapter):
         self,
         beta: jnp.ndarray,
         X: jnp.ndarray,
-        offset: Optional[jnp.ndarray] = None,
+        offset: jnp.ndarray | None = None,
     ) -> jnp.ndarray:
         """Return class probabilities (n_obs, K) for a standard design matrix."""
         X_arr = jnp.asarray(X)
@@ -213,15 +223,16 @@ class StatsmodelsNominalGEEAdapter(ModelAdapter):
         if formula is not None:
             rhs = formula.split("~", 1)[1].strip()
             from patsy import dmatrix
+
             X = np.asarray(dmatrix(rhs, df, return_type="matrix"))
             return jnp.asarray(X)
-        return _common_design_matrix_from_df(
-            self.results, self._std_exog_names, df
-        )
+        return _common_design_matrix_from_df(self.results, self._std_exog_names, df)
 
     def column_index_of_variable(self, variable_name: str) -> int:
         return column_index_of_variable(
-            self._std_exog_names, self.variable_metadata(), variable_name,
+            self._std_exog_names,
+            self.variable_metadata(),
+            variable_name,
         )
 
     def variable_metadata(self) -> dict[str, VariableInfo]:
@@ -244,7 +255,9 @@ class StatsmodelsNominalGEEAdapter(ModelAdapter):
             kwargs["weights"] = weights
         return kwargs
 
-    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "StatsmodelsNominalGEEAdapter":
+    def refit(
+        self, resampled_data: pd.DataFrame, *, index=None
+    ) -> StatsmodelsNominalGEEAdapter:
         from statsmodels.formula.api import nominal_gee as smf_nominal_gee
 
         model_kwargs = self._collect_original_model_kwargs()
@@ -265,7 +278,9 @@ class StatsmodelsNominalGEEAdapter(ModelAdapter):
                 cov_struct=self._cov_struct,
                 **model_kwargs,
             ).fit()
-            return StatsmodelsNominalGEEAdapter(new_results, training_data=resampled_data)
+            return StatsmodelsNominalGEEAdapter(
+                new_results, training_data=resampled_data
+            )
 
         # Array-fit refit
         endog_name = getattr(self.results.model, "endog_names", None)
@@ -299,7 +314,9 @@ class StatsmodelsNominalGEEAdapter(ModelAdapter):
             groups = np.asarray(groups)[index]
 
         new_results = sm.NominalGEE(
-            endog, exog_df, groups=groups,
+            endog,
+            exog_df,
+            groups=groups,
             cov_struct=self._cov_struct,
             **model_kwargs,
         ).fit()

@@ -13,17 +13,17 @@ absorbed design matrix only.
 """
 
 from __future__ import annotations
-from typing import Optional, Any
+
+from typing import Any
+
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
-from linearmodels.panel import PanelOLS, PooledOLS, RandomEffects, FirstDifferenceOLS, BetweenOLS
-
 from .._adapter import LinearPredictionAdapter, VariableInfo
 from ._common import (
-    column_index_of_variable,
     build_variable_metadata,
+    column_index_of_variable,
     validate_vcov_spec,
 )
 
@@ -43,7 +43,12 @@ class LinearmodelsPanelAdapter(LinearPredictionAdapter):
         original DataFrame explicitly is safer.
     """
 
-    def __init__(self, results, training_data: Optional[pd.DataFrame] = None, formula: Optional[str] = None):
+    def __init__(
+        self,
+        results,
+        training_data: pd.DataFrame | None = None,
+        formula: str | None = None,
+    ):
         self.results = results
         self._training_data = self._resolve_training_data(results, training_data)
         self._exog_names = list(results.params.index)
@@ -51,6 +56,7 @@ class LinearmodelsPanelAdapter(LinearPredictionAdapter):
         self._formula_spec = None
         if formula is not None:
             from .._formula import FormulaSpec
+
             self._formula_spec = FormulaSpec(formula, self._training_data)
         self._model_cls = type(results.model)
 
@@ -63,7 +69,7 @@ class LinearmodelsPanelAdapter(LinearPredictionAdapter):
     # -----------------------------------------------------------------------
 
     @staticmethod
-    def _resolve_training_data(results, training_data: Optional[pd.DataFrame]):
+    def _resolve_training_data(results, training_data: pd.DataFrame | None):
         if training_data is not None:
             return training_data
         # Attempt reconstruction from model components
@@ -95,7 +101,7 @@ class LinearmodelsPanelAdapter(LinearPredictionAdapter):
     def coefficients(self) -> jnp.ndarray:
         return jnp.asarray(self.results.params.values)
 
-    def covariance(self, vcov_spec: Optional[Any] = None) -> jnp.ndarray:
+    def covariance(self, vcov_spec: Any | None = None) -> jnp.ndarray:
         if vcov_spec is None:
             return jnp.asarray(self.results.cov.values)
 
@@ -116,16 +122,13 @@ class LinearmodelsPanelAdapter(LinearPredictionAdapter):
             if kind == "cluster":
                 groups = vcov_spec.get("groups")
                 if groups is None:
-                    raise ValueError(
-                        "cluster vcov requires 'groups' in the spec dict."
-                    )
+                    raise ValueError("cluster vcov requires 'groups' in the spec dict.")
                 return self._refit_and_extract_cov(
-                    cov_type="clustered", cluster_entity=False,
+                    cov_type="clustered",
+                    cluster_entity=False,
                     cluster_groups=groups,
                 )
-            raise ValueError(
-                f"Unsupported vcov dict type for linearmodels: {kind!r}"
-            )
+            raise ValueError(f"Unsupported vcov dict type for linearmodels: {kind!r}")
 
         raise ValueError(f"Unsupported vcov_spec: {vcov_spec!r}")
 
@@ -139,7 +142,8 @@ class LinearmodelsPanelAdapter(LinearPredictionAdapter):
         # Align columns to exog_names; auto-inject intercept if needed
         aligned = df.reindex(columns=self._exog_names)
         missing_cols = [
-            col for col in self._exog_names
+            col
+            for col in self._exog_names
             if col not in df.columns and col not in ("const", "Intercept")
         ]
         if missing_cols:
@@ -157,7 +161,9 @@ class LinearmodelsPanelAdapter(LinearPredictionAdapter):
 
     def column_index_of_variable(self, variable_name: str) -> int:
         return column_index_of_variable(
-            self._exog_names, self.variable_metadata(), variable_name,
+            self._exog_names,
+            self.variable_metadata(),
+            variable_name,
         )
 
     def variable_metadata(self) -> dict[str, VariableInfo]:
@@ -169,14 +175,17 @@ class LinearmodelsPanelAdapter(LinearPredictionAdapter):
     # Bootstrap support
     # -----------------------------------------------------------------------
 
-    def _refit_and_extract_cov(self, cov_type: str, cluster_entity=False, cluster_groups=None):
+    def _refit_and_extract_cov(
+        self, cov_type: str, cluster_entity=False, cluster_groups=None
+    ):
         """Refit the model with a specific cov_type and return its covariance."""
         if self._formula is not None:
             kwargs = {"cov_type": cov_type}
             if cluster_groups is not None:
                 kwargs["clusters"] = cluster_groups
             new_results = self._model_cls.from_formula(
-                self._formula, data=self._training_data,
+                self._formula,
+                data=self._training_data,
             ).fit(**kwargs)
             return jnp.asarray(new_results.cov.values)
 
@@ -184,11 +193,14 @@ class LinearmodelsPanelAdapter(LinearPredictionAdapter):
             "Array-fit refit with custom cov_type is not yet supported for linearmodels panel adapters."
         )
 
-    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "LinearmodelsPanelAdapter":
+    def refit(
+        self, resampled_data: pd.DataFrame, *, index=None
+    ) -> LinearmodelsPanelAdapter:
         """Refit the model on resampled data."""
         if self._formula is not None:
             new_results = self._model_cls.from_formula(
-                self._formula, data=resampled_data,
+                self._formula,
+                data=resampled_data,
             ).fit()
             return LinearmodelsPanelAdapter(new_results, training_data=resampled_data)
 

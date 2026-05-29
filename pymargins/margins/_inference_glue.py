@@ -1,14 +1,14 @@
 """Inference configuration and result wrapping helpers."""
 
 from __future__ import annotations
-from typing import Any
+
 import hashlib
 import weakref
 
 import jax.numpy as jnp
 import numpy as np
 
-from .._inference import InferenceConfig, run_inference
+from .._inference import InferenceConfig
 from .._result import MarginsResult
 
 
@@ -193,6 +193,7 @@ def _simulation_draws_bank(session):
         [session.rng_seed, 0] if session.rng_seed is not None else None
     )
     from .._inference._simulation import _generate_simulation_draws
+
     draws = _generate_simulation_draws(beta, Sigma, rng, session.n_sim)
     setattr(session, cache_attr, (bank_key, draws))
     return draws, bank_key

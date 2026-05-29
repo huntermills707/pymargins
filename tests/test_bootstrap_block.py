@@ -1,20 +1,18 @@
-"""Tests for block bootstrap resampling.
-"""
+"""Tests for block bootstrap resampling."""
 
 import numpy as np
 import pandas as pd
 import pytest
 import statsmodels.formula.api as smf
-import statsmodels.api as sm
 
 from pymargins import Margins
-from pymargins._inference import InferenceConfig, _run_bootstrap
 from pymargins._adapter import auto_detect_adapter
-
+from pymargins._inference import InferenceConfig, _run_bootstrap
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def df_time_series():
@@ -41,10 +39,15 @@ def ols_fit_formula(df_time_series):
 # Validation
 # ---------------------------------------------------------------------------
 
+
 def test_block_size_too_large_raises(ols_fit_formula, df_time_series):
     with pytest.raises(ValueError, match="block_size"):
-        Margins(ols_fit_formula, method="bootstrap", n_boot=50,
-                block_size=len(df_time_series) + 1)
+        Margins(
+            ols_fit_formula,
+            method="bootstrap",
+            n_boot=50,
+            block_size=len(df_time_series) + 1,
+        )
 
 
 def test_block_size_zero_raises(ols_fit_formula):
@@ -54,25 +57,38 @@ def test_block_size_zero_raises(ols_fit_formula):
 
 def test_invalid_block_type_raises(ols_fit_formula):
     with pytest.raises(ValueError, match="block_type"):
-        Margins(ols_fit_formula, method="bootstrap", n_boot=50, block_size=5,
-                bootstrap_config={"block_type": "invalid"})
+        Margins(
+            ols_fit_formula,
+            method="bootstrap",
+            n_boot=50,
+            block_size=5,
+            bootstrap_config={"block_type": "invalid"},
+        )
 
 
 def test_cluster_and_block_size_mutually_exclusive(ols_fit_formula, df_time_series):
     with pytest.raises(ValueError, match="mutually exclusive"):
-        Margins(ols_fit_formula, method="bootstrap", n_boot=50,
-                cluster=df_time_series.index, block_size=5)
+        Margins(
+            ols_fit_formula,
+            method="bootstrap",
+            n_boot=50,
+            cluster=df_time_series.index,
+            block_size=5,
+        )
 
 
 # ---------------------------------------------------------------------------
 # Reproducibility
 # ---------------------------------------------------------------------------
 
+
 def test_block_bootstrap_reproducible(ols_fit_formula, df_time_series):
-    m1 = Margins(ols_fit_formula, method="bootstrap", n_boot=100, rng_seed=42,
-                 block_size=5)
-    m2 = Margins(ols_fit_formula, method="bootstrap", n_boot=100, rng_seed=42,
-                 block_size=5)
+    m1 = Margins(
+        ols_fit_formula, method="bootstrap", n_boot=100, rng_seed=42, block_size=5
+    )
+    m2 = Margins(
+        ols_fit_formula, method="bootstrap", n_boot=100, rng_seed=42, block_size=5
+    )
     res1 = m1.dydx("x")
     res2 = m2.dydx("x")
     np.testing.assert_allclose(res1.estimate, res2.estimate)
@@ -84,9 +100,11 @@ def test_block_bootstrap_reproducible(ols_fit_formula, df_time_series):
 # Block bootstrap differs from i.i.d. on dependent data
 # ---------------------------------------------------------------------------
 
+
 def test_block_bootstrap_differs_from_iid(ols_fit_formula, df_time_series):
-    m_block = Margins(ols_fit_formula, method="bootstrap", n_boot=200, rng_seed=42,
-                      block_size=10)
+    m_block = Margins(
+        ols_fit_formula, method="bootstrap", n_boot=200, rng_seed=42, block_size=10
+    )
     m_iid = Margins(ols_fit_formula, method="bootstrap", n_boot=200, rng_seed=42)
     res_block = m_block.dydx("x")
     res_iid = m_iid.dydx("x")
@@ -98,11 +116,24 @@ def test_block_bootstrap_differs_from_iid(ols_fit_formula, df_time_series):
 # Block types produce different resampling
 # ---------------------------------------------------------------------------
 
+
 def test_moving_vs_nonoverlapping_different(ols_fit_formula, df_time_series):
-    m_moving = Margins(ols_fit_formula, method="bootstrap", n_boot=100, rng_seed=42,
-                       block_size=10, bootstrap_config={"block_type": "moving"})
-    m_nonover = Margins(ols_fit_formula, method="bootstrap", n_boot=100, rng_seed=42,
-                        block_size=10, bootstrap_config={"block_type": "nonoverlapping"})
+    m_moving = Margins(
+        ols_fit_formula,
+        method="bootstrap",
+        n_boot=100,
+        rng_seed=42,
+        block_size=10,
+        bootstrap_config={"block_type": "moving"},
+    )
+    m_nonover = Margins(
+        ols_fit_formula,
+        method="bootstrap",
+        n_boot=100,
+        rng_seed=42,
+        block_size=10,
+        bootstrap_config={"block_type": "nonoverlapping"},
+    )
     res_moving = m_moving.dydx("x")
     res_nonover = m_nonover.dydx("x")
     # They should produce different results
@@ -113,9 +144,16 @@ def test_moving_vs_nonoverlapping_different(ols_fit_formula, df_time_series):
 # Circular block bootstrap works
 # ---------------------------------------------------------------------------
 
+
 def test_circular_block_bootstrap(ols_fit_formula, df_time_series):
-    m = Margins(ols_fit_formula, method="bootstrap", n_boot=100, rng_seed=42,
-                block_size=10, bootstrap_config={"block_type": "circular"})
+    m = Margins(
+        ols_fit_formula,
+        method="bootstrap",
+        n_boot=100,
+        rng_seed=42,
+        block_size=10,
+        bootstrap_config={"block_type": "circular"},
+    )
     res = m.dydx("x")
     assert np.isfinite(res.estimate)
     assert np.isfinite(res.std_error)
@@ -125,10 +163,12 @@ def test_circular_block_bootstrap(ols_fit_formula, df_time_series):
 # Block bootstrap SE roughly matches analytical HAC SE
 # ---------------------------------------------------------------------------
 
+
 def test_block_bootstrap_se_larger_than_iid(ols_fit_formula, df_time_series):
     """For AR data, block-bootstrap SE should be larger than i.i.d. bootstrap SE."""
-    m_block = Margins(ols_fit_formula, method="bootstrap", n_boot=400, rng_seed=42,
-                      block_size=10)
+    m_block = Margins(
+        ols_fit_formula, method="bootstrap", n_boot=400, rng_seed=42, block_size=10
+    )
     res_block = m_block.dydx("x")
 
     m_iid = Margins(ols_fit_formula, method="bootstrap", n_boot=400, rng_seed=42)
@@ -142,26 +182,40 @@ def test_block_bootstrap_se_larger_than_iid(ols_fit_formula, df_time_series):
 # Multiplicity: block bootstrap preserves block structure
 # ---------------------------------------------------------------------------
 
+
 def test_block_bootstrap_multiplicity(ols_fit_formula):
     """Verify that resampled data preserves contiguous blocks."""
-    tiny_df = pd.DataFrame({
-        "x": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-        "y": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-    })
+    tiny_df = pd.DataFrame(
+        {
+            "x": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            "y": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        }
+    )
     fit = smf.ols("y ~ x", data=tiny_df).fit()
     adapter = auto_detect_adapter(fit)
 
-    config = InferenceConfig(method="bootstrap", n_boot=1, rng_seed=1,
-                             block_size=2, bootstrap_config={"block_type": "moving"})
+    config = InferenceConfig(
+        method="bootstrap",
+        n_boot=1,
+        rng_seed=1,
+        block_size=2,
+        bootstrap_config={"block_type": "moving"},
+    )
 
     def h_factory(a):
         def h(beta):
             # Return the sum of y values as a scalar
             return float(a.training_data["y"].sum())
+
         return h
 
-    result = _run_bootstrap(lambda b: float(adapter.training_data["y"].sum()),
-                            adapter, config, {}, h_factory=h_factory)
+    result = _run_bootstrap(
+        lambda b: float(adapter.training_data["y"].sum()),
+        adapter,
+        config,
+        {},
+        h_factory=h_factory,
+    )
     # With block_size=2 and n=6, k=ceil(6/2)=3 blocks
     # Resampled length should be 3*2=6
     resampled_sum = result["draws"][0]
@@ -173,6 +227,7 @@ def test_block_bootstrap_multiplicity(ols_fit_formula):
 # ---------------------------------------------------------------------------
 # Delta and simulation paths ignore block_size
 # ---------------------------------------------------------------------------
+
 
 def test_delta_ignores_block_size(ols_fit_formula, df_time_series):
     m = Margins(ols_fit_formula, method="delta", block_size=5)
@@ -192,11 +247,18 @@ def test_simulation_ignores_block_size(ols_fit_formula, df_time_series):
 # Non-overlapping block bootstrap with edge case
 # ---------------------------------------------------------------------------
 
+
 def test_nonoverlapping_block_size_does_not_divide_n(ols_fit_formula, df_time_series):
     """When n is not divisible by block_size, NBB should still work."""
     # n=200, block_size=7 → n_blocks=28, remainder=4 ignored
-    m = Margins(ols_fit_formula, method="bootstrap", n_boot=50, rng_seed=42,
-                block_size=7, bootstrap_config={"block_type": "nonoverlapping"})
+    m = Margins(
+        ols_fit_formula,
+        method="bootstrap",
+        n_boot=50,
+        rng_seed=42,
+        block_size=7,
+        bootstrap_config={"block_type": "nonoverlapping"},
+    )
     res = m.dydx("x")
     assert np.isfinite(res.estimate)
     assert np.isfinite(res.std_error)

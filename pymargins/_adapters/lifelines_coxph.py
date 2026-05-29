@@ -11,17 +11,19 @@ in predict() to match the fitted model's behavior.
 """
 
 from __future__ import annotations
-from typing import Optional, Any
+
+from typing import Any
+
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
 from .._adapter import ModelAdapter, VariableInfo
 from ._common import (
-    extract_training_data,
-    design_matrix_from_df,
-    column_index_of_variable,
     build_variable_metadata,
+    column_index_of_variable,
+    design_matrix_from_df,
+    extract_training_data,
     validate_vcov_spec,
 )
 
@@ -39,7 +41,7 @@ class LifelinesCoxPHAdapter(ModelAdapter):
         The data the model was fit on.
     """
 
-    def __init__(self, results, training_data: Optional[pd.DataFrame] = None):
+    def __init__(self, results, training_data: pd.DataFrame | None = None):
         self.results = results
         self._training_data = extract_training_data(results, training_data)
         self._exog_names = list(results.params_.index)
@@ -78,7 +80,7 @@ class LifelinesCoxPHAdapter(ModelAdapter):
     def coefficients(self) -> jnp.ndarray:
         return jnp.asarray(self.results.params_.values)
 
-    def covariance(self, vcov_spec: Optional[Any] = None) -> jnp.ndarray:
+    def covariance(self, vcov_spec: Any | None = None) -> jnp.ndarray:
         if vcov_spec is None:
             return jnp.asarray(self.results.variance_matrix_)
 
@@ -93,8 +95,8 @@ class LifelinesCoxPHAdapter(ModelAdapter):
 
         if isinstance(vcov_spec, dict):
             raise ValueError(
-                f"LifelinesCoxPHAdapter does not support vcov dict. "
-                f"Use None (default variance_matrix_) or a user-supplied ndarray."
+                "LifelinesCoxPHAdapter does not support vcov dict. "
+                "Use None (default variance_matrix_) or a user-supplied ndarray."
             )
 
         raise ValueError(f"Unsupported vcov_spec: {vcov_spec!r}")
@@ -107,7 +109,7 @@ class LifelinesCoxPHAdapter(ModelAdapter):
         self,
         beta: jnp.ndarray,
         X: jnp.ndarray,
-        offset: Optional[jnp.ndarray] = None,
+        offset: jnp.ndarray | None = None,
     ) -> jnp.ndarray:
         X_arr = jnp.asarray(X)
         if self._x_mean is not None:
@@ -124,6 +126,7 @@ class LifelinesCoxPHAdapter(ModelAdapter):
     def design_matrix_from_df(self, df: pd.DataFrame) -> jnp.ndarray:
         if self._formula is not None:
             from patsy import dmatrix
+
             # lifelines stores regressors info; we can use the formula
             X_np = np.asarray(dmatrix(self._formula, df, return_type="matrix"))
             # Drop intercept if present — Cox PH absorbs intercept into baseline hazard
@@ -135,7 +138,9 @@ class LifelinesCoxPHAdapter(ModelAdapter):
 
     def column_index_of_variable(self, variable_name: str) -> int:
         return column_index_of_variable(
-            self._exog_names, self.variable_metadata(), variable_name,
+            self._exog_names,
+            self.variable_metadata(),
+            variable_name,
         )
 
     def variable_metadata(self) -> dict[str, VariableInfo]:
@@ -147,7 +152,9 @@ class LifelinesCoxPHAdapter(ModelAdapter):
     # Bootstrap support
     # -----------------------------------------------------------------------
 
-    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "LifelinesCoxPHAdapter":
+    def refit(
+        self, resampled_data: pd.DataFrame, *, index=None
+    ) -> LifelinesCoxPHAdapter:
         from lifelines import CoxPHFitter
 
         kwargs = {

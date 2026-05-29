@@ -10,8 +10,10 @@ prediction in pure JAX so autodiff is exact.
 """
 
 from __future__ import annotations
-from functools import lru_cache
-from typing import Optional, Any
+
+from functools import cache
+from typing import Any
+
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
@@ -19,10 +21,10 @@ import statsmodels.api as sm
 
 from .._adapter import ModelAdapter, VariableInfo
 from ._common import (
-    extract_training_data,
-    design_matrix_from_df,
-    column_index_of_variable,
     build_variable_metadata,
+    column_index_of_variable,
+    design_matrix_from_df,
+    extract_training_data,
     validate_vcov_spec,
 )
 
@@ -39,14 +41,16 @@ class StatsmodelsMNLogitAdapter(ModelAdapter):
         The data the model was fit on.
     """
 
-    def __init__(self, results, training_data: Optional[pd.DataFrame] = None):
+    def __init__(self, results, training_data: pd.DataFrame | None = None):
         self.results = results
         self._training_data = extract_training_data(results, training_data)
         self._exog_names = list(results.model.exog_names)
         self._n_outcomes = int(results.model.J)
         ynames = getattr(results.model, "_ynames_map", None)
         if ynames is not None:
-            self._outcome_labels = [str(ynames.get(i, str(i))) for i in range(self._n_outcomes)]
+            self._outcome_labels = [
+                str(ynames.get(i, str(i))) for i in range(self._n_outcomes)
+            ]
         else:
             self._outcome_labels = [str(i) for i in range(self._n_outcomes)]
 
@@ -59,7 +63,7 @@ class StatsmodelsMNLogitAdapter(ModelAdapter):
         return self._n_outcomes
 
     @property
-    def outcome_labels(self) -> Optional[list[str]]:
+    def outcome_labels(self) -> list[str] | None:
         return self._outcome_labels
 
     @property
@@ -89,7 +93,7 @@ class StatsmodelsMNLogitAdapter(ModelAdapter):
         params_arr = np.asarray(self.results.params)
         return jnp.asarray(params_arr.ravel(order="F"))
 
-    def covariance(self, vcov_spec: Optional[Any] = None) -> jnp.ndarray:
+    def covariance(self, vcov_spec: Any | None = None) -> jnp.ndarray:
         if vcov_spec is None:
             return jnp.asarray(self.results.cov_params())
 
@@ -111,7 +115,8 @@ class StatsmodelsMNLogitAdapter(ModelAdapter):
                 if groups is None:
                     raise ValueError("cluster vcov requires 'groups' in the spec dict.")
                 return self._refit_and_extract_cov(
-                    cov_type="cluster", cov_kwds={"groups": groups},
+                    cov_type="cluster",
+                    cov_kwds={"groups": groups},
                 )
             raise ValueError(f"Unsupported vcov dict type: {kind!r}")
 
@@ -135,7 +140,9 @@ class StatsmodelsMNLogitAdapter(ModelAdapter):
 
     def column_index_of_variable(self, variable_name: str) -> int:
         return column_index_of_variable(
-            self._exog_names, self.variable_metadata(), variable_name,
+            self._exog_names,
+            self.variable_metadata(),
+            variable_name,
         )
 
     def variable_metadata(self) -> dict[str, VariableInfo]:
@@ -152,28 +159,37 @@ class StatsmodelsMNLogitAdapter(ModelAdapter):
         if formula is not None:
             if cov_kwds and "groups" in cov_kwds:
                 groups = cov_kwds["groups"]
-                if hasattr(groups, "__len__") and len(groups) != len(self._training_data):
+                if hasattr(groups, "__len__") and len(groups) != len(
+                    self._training_data
+                ):
                     raise ValueError(
                         f"groups length ({len(groups)}) must match training_data "
                         f"length ({len(self._training_data)})."
                     )
             from statsmodels.formula.api import mnlogit as smf_mnlogit
+
             new_results = smf_mnlogit(
-                formula, data=self._training_data,
+                formula,
+                data=self._training_data,
             ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False)
             return jnp.asarray(new_results.cov_params())
 
         endog = self.results.model.endog
         exog = self.results.model.exog
         new_results = sm.MNLogit(endog, exog).fit(
-            cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False,
+            cov_type=cov_type,
+            cov_kwds=cov_kwds or {},
+            disp=False,
         )
         return jnp.asarray(new_results.cov_params())
 
-    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "StatsmodelsMNLogitAdapter":
+    def refit(
+        self, resampled_data: pd.DataFrame, *, index=None
+    ) -> StatsmodelsMNLogitAdapter:
         formula = getattr(self.results.model, "formula", None)
         if formula is not None:
             from statsmodels.formula.api import mnlogit as smf_mnlogit
+
             new_results = smf_mnlogit(formula, data=resampled_data).fit(disp=False)
             return StatsmodelsMNLogitAdapter(new_results, training_data=resampled_data)
 
@@ -206,14 +222,14 @@ class StatsmodelsMNLogitAdapter(ModelAdapter):
         return StatsmodelsMNLogitAdapter(new_results, training_data=resampled_data)
 
 
-@lru_cache(maxsize=None)
+@cache
 def _mnlogit_predict(n_outcomes: int):
     """Cached predict factory so JAX sees the same callable across refits."""
 
     def predict(
         beta: jnp.ndarray,
         X: jnp.ndarray,
-        offset: Optional[jnp.ndarray] = None,
+        offset: jnp.ndarray | None = None,
     ) -> jnp.ndarray:
         X_arr = jnp.asarray(X)
         n_obs, p = X_arr.shape

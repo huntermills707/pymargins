@@ -22,18 +22,20 @@ shallow adapter clones (``with_prediction_time``).
 """
 
 from __future__ import annotations
+
 import copy
-from typing import Optional, Any
+from typing import Any
+
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
-from .._adapter import WrappedFDAdapter, VariableInfo
+from .._adapter import VariableInfo, WrappedFDAdapter
 from ._common import (
-    extract_training_data,
-    design_matrix_from_df,
-    column_index_of_variable,
     build_variable_metadata,
+    column_index_of_variable,
+    design_matrix_from_df,
+    extract_training_data,
     validate_vcov_spec,
 )
 
@@ -60,8 +62,8 @@ class LifelinesCoxPHSurvivalAdapter(WrappedFDAdapter):
     def __init__(
         self,
         results,
-        training_data: Optional[pd.DataFrame] = None,
-        prediction_time: Optional[float] = None,
+        training_data: pd.DataFrame | None = None,
+        prediction_time: float | None = None,
     ):
         self.results = results
         self._training_data = extract_training_data(results, training_data)
@@ -111,7 +113,7 @@ class LifelinesCoxPHSurvivalAdapter(WrappedFDAdapter):
     def coefficients(self) -> jnp.ndarray:
         return jnp.asarray(self.results.params_.values)
 
-    def covariance(self, vcov_spec: Optional[Any] = None) -> jnp.ndarray:
+    def covariance(self, vcov_spec: Any | None = None) -> jnp.ndarray:
         if vcov_spec is None:
             return jnp.asarray(self.results.variance_matrix_)
 
@@ -127,7 +129,7 @@ class LifelinesCoxPHSurvivalAdapter(WrappedFDAdapter):
     # Prediction (via WrappedFDAdapter)
     # -----------------------------------------------------------------------
 
-    def with_prediction_time(self, t: float) -> "LifelinesCoxPHSurvivalAdapter":
+    def with_prediction_time(self, t: float) -> LifelinesCoxPHSurvivalAdapter:
         """Return a shallow clone with prediction_time overridden.
 
         Used by the atom builders to evaluate scenarios that carry a
@@ -151,7 +153,7 @@ class LifelinesCoxPHSurvivalAdapter(WrappedFDAdapter):
         # Baseline survival at prediction_time
         S0_t = self._baseline_survival_at(self._prediction_time)
         # Survival probability
-        return S0_t ** ph
+        return S0_t**ph
 
     def _baseline_survival_at(self, t: float) -> float:
         """Look up baseline survival at time t.
@@ -162,7 +164,9 @@ class LifelinesCoxPHSurvivalAdapter(WrappedFDAdapter):
         """
         S0_df = self.results.baseline_survival_
         if S0_df is None or S0_df.empty:
-            raise ValueError("Baseline survival function not available on the fitted model.")
+            raise ValueError(
+                "Baseline survival function not available on the fitted model."
+            )
         col = S0_df.columns[0]
         times = S0_df.index.values
         surv = S0_df[col].values
@@ -183,6 +187,7 @@ class LifelinesCoxPHSurvivalAdapter(WrappedFDAdapter):
     def design_matrix_from_df(self, df: pd.DataFrame) -> jnp.ndarray:
         if self._formula is not None:
             from patsy import dmatrix
+
             X_np = np.asarray(dmatrix(self._formula, df, return_type="matrix"))
             # Drop intercept if present — Cox PH absorbs intercept into baseline hazard
             if X_np.shape[1] > len(self._exog_names):
@@ -192,7 +197,9 @@ class LifelinesCoxPHSurvivalAdapter(WrappedFDAdapter):
 
     def column_index_of_variable(self, variable_name: str) -> int:
         return column_index_of_variable(
-            self._exog_names, self.variable_metadata(), variable_name,
+            self._exog_names,
+            self.variable_metadata(),
+            variable_name,
         )
 
     def variable_metadata(self) -> dict[str, VariableInfo]:
@@ -204,7 +211,9 @@ class LifelinesCoxPHSurvivalAdapter(WrappedFDAdapter):
     # Bootstrap support
     # -----------------------------------------------------------------------
 
-    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "LifelinesCoxPHSurvivalAdapter":
+    def refit(
+        self, resampled_data: pd.DataFrame, *, index=None
+    ) -> LifelinesCoxPHSurvivalAdapter:
         from lifelines import CoxPHFitter
 
         # Reset index to handle bootstrap resampling with replacement

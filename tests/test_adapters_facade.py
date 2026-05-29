@@ -21,7 +21,7 @@ def _concrete_adapter_classes():
         with open(path) as fh:
             for line in fh:
                 if line.startswith("class ") and "Adapter" in line:
-                    name = line[len("class "):].split("(")[0].split(":")[0].strip()
+                    name = line[len("class ") :].split("(")[0].split(":")[0].strip()
                     if name.endswith("Adapter"):
                         pairs.append((name, sub))
     return pairs

@@ -13,11 +13,13 @@ from pymargins import Margins
 def df_logit():
     rng = np.random.default_rng(42)
     n = 400
-    df = pd.DataFrame({
-        "age": rng.normal(50, 10, size=n),
-        "treatment": rng.binomial(1, 0.5, size=n),
-        "sex": rng.choice(["M", "F"], size=n),
-    })
+    df = pd.DataFrame(
+        {
+            "age": rng.normal(50, 10, size=n),
+            "treatment": rng.binomial(1, 0.5, size=n),
+            "sex": rng.choice(["M", "F"], size=n),
+        }
+    )
     lp = -2.0 + 0.05 * df["age"] + 0.8 * df["treatment"] + 0.3 * (df["sex"] == "M")
     df["outcome"] = rng.binomial(1, 1 / (1 + np.exp(-lp)))
     return df
@@ -36,11 +38,13 @@ def fit_logit(df_logit):
 def df_ols():
     rng = np.random.default_rng(42)
     n = 300
-    df = pd.DataFrame({
-        "age": rng.normal(50, 10, size=n),
-        "treatment": rng.binomial(1, 0.5, size=n),
-        "group": rng.choice(["A", "B", "C"], size=n),
-    })
+    df = pd.DataFrame(
+        {
+            "age": rng.normal(50, 10, size=n),
+            "treatment": rng.binomial(1, 0.5, size=n),
+            "group": rng.choice(["A", "B", "C"], size=n),
+        }
+    )
     df["y"] = (
         10.0
         + 0.2 * df["age"]
@@ -59,6 +63,7 @@ def fit_ols(df_ols):
 # ---------------------------------------------------------------------------
 # Materialize tests
 # ---------------------------------------------------------------------------
+
 
 def test_materialized_to_frame_has_no_p_value(fit_ols):
     m = Margins.linear_scale(fit_ols)
@@ -81,13 +86,12 @@ def test_materialized_test_raises(fit_ols):
 # scaled() test
 # ---------------------------------------------------------------------------
 
+
 def test_scaled_multiplies_estimate_and_ci(fit_ols):
     m = Margins.linear_scale(fit_ols)
     pred = m.predict(atexog={"treatment": [0, 1]})
     scaled = pred.scaled(by=100, units="%")
-    np.testing.assert_array_almost_equal(
-        scaled.estimate, pred.estimate * 100
-    )
+    np.testing.assert_array_almost_equal(scaled.estimate, pred.estimate * 100)
     np.testing.assert_array_almost_equal(
         scaled.conf_int_lower, pred.conf_int_lower * 100
     )
@@ -99,6 +103,7 @@ def test_scaled_multiplies_estimate_and_ci(fit_ols):
 # ---------------------------------------------------------------------------
 # One-sided test alternatives
 # ---------------------------------------------------------------------------
+
 
 def test_test_one_sided_alternatives(fit_ols):
     m = Margins.linear_scale(fit_ols)
@@ -123,6 +128,7 @@ def test_test_one_sided_alternatives(fit_ols):
 # dydx with over
 # ---------------------------------------------------------------------------
 
+
 def test_dydx_with_over_produces_group_rows(df_ols, fit_ols):
     m = Margins.linear_scale(fit_ols)
     result = m.dydx("age", over="group")
@@ -136,11 +142,14 @@ def test_dydx_with_over_produces_group_rows(df_ols, fit_ols):
 # Edge cases
 # ---------------------------------------------------------------------------
 
+
 def test_single_observation_ci_collapses():
-    df = pd.DataFrame({
-        "x": [1.0],
-        "y": [2.0],
-    })
+    df = pd.DataFrame(
+        {
+            "x": [1.0],
+            "y": [2.0],
+        }
+    )
     model = smf.ols("y ~ x", data=df).fit()
     m = Margins.linear_scale(model)
     pred = m.predict()
@@ -154,6 +163,7 @@ def test_single_observation_ci_collapses():
 # ---------------------------------------------------------------------------
 # Contrasts with ndarray
 # ---------------------------------------------------------------------------
+
 
 def test_contrasts_with_ndarray_matrix(fit_ols):
     m = Margins.linear_scale(fit_ols)
@@ -173,11 +183,17 @@ def test_contrasts_with_ndarray_matrix(fit_ols):
 # diagnose() with non-DataFrame training data
 # ---------------------------------------------------------------------------
 
+
 def test_diagnose_non_dataframe_raises(fit_ols):
     m = Margins.linear_scale(fit_ols)
     # Mock adapter.training_data to return a non-DataFrame
     from unittest.mock import patch
-    with patch.object(m.adapter.__class__, "training_data", new_callable=lambda: property(lambda self: np.array([1, 2, 3]))):
+
+    with patch.object(
+        m.adapter.__class__,
+        "training_data",
+        new_callable=lambda: property(lambda self: np.array([1, 2, 3])),
+    ):
         with pytest.raises(TypeError, match="diagnose.*requires base data"):
             m.diagnose()
 
@@ -185,6 +201,7 @@ def test_diagnose_non_dataframe_raises(fit_ols):
 # ---------------------------------------------------------------------------
 # Fallback triggered appears in to_frame
 # ---------------------------------------------------------------------------
+
 
 def test_fallback_triggered_in_to_frame(fit_logit):
     # log_scale on a logit model creates a highly non-linear composition
@@ -202,13 +219,16 @@ def test_fallback_triggered_in_to_frame(fit_logit):
 # Multi-outcome result to_frame
 # ---------------------------------------------------------------------------
 
+
 def test_multi_outcome_to_frame():
     rng = np.random.default_rng(42)
     n = 400
-    df = pd.DataFrame({
-        "x1": rng.normal(size=n),
-        "x2": rng.normal(size=n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.normal(size=n),
+            "x2": rng.normal(size=n),
+        }
+    )
     # Three-category outcome
     lp0 = 1.0 + 0.5 * df["x1"] + 0.3 * df["x2"]
     lp1 = 0.5 + 0.2 * df["x1"] - 0.1 * df["x2"]
@@ -231,13 +251,16 @@ def test_multi_outcome_to_frame():
 # outcome() end-to-end with real multi-outcome model
 # ---------------------------------------------------------------------------
 
+
 def test_outcome_end_to_end():
     rng = np.random.default_rng(42)
     n = 400
-    df = pd.DataFrame({
-        "x1": rng.normal(size=n),
-        "x2": rng.normal(size=n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.normal(size=n),
+            "x2": rng.normal(size=n),
+        }
+    )
     lp0 = 1.0 + 0.5 * df["x1"] + 0.3 * df["x2"]
     lp1 = 0.5 + 0.2 * df["x1"] - 0.1 * df["x2"]
     denom = 1 + np.exp(lp0) + np.exp(lp1)
@@ -260,6 +283,7 @@ def test_outcome_end_to_end():
 # ---------------------------------------------------------------------------
 # joint_test() on non-identity scale
 # ---------------------------------------------------------------------------
+
 
 def test_joint_test_non_identity_scale(fit_logit):
     m = Margins.log_scale(fit_logit, at="typical")
@@ -287,8 +311,11 @@ def test_joint_test_non_identity_scale(fit_logit):
 # evaluate() with non-JAX-differentiable compose
 # ---------------------------------------------------------------------------
 
+
 def test_evaluate_non_jax_differentiable_compose(fit_logit):
-    m = Margins.linear_scale(fit_logit, at="typical", method="simulation", n_sim=200, rng_seed=42)
+    m = Margins.linear_scale(
+        fit_logit, at="typical", method="simulation", n_sim=200, rng_seed=42
+    )
     result = m.evaluate(
         scenarios=[
             {"atexog": {"treatment": 1}},
@@ -305,8 +332,11 @@ def test_evaluate_non_jax_differentiable_compose(fit_logit):
 # predict() with non-JAX-differentiable transform
 # ---------------------------------------------------------------------------
 
+
 def test_predict_non_jax_differentiable_transform(fit_logit):
-    m = Margins.linear_scale(fit_logit, at="typical", method="simulation", n_sim=200, rng_seed=42)
+    m = Margins.linear_scale(
+        fit_logit, at="typical", method="simulation", n_sim=200, rng_seed=42
+    )
     result = m.predict(
         atexog={"treatment": [0, 1]},
         transform=lambda x: x + 0.01 if x < 0.5 else x,
@@ -319,13 +349,16 @@ def test_predict_non_jax_differentiable_transform(fit_logit):
 # contrasts() with outcome parameter on multi-outcome model
 # ---------------------------------------------------------------------------
 
+
 def test_contrasts_with_outcome():
     rng = np.random.default_rng(42)
     n = 400
-    df = pd.DataFrame({
-        "x1": rng.normal(size=n),
-        "x2": rng.normal(size=n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.normal(size=n),
+            "x2": rng.normal(size=n),
+        }
+    )
     lp0 = 1.0 + 0.5 * df["x1"] + 0.3 * df["x2"]
     lp1 = 0.5 + 0.2 * df["x1"] - 0.1 * df["x2"]
     denom = 1 + np.exp(lp0) + np.exp(lp1)
@@ -353,8 +386,10 @@ def test_contrasts_with_outcome():
 # TestResult.to_frame() multi-row
 # ---------------------------------------------------------------------------
 
+
 def test_testresult_to_frame_multi_row():
     from pymargins._result import TestResult
+
     tr = TestResult(
         statistic=np.array([2.0, 3.0]),
         pvalue=np.array([0.05, 0.01]),
@@ -374,10 +409,12 @@ def test_testresult_to_frame_multi_row():
 # Empty training data
 # ---------------------------------------------------------------------------
 
+
 def test_empty_training_data_raises_clear_error(fit_logit):
     m = Margins.linear_scale(fit_logit, at="typical")
     # Mock training_data to be empty
     from unittest.mock import patch
+
     empty_df = pd.DataFrame({"age": [], "treatment": [], "sex": [], "outcome": []})
     with patch.object(m.adapter.__class__, "training_data", new=empty_df):
         with pytest.raises(ValueError):
@@ -388,13 +425,16 @@ def test_empty_training_data_raises_clear_error(fit_logit):
 # All-NaN column in training data
 # ---------------------------------------------------------------------------
 
+
 def test_all_nan_column_raises_clear_error():
     rng = np.random.default_rng(42)
     n = 100
-    df = pd.DataFrame({
-        "x": rng.normal(size=n),
-        "y": rng.normal(size=n) + 2.0 * rng.normal(size=n),
-    })
+    df = pd.DataFrame(
+        {
+            "x": rng.normal(size=n),
+            "y": rng.normal(size=n) + 2.0 * rng.normal(size=n),
+        }
+    )
     df["bad"] = np.nan
     fit = smf.ols("y ~ x", data=df).fit()
     m = Margins.linear_scale(fit, at="typical")
@@ -408,6 +448,7 @@ def test_all_nan_column_raises_clear_error():
 # ---------------------------------------------------------------------------
 # conf_int() on simulation results
 # ---------------------------------------------------------------------------
+
 
 def test_conf_int_on_simulation_results(fit_ols):
     m = Margins.linear_scale(fit_ols, method="simulation", n_sim=200, rng_seed=42)

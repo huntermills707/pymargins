@@ -1,8 +1,6 @@
-"""Tests for StatsmodelsPHRegSurvivalAdapter.
-"""
+"""Tests for StatsmodelsPHRegSurvivalAdapter."""
 
 import jax
-import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import pytest
@@ -10,23 +8,27 @@ from statsmodels.duration.hazard_regression import PHReg
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins._adapters.statsmodels_phreg_survival import StatsmodelsPHRegSurvivalAdapter
 from pymargins import Margins
-
+from pymargins._adapters.statsmodels_phreg_survival import (
+    StatsmodelsPHRegSurvivalAdapter,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def df_survival():
     """Synthetic survival data."""
     rng = np.random.default_rng(42)
     n = 200
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+        }
+    )
     hazard = np.exp(0.5 + 0.3 * df["x1"] - 0.2 * df["x2"])
     df["T"] = rng.exponential(1.0 / hazard)
     df["E"] = (rng.random(n) < 0.8).astype(int)
@@ -45,6 +47,7 @@ def phreg_fit(df_survival):
 # ---------------------------------------------------------------------------
 # Construction and prediction
 # ---------------------------------------------------------------------------
+
 
 def test_adapter_coefficients(phreg_fit, df_survival):
     adapter = StatsmodelsPHRegSurvivalAdapter(phreg_fit, training_data=df_survival)
@@ -84,6 +87,7 @@ def test_predict_matches_native(phreg_fit, df_survival):
 # Covariance
 # ---------------------------------------------------------------------------
 
+
 def test_covariance_default(phreg_fit, df_survival):
     adapter = StatsmodelsPHRegSurvivalAdapter(phreg_fit, training_data=df_survival)
     cov = adapter.covariance()
@@ -99,6 +103,7 @@ def test_covariance_rejects_hc(phreg_fit, df_survival):
 # ---------------------------------------------------------------------------
 # Design matrix and metadata
 # ---------------------------------------------------------------------------
+
 
 def test_design_matrix(phreg_fit, df_survival):
     adapter = StatsmodelsPHRegSurvivalAdapter(phreg_fit, training_data=df_survival)
@@ -117,6 +122,7 @@ def test_variable_metadata(phreg_fit, df_survival):
 # Inference methods
 # ---------------------------------------------------------------------------
 
+
 def test_supported_inference_methods(phreg_fit, df_survival):
     adapter = StatsmodelsPHRegSurvivalAdapter(phreg_fit, training_data=df_survival)
     assert adapter.supported_inference_methods == {"bootstrap"}
@@ -124,8 +130,14 @@ def test_supported_inference_methods(phreg_fit, df_survival):
 
 def test_bootstrap_end_to_end(phreg_fit, df_survival):
     adapter = StatsmodelsPHRegSurvivalAdapter(phreg_fit, training_data=df_survival)
-    m = Margins(phreg_fit, adapter=adapter, at="typical",
-                method="bootstrap", n_boot=50, rng_seed=42)
+    m = Margins(
+        phreg_fit,
+        adapter=adapter,
+        at="typical",
+        method="bootstrap",
+        n_boot=50,
+        rng_seed=42,
+    )
     rd = m.predict()
     assert rd.method == "bootstrap"
     assert np.isfinite(float(rd.estimate))
@@ -136,8 +148,14 @@ def test_bootstrap_end_to_end(phreg_fit, df_survival):
 
 def test_bootstrap_dydx(phreg_fit, df_survival):
     adapter = StatsmodelsPHRegSurvivalAdapter(phreg_fit, training_data=df_survival)
-    m = Margins(phreg_fit, adapter=adapter, at="typical",
-                method="bootstrap", n_boot=50, rng_seed=42)
+    m = Margins(
+        phreg_fit,
+        adapter=adapter,
+        at="typical",
+        method="bootstrap",
+        n_boot=50,
+        rng_seed=42,
+    )
     rd = m.dydx("x1")
     assert rd.method == "bootstrap"
     assert np.isfinite(float(rd.estimate))
@@ -147,6 +165,7 @@ def test_bootstrap_dydx(phreg_fit, df_survival):
 # ---------------------------------------------------------------------------
 # Refit
 # ---------------------------------------------------------------------------
+
 
 def test_refit(phreg_fit, df_survival):
     adapter = StatsmodelsPHRegSurvivalAdapter(phreg_fit, training_data=df_survival)
@@ -161,7 +180,9 @@ def test_refit(phreg_fit, df_survival):
 
 def test_refit_changes_coefficients(phreg_fit, df_survival):
     adapter = StatsmodelsPHRegSurvivalAdapter(phreg_fit, training_data=df_survival)
-    resampled = df_survival.sample(frac=1.0, replace=True, random_state=42).reset_index(drop=True)
+    resampled = df_survival.sample(frac=1.0, replace=True, random_state=42).reset_index(
+        drop=True
+    )
     new_adapter = adapter.refit(resampled)
     assert isinstance(new_adapter, StatsmodelsPHRegSurvivalAdapter)
     assert not np.allclose(
@@ -173,6 +194,7 @@ def test_refit_changes_coefficients(phreg_fit, df_survival):
 # ---------------------------------------------------------------------------
 # Prediction time
 # ---------------------------------------------------------------------------
+
 
 def test_default_prediction_time(phreg_fit, df_survival):
     adapter = StatsmodelsPHRegSurvivalAdapter(phreg_fit, training_data=df_survival)

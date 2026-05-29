@@ -18,27 +18,28 @@ static-analysis audits do not re-flag them.
 """
 
 from __future__ import annotations
-from typing import Optional
-from functools import partial
+
 import warnings
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
+
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
-from scipy import stats
 import threadpoolctl
+from scipy import stats
 from tqdm import tqdm
-from .._gradients import gradient
-from .._delta import delta_se
-from .._kappa import kappa, kappa_vector
-from .._estimands import is_jax_differentiable, split_kernel_partial, slope_kernel
-from ._config import InferenceConfig
 
+from .._delta import delta_se
+from .._estimands import is_jax_differentiable, slope_kernel, split_kernel_partial
+from .._gradients import gradient
+from .._kappa import kappa, kappa_vector
 
 # ---------------------------------------------------------------------------
 # Resample-index generation (extracted for session-level bank reuse)
 # ---------------------------------------------------------------------------
+
 
 def _generate_resample_indices(
     rng_seed,
@@ -54,9 +55,7 @@ def _generate_resample_indices(
     ``all_idx``.  This determinism is what makes session-level resample banks
     possible.
     """
-    rng = np.random.default_rng(
-        [rng_seed, 1] if rng_seed is not None else None
-    )
+    rng = np.random.default_rng([rng_seed, 1] if rng_seed is not None else None)
 
     if cluster_ids is not None:
         cluster_ids = np.asarray(cluster_ids)
@@ -66,25 +65,24 @@ def _generate_resample_indices(
     all_idx = []
     for _ in range(n_boot):
         if cluster_ids is not None:
-            sampled_clusters = rng.choice(unique_clusters, size=n_clusters, replace=True)
-            idx = np.concatenate([
-                np.where(cluster_ids == c)[0]
-                for c in sampled_clusters
-            ])
+            sampled_clusters = rng.choice(
+                unique_clusters, size=n_clusters, replace=True
+            )
+            idx = np.concatenate(
+                [np.where(cluster_ids == c)[0] for c in sampled_clusters]
+            )
         elif block_size is not None:
             k = int(np.ceil(n_obs / block_size))
             if block_type == "moving":
                 start_positions = rng.integers(0, n_obs - block_size + 1, size=k)
-                idx = np.concatenate([
-                    np.arange(s, s + block_size)
-                    for s in start_positions
-                ])
+                idx = np.concatenate(
+                    [np.arange(s, s + block_size) for s in start_positions]
+                )
             elif block_type == "circular":
                 start_positions = rng.integers(0, n_obs, size=k)
-                idx = np.concatenate([
-                    np.arange(s, s + block_size) % n_obs
-                    for s in start_positions
-                ])
+                idx = np.concatenate(
+                    [np.arange(s, s + block_size) % n_obs for s in start_positions]
+                )
             else:  # nonoverlapping
                 n_blocks = int(np.ceil(n_obs / block_size))
                 if n_blocks == 0:
@@ -92,10 +90,12 @@ def _generate_resample_indices(
                         f"block_size ({block_size}) too large for n_obs ({n_obs})."
                     )
                 sampled_blocks = rng.integers(0, n_blocks, size=n_blocks)
-                idx = np.concatenate([
-                    np.arange(bi * block_size, (bi + 1) * block_size) % n_obs
-                    for bi in sampled_blocks
-                ])
+                idx = np.concatenate(
+                    [
+                        np.arange(bi * block_size, (bi + 1) * block_size) % n_obs
+                        for bi in sampled_blocks
+                    ]
+                )
         else:
             idx = rng.integers(0, n_obs, size=n_obs)
         all_idx.append(idx)
@@ -107,7 +107,10 @@ def _generate_resample_indices(
 # BCa helpers
 # ---------------------------------------------------------------------------
 
-def _compute_acceleration_jackknife(adapter, h_factory, h, data, cluster_ids, block_size):
+
+def _compute_acceleration_jackknife(
+    adapter, h_factory, h, data, cluster_ids, block_size
+):
     """Compute BCa acceleration via leave-one-out jackknife.
 
     Returns (None, None) when jackknife is deemed too expensive (n_obs or
@@ -143,13 +146,21 @@ def _compute_acceleration_jackknife(adapter, h_factory, h, data, cluster_ids, bl
                             if not isinstance(probe_val, (np.ndarray, jnp.ndarray)):
                                 data_independent = False
                                 break
-                            if val.shape != probe_val.shape or not np.allclose(val, probe_val):
+                            if val.shape != probe_val.shape or not np.allclose(
+                                val, probe_val
+                            ):
                                 data_independent = False
                                 break
                     if data_independent:
-                        theta_minus.append(np.asarray(kernel_fn(new_adapter.coefficients(), **static_kwargs)))
+                        theta_minus.append(
+                            np.asarray(
+                                kernel_fn(new_adapter.coefficients(), **static_kwargs)
+                            )
+                        )
                     else:
-                        theta_minus.append(np.asarray(h_probe(new_adapter.coefficients())))
+                        theta_minus.append(
+                            np.asarray(h_probe(new_adapter.coefficients()))
+                        )
                 else:
                     theta_minus.append(np.asarray(h_probe(new_adapter.coefficients())))
             else:
@@ -175,14 +186,23 @@ def _compute_acceleration_jackknife(adapter, h_factory, h, data, cluster_ids, bl
     theta_minus = np.stack(theta_minus, axis=0)  # shape (n_units, n_components)
     theta_mean = np.mean(theta_minus, axis=0)
     diffs = theta_mean - theta_minus  # shape (n_units, n_components)
-    num = np.sum(diffs ** 3, axis=0)
-    den = np.sum(diffs ** 2, axis=0)
-    a = np.where(den > 0, num / (6.0 * den ** 1.5), 0.0)
+    num = np.sum(diffs**3, axis=0)
+    den = np.sum(diffs**2, axis=0)
+    a = np.where(den > 0, num / (6.0 * den**1.5), 0.0)
     return a, theta_minus
 
 
-def _compute_bca_params(h_draws_inf, estimate, adapter, h_factory, h, data,
-                        cluster_ids, block_size, bootstrap_config):
+def _compute_bca_params(
+    h_draws_inf,
+    estimate,
+    adapter,
+    h_factory,
+    h,
+    data,
+    cluster_ids,
+    block_size,
+    bootstrap_config,
+):
     """Compute BCa bias correction (z0) and acceleration (a)."""
     if not np.all(np.isfinite(estimate)):
         raise ValueError(
@@ -199,16 +219,22 @@ def _compute_bca_params(h_draws_inf, estimate, adapter, h_factory, h, data,
         a = np.asarray(bootstrap_config["acceleration"])
     else:
         a, theta_minus = _compute_acceleration_jackknife(
-            adapter, h_factory, h, data, cluster_ids, block_size,
+            adapter,
+            h_factory,
+            h,
+            data,
+            cluster_ids,
+            block_size,
         )
         if a is None:
             warnings.warn(
                 "BCa acceleration could not be computed automatically "
-                "(jackknife is too expensive for this data size). "
+                "(jackknife is too expensive for this data size, stacklevel=2). "
                 "Using a=0 (BC, bias-corrected only). Pass "
                 "bootstrap_config={'acceleration': value} to supply a "
                 "custom acceleration.",
-                UserWarning, stacklevel=4,
+                UserWarning,
+                stacklevel=4,
             )
     return z0, a, theta_minus
 
@@ -218,7 +244,6 @@ def _bca_confint(h_draws_inf, estimate, level, z0, a, phi):
     alpha = (1.0 - level) / 2.0
     z_alpha = stats.norm.ppf(alpha)
     z_1_alpha = stats.norm.ppf(1.0 - alpha)
-    estimate_arr = np.asarray(estimate)
 
     if a is not None:
         a_arr = np.asarray(a)
@@ -255,6 +280,7 @@ def _bca_confint(h_draws_inf, estimate, level, z0, a, phi):
 # Bootstrap path
 # ---------------------------------------------------------------------------
 
+
 def _refit_replicate_task(args, adapter, data, matching=None):
     """Module-level helper for bootstrap refit parallelism.
 
@@ -272,10 +298,12 @@ def _refit_replicate_task(args, adapter, data, matching=None):
         try:
             resampled = matching.rematch(resampled)
         except Exception as exc:
-            if isinstance(exc, (AssertionError, MemoryError, RecursionError, KeyboardInterrupt)):
+            if isinstance(
+                exc, (AssertionError, MemoryError, RecursionError, KeyboardInterrupt)
+            ):
                 raise
             return b, None, exc
-        index = None   # rematching breaks the original index mapping
+        index = None  # rematching breaks the original index mapping
     else:
         index = idx
 
@@ -294,7 +322,9 @@ def _refit_replicate_task(args, adapter, data, matching=None):
         # expected and counted against the 10% failure threshold.
         # Serious errors (assertions, memory exhaustion, recursion limits,
         # interrupts) propagate immediately so they are not silently lost.
-        if isinstance(exc, (AssertionError, MemoryError, RecursionError, KeyboardInterrupt)):
+        if isinstance(
+            exc, (AssertionError, MemoryError, RecursionError, KeyboardInterrupt)
+        ):
             raise
         return b, None, exc
 
@@ -329,6 +359,7 @@ def _try_fast_path(h, adapter, config):
 # leaves so the kernel can be vmapped over replicates.
 # ---------------------------------------------------------------------------
 
+
 def _is_arr(x):
     return isinstance(x, (np.ndarray, jnp.ndarray))
 
@@ -353,7 +384,9 @@ def _arr_tree_equal(a, b):
         a, b = np.asarray(a), np.asarray(b)
         return a.shape == b.shape and np.array_equal(a, b)
     if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
-        return len(a) == len(b) and all(_arr_tree_equal(x, y) for x, y in zip(a, b))
+        return len(a) == len(b) and all(
+            _arr_tree_equal(x, y) for x, y in zip(a, b, strict=False)
+        )
     if _is_arr(a) or _is_arr(b):
         return False
     return a is None and b is None if (a is None or b is None) else True
@@ -417,9 +450,7 @@ def _chunked_batched(fn, betas, dyn_stacked, chunk_size):
         for s in range(0, n, chunk_size):
             e = min(s + chunk_size, n)
             dyn_c = {k: _tree_take(v, slice(s, e)) for k, v in dyn_stacked.items()}
-            out.append(np.asarray(
-                jax.vmap(jitted, in_axes=in_axes)(betas[s:e], dyn_c)
-            ))
+            out.append(np.asarray(jax.vmap(jitted, in_axes=in_axes)(betas[s:e], dyn_c)))
         return np.concatenate(out, axis=0)
 
     jitted = jax.jit(lambda beta: fn(beta, {}))
@@ -458,8 +489,9 @@ def _split_static_dynamic(orig_kw, probe_kws):
     return static_kwargs, dynamic_keys
 
 
-def _run_fast_path(kernel_info, refitted, h_factory, config,
-                   ci_method, jax_diffable, chunk_size):
+def _run_fast_path(
+    kernel_info, refitted, h_factory, config, ci_method, jax_diffable, chunk_size
+):
     """Batched (JIT + chunked vmap) replacement for the per-replicate loop.
 
     Returns ``raw_results`` (one entry per replicate, in ``refitted`` order:
@@ -489,8 +521,7 @@ def _run_fast_path(kernel_info, refitted, h_factory, config,
             info = split_kernel_partial(h_factory(adp))
         except Exception:
             return None
-        if (info is None or info["kernel_fn"] is not kernel_fn
-                or info["args"]):
+        if info is None or info["kernel_fn"] is not kernel_fn or info["args"]:
             return None
         probe_cache[idx] = info
         probe_kws.append(info["keywords"])
@@ -531,8 +562,12 @@ def _run_fast_path(kernel_info, refitted, h_factory, config,
                     info = split_kernel_partial(h_factory(adp))
                 except Exception:
                     return None
-                if (info is None or info["kernel_fn"] is not kernel_fn
-                        or info["args"] or set(info["keywords"]) != set(orig_kw)):
+                if (
+                    info is None
+                    or info["kernel_fn"] is not kernel_fn
+                    or info["args"]
+                    or set(info["keywords"]) != set(orig_kw)
+                ):
                     return None
             kwb = info["keywords"]
             # Static array leaves must really be invariant; bail (to the
@@ -563,7 +598,11 @@ def _run_fast_path(kernel_info, refitted, h_factory, config,
     se_draws = None
     if ci_method == "studentized" and jax_diffable:
         is_vector = np.ndim(thetas) > 1
-        gfn = jax.jacobian(kernel_fn, argnums=0) if is_vector else jax.grad(kernel_fn, argnums=0)
+        gfn = (
+            jax.jacobian(kernel_fn, argnums=0)
+            if is_vector
+            else jax.grad(kernel_fn, argnums=0)
+        )
 
         def _grad(beta, dyn):
             return gfn(beta, **static_kwargs, **dyn)
@@ -576,8 +615,7 @@ def _run_fast_path(kernel_info, refitted, h_factory, config,
             se_draws = np.asarray(
                 jax.vmap(delta_se, in_axes=(0, 0))(jnp.asarray(grads), Sigma_stack)
             )
-        except (ValueError, TypeError, jax.errors.JAXTypeError,
-                np.linalg.LinAlgError):
+        except (ValueError, TypeError, jax.errors.JAXTypeError, np.linalg.LinAlgError):
             se_draws = None
 
     result_map = {}
@@ -589,7 +627,9 @@ def _run_fast_path(kernel_info, refitted, h_factory, config,
     return [result_map[b] for b, _, _ in refitted]
 
 
-def _harvest_bootstrap_states(adapter, data, all_idx, matching=None, n_jobs=1, progress=False):
+def _harvest_bootstrap_states(
+    adapter, data, all_idx, matching=None, n_jobs=1, progress=False
+):
     """Resample + refit, returning bootstrap_state() snapshots.
 
     Parameters
@@ -616,11 +656,12 @@ def _harvest_bootstrap_states(adapter, data, all_idx, matching=None, n_jobs=1, p
     """
     if n_jobs == -1:
         import os
+
         n_jobs = os.cpu_count() or 1
 
     if n_jobs > 1:
         warnings.warn(
-            f"Parallel bootstrap (n_jobs={n_jobs}) is experimental. "
+            f"Parallel bootstrap (n_jobs={n_jobs}, stacklevel=2) is experimental. "
             "Process-based execution is used when pickling succeeds; "
             "otherwise it falls back to thread-based execution.",
             RuntimeWarning,
@@ -634,6 +675,7 @@ def _harvest_bootstrap_states(adapter, data, all_idx, matching=None, n_jobs=1, p
 
     if n_jobs != 1:
         import pickle
+
         try:
             pickle.dumps(adapter)
             pickle.dumps(data)
@@ -653,33 +695,52 @@ def _harvest_bootstrap_states(adapter, data, all_idx, matching=None, n_jobs=1, p
         if use_processes:
             import multiprocessing as _mp
             from concurrent.futures import ProcessPoolExecutor
+
             _ctx = _mp.get_context("spawn")
             with ProcessPoolExecutor(max_workers=n_jobs, mp_context=_ctx) as executor:
-                refitted = list(_maybe_tqdm(executor.map(
+                refitted = list(
+                    _maybe_tqdm(
+                        executor.map(
+                            _refit_replicate_task,
+                            enumerate(all_idx),
+                            [adapter] * len(all_idx),
+                            [data] * len(all_idx),
+                            [matching] * len(all_idx),
+                        ),
+                        desc="Bootstrap refit",
+                        total=len(all_idx),
+                    )
+                )
+        else:
+            with threadpoolctl.threadpool_limits(limits=1):
+                with ThreadPoolExecutor(max_workers=n_jobs) as executor:
+                    refitted = list(
+                        _maybe_tqdm(
+                            executor.map(
+                                _refit_replicate_task,
+                                enumerate(all_idx),
+                                [adapter] * len(all_idx),
+                                [data] * len(all_idx),
+                                [matching] * len(all_idx),
+                            ),
+                            desc="Bootstrap refit",
+                            total=len(all_idx),
+                        )
+                    )
+    else:
+        refitted = list(
+            _maybe_tqdm(
+                map(
                     _refit_replicate_task,
                     enumerate(all_idx),
                     [adapter] * len(all_idx),
                     [data] * len(all_idx),
                     [matching] * len(all_idx),
-                ), desc="Bootstrap refit", total=len(all_idx)))
-        else:
-            with threadpoolctl.threadpool_limits(limits=1):
-                with ThreadPoolExecutor(max_workers=n_jobs) as executor:
-                    refitted = list(_maybe_tqdm(executor.map(
-                        _refit_replicate_task,
-                        enumerate(all_idx),
-                        [adapter] * len(all_idx),
-                        [data] * len(all_idx),
-                        [matching] * len(all_idx),
-                    ), desc="Bootstrap refit", total=len(all_idx)))
-    else:
-        refitted = list(_maybe_tqdm(map(
-            _refit_replicate_task,
-            enumerate(all_idx),
-            [adapter] * len(all_idx),
-            [data] * len(all_idx),
-            [matching] * len(all_idx),
-        ), desc="Bootstrap refit", total=len(all_idx)))
+                ),
+                desc="Bootstrap refit",
+                total=len(all_idx),
+            )
+        )
 
     states = []
     failures = []
@@ -691,7 +752,9 @@ def _harvest_bootstrap_states(adapter, data, all_idx, matching=None, n_jobs=1, p
     return states, failures
 
 
-def _replay_h_over_states(states, failures, h_factory, h, config, *, kernel_info=None, jax_diffable=None):
+def _replay_h_over_states(
+    states, failures, h_factory, h, config, *, kernel_info=None, jax_diffable=None
+):
     """Evaluate h over cached bootstrap states.
 
     Returns a list ``raw_results`` where each element is either
@@ -718,22 +781,29 @@ def _replay_h_over_states(states, failures, h_factory, h, config, *, kernel_info
     if ci_method == "studentized" and jax_diffable:
         if states:
             h_probe = h_factory(states[0][1])
-            if isinstance(h_probe, partial) and getattr(h_probe.func, "__pymargins_kernel__", False):
+            if isinstance(h_probe, partial) and getattr(
+                h_probe.func, "__pymargins_kernel__", False
+            ):
                 _kernel_grad_fn = jax.grad(h_probe.func, argnums=0)
 
     raw_results = []
     if kernel_info is not None:
         chunk_size = bootstrap_config.get("vmap_chunk_size", 256)
         batched = _run_fast_path(
-            kernel_info, replicates, h_factory, config,
-            ci_method, jax_diffable, chunk_size,
+            kernel_info,
+            replicates,
+            h_factory,
+            config,
+            ci_method,
+            jax_diffable,
+            chunk_size,
         )
         if batched is not None:
             raw_results = batched
 
     if not raw_results:
         # Legacy per-replicate loop
-        for b, state, refit_exc in _maybe_tqdm(replicates, desc="Bootstrap evaluate"):
+        for _b, state, refit_exc in _maybe_tqdm(replicates, desc="Bootstrap evaluate"):
             if refit_exc is not None:
                 raw_results.append(refit_exc)
                 continue
@@ -750,12 +820,18 @@ def _replay_h_over_states(states, failures, h_factory, h, config, *, kernel_info
                             grad_b = _kernel_grad_fn(beta_b, *h_b.args, **h_b.keywords)
                         else:
                             grad_b = gradient(
-                                h_b, beta_b,
+                                h_b,
+                                beta_b,
                                 backend=config.gradient_backend,
                                 fd_step=config.fd_step,
                             )
                         se_b = np.asarray(delta_se(grad_b, Sigma_b))
-                    except (ValueError, TypeError, jax.errors.JAXTypeError, np.linalg.LinAlgError):
+                    except (
+                        ValueError,
+                        TypeError,
+                        jax.errors.JAXTypeError,
+                        np.linalg.LinAlgError,
+                    ):
                         se_b = None
 
                 raw_results.append((theta_b, se_b))
@@ -765,7 +841,9 @@ def _replay_h_over_states(states, failures, h_factory, h, config, *, kernel_info
     return raw_results
 
 
-def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=None, h_factory=None):
+def _run_bootstrap(
+    h, adapter, config, estimand_metadata, *, fallback_reason=None, h_factory=None
+):
     """Nonparametric bootstrap: refit the model on resampled data, recompute
     h, take quantiles.
 
@@ -883,7 +961,9 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
         failures = config.all_states_failures or []
     else:
         states, failures = _harvest_bootstrap_states(
-            adapter, data, all_idx,
+            adapter,
+            data,
+            all_idx,
             matching=config.matching,
             n_jobs=config.n_jobs,
             progress=config.progress_bar,
@@ -892,7 +972,11 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
     # Step 2: Evaluate estimand over the states (fast path or legacy loop)
     kernel_info = _try_fast_path(h, adapter, config)
     raw_results = _replay_h_over_states(
-        states, failures, h_factory, h, config,
+        states,
+        failures,
+        h_factory,
+        h,
+        config,
         kernel_info=kernel_info,
         jax_diffable=jax_diffable,
     )
@@ -916,14 +1000,13 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
     if n_failures > max_failures:
         last_exc = failure_exceptions[-1] if failure_exceptions else None
         raise RuntimeError(
-            f"Bootstrap failed on {n_failures} replicates (>{max_failures} "
-            f"threshold)."
+            f"Bootstrap failed on {n_failures} replicates (>{max_failures} threshold)."
         ) from last_exc
 
     if n_failures > 0:
         warnings.warn(
             f"Bootstrap: {n_failures} of {config.n_boot} replicates failed "
-            f"({n_failures / config.n_boot:.1%}). CI computed from "
+            f"({n_failures / config.n_boot:.1%}, stacklevel=2). CI computed from "
             f"{len(h_draws_inf)} successful replicates.",
             UserWarning,
             stacklevel=3,
@@ -976,11 +1059,23 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
 
     elif ci_method == "bca":
         bca_z0, bca_a, bca_theta_minus = _compute_bca_params(
-            h_draws_inf, estimate, adapter, h_factory, h, data,
-            cluster_ids, block_size, bootstrap_config,
+            h_draws_inf,
+            estimate,
+            adapter,
+            h_factory,
+            h,
+            data,
+            cluster_ids,
+            block_size,
+            bootstrap_config,
         )
         lower, upper = _bca_confint(
-            h_draws_inf, estimate, config.level, bca_z0, bca_a, config.phi,
+            h_draws_inf,
+            estimate,
+            config.level,
+            bca_z0,
+            bca_a,
+            config.phi,
         )
 
     elif ci_method == "studentized":
@@ -1003,16 +1098,24 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
         studentized_t = (valid_draws - np.asarray(estimate)) / valid_se
 
         beta_hat = adapter.coefficients()
-        Sigma_hat = config.cov_params if config.cov_params is not None else adapter.covariance()
+        Sigma_hat = (
+            config.cov_params if config.cov_params is not None else adapter.covariance()
+        )
         if is_jax_differentiable(h, beta_hat):
             try:
                 grad_hat = gradient(
-                    h, beta_hat,
+                    h,
+                    beta_hat,
                     backend=config.gradient_backend,
                     fd_step=config.fd_step,
                 )
                 se_hat = np.asarray(delta_se(grad_hat, Sigma_hat))
-            except (ValueError, TypeError, jax.errors.JAXTypeError, np.linalg.LinAlgError):
+            except (
+                ValueError,
+                TypeError,
+                jax.errors.JAXTypeError,
+                np.linalg.LinAlgError,
+            ):
                 se_hat = np.std(h_draws_inf, axis=0, ddof=1)
         else:
             se_hat = np.std(h_draws_inf, axis=0, ddof=1)
@@ -1027,7 +1130,9 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
     # κ at β̂ when h is JAX-differentiable
     k = None
     beta_hat = adapter.coefficients()
-    Sigma_hat = config.cov_params if config.cov_params is not None else adapter.covariance()
+    Sigma_hat = (
+        config.cov_params if config.cov_params is not None else adapter.covariance()
+    )
     if config.diagnostics and is_jax_differentiable(h, beta_hat):
         try:
             # Reuse the jitted kernel for κ so the forward evaluation is
@@ -1036,20 +1141,36 @@ def _run_bootstrap(h, adapter, config, estimand_metadata, *, fallback_reason=Non
             if kernel_info_kappa is not None:
                 kernel_fn_kappa = kernel_info_kappa["kernel_fn"]
                 static_kwargs_kappa = kernel_info_kappa["keywords"]
+
                 def h_jitted(beta):
                     return kernel_fn_kappa(beta, **static_kwargs_kappa)
+
                 h_for_kappa = jax.jit(h_jitted)
             else:
                 h_for_kappa = h
 
             if jnp.ndim(estimate) == 0:
-                k = kappa(h_for_kappa, beta_hat, Sigma_hat,
-                          backend=config.gradient_backend, fd_step=config.fd_step)
+                k = kappa(
+                    h_for_kappa,
+                    beta_hat,
+                    Sigma_hat,
+                    backend=config.gradient_backend,
+                    fd_step=config.fd_step,
+                )
             else:
-                k = kappa_vector(h_for_kappa, beta_hat, Sigma_hat,
-                                 backend=config.gradient_backend, fd_step=config.fd_step)
+                k = kappa_vector(
+                    h_for_kappa,
+                    beta_hat,
+                    Sigma_hat,
+                    backend=config.gradient_backend,
+                    fd_step=config.fd_step,
+                )
         except (ValueError, TypeError, jax.errors.JAXTypeError) as exc:
-            warnings.warn(f"Bootstrap kappa diagnostic failed: {exc}", RuntimeWarning)
+            warnings.warn(
+                f"Bootstrap kappa diagnostic failed: {exc}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
     bootstrap_extras = {}
     if bca_z0 is not None:

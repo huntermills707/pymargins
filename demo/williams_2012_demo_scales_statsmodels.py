@@ -7,6 +7,7 @@ correctness tests of pymargins.
 """
 
 import jax
+
 jax.config.update("jax_enable_x64", True)
 
 import numpy as np
@@ -21,7 +22,9 @@ def make_data(n=5000, seed=42):
     female = rng.binomial(1, 0.52, size=n)
     black = rng.binomial(1, 0.11, size=n)
     age = rng.integers(20, 75, size=n)
-    agegrp = pd.cut(age, bins=[19, 29, 39, 49, 59, 69, 100], labels=[1, 2, 3, 4, 5, 6]).astype(int)
+    agegrp = pd.cut(
+        age, bins=[19, 29, 39, 49, 59, 69, 100], labels=[1, 2, 3, 4, 5, 6]
+    ).astype(int)
     bmi = 22 + 0.15 * age + 1.5 * female + rng.normal(0, 4, size=n)
     bmi = np.clip(bmi, 15, 50)
     lp = (
@@ -37,16 +40,25 @@ def make_data(n=5000, seed=42):
         + 2.6 * (agegrp == 6).astype(float)
     )
     diabetes = rng.binomial(1, 1 / (1 + np.exp(-lp)))
-    bp = 110 + 0.4 * age + 2.5 * black + 1.2 * female + 0.5 * bmi + rng.normal(0, 8, size=n)
-    return pd.DataFrame({
-        "diabetes": diabetes,
-        "bp": bp,
-        "black": black,
-        "female": female,
-        "age": age,
-        "agegrp": agegrp,
-        "bmi": bmi,
-    })
+    bp = (
+        110
+        + 0.4 * age
+        + 2.5 * black
+        + 1.2 * female
+        + 0.5 * bmi
+        + rng.normal(0, 8, size=n)
+    )
+    return pd.DataFrame(
+        {
+            "diabetes": diabetes,
+            "bp": bp,
+            "black": black,
+            "female": female,
+            "age": age,
+            "agegrp": agegrp,
+            "bmi": bmi,
+        }
+    )
 
 
 def _print_section(title):

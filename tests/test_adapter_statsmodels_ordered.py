@@ -1,35 +1,35 @@
-"""Tests for StatsmodelsOrderedAdapter.
-"""
+"""Tests for StatsmodelsOrderedAdapter."""
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import pytest
-import statsmodels.api as sm
 import statsmodels.miscmodels.ordinal_model as om
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins._adapters.statsmodels_ordered import StatsmodelsOrderedAdapter
-from pymargins._adapter import auto_detect_adapter
 from pymargins import Margins
-
+from pymargins._adapter import auto_detect_adapter
+from pymargins._adapters.statsmodels_ordered import StatsmodelsOrderedAdapter
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def df_ordered():
     """Synthetic data for ordered logit."""
     rng = np.random.default_rng(43)
     n = 300
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-        "treatment": rng.binomial(1, 0.5, n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+            "treatment": rng.binomial(1, 0.5, n),
+        }
+    )
     eta = 0.5 + 0.3 * df["x1"] - 0.2 * df["x2"] + 0.6 * df["treatment"]
     # thresholds at -1, 0, 1
     y = np.zeros(n, dtype=int)
@@ -52,6 +52,7 @@ def ordered_fit_array(df_ordered):
 # Auto-detection
 # ---------------------------------------------------------------------------
 
+
 def test_auto_detect_array_requires_training_data(ordered_fit_array):
     with pytest.raises(ValueError, match="training_data"):
         auto_detect_adapter(ordered_fit_array)
@@ -62,6 +63,7 @@ def test_auto_detect_with_training_data(ordered_fit_array, df_ordered):
     # which calls cls(model) without training_data. Since OrderedModel has no
     # formula API, we test the class directly.
     from pymargins._adapters import _detect_adapter_class
+
     cls = _detect_adapter_class(ordered_fit_array)
     assert cls is StatsmodelsOrderedAdapter
 
@@ -69,6 +71,7 @@ def test_auto_detect_with_training_data(ordered_fit_array, df_ordered):
 # ---------------------------------------------------------------------------
 # Coefficients and covariance
 # ---------------------------------------------------------------------------
+
 
 def test_coefficients_shape(ordered_fit_array, df_ordered):
     adapter = StatsmodelsOrderedAdapter(ordered_fit_array, training_data=df_ordered)
@@ -79,28 +82,32 @@ def test_coefficients_shape(ordered_fit_array, df_ordered):
 def test_covariance_default(ordered_fit_array, df_ordered):
     adapter = StatsmodelsOrderedAdapter(ordered_fit_array, training_data=df_ordered)
     cov = adapter.covariance()
-    assert cov.shape == (adapter.coefficients().shape[0], adapter.coefficients().shape[0])
+    assert cov.shape == (
+        adapter.coefficients().shape[0],
+        adapter.coefficients().shape[0],
+    )
 
 
 # ---------------------------------------------------------------------------
 # Prediction
 # ---------------------------------------------------------------------------
 
+
 def test_predict_shape_and_sum_to_one(ordered_fit_array, df_ordered):
     adapter = StatsmodelsOrderedAdapter(ordered_fit_array, training_data=df_ordered)
     X = adapter.design_matrix_from_df(df_ordered[:10])
     probs = adapter.predict(adapter.coefficients(), X)
     assert probs.shape == (10, adapter.n_outcomes)
-    np.testing.assert_array_almost_equal(
-        np.asarray(probs.sum(axis=1)), np.ones(10)
-    )
+    np.testing.assert_array_almost_equal(np.asarray(probs.sum(axis=1)), np.ones(10))
 
 
 def test_predict_matches_statsmodels(ordered_fit_array, df_ordered):
     adapter = StatsmodelsOrderedAdapter(ordered_fit_array, training_data=df_ordered)
     X = adapter.design_matrix_from_df(df_ordered[:10])
     our_probs = np.asarray(adapter.predict(adapter.coefficients(), X))
-    sm_probs = ordered_fit_array.model.predict(ordered_fit_array.params, exog=np.asarray(X))
+    sm_probs = ordered_fit_array.model.predict(
+        ordered_fit_array.params, exog=np.asarray(X)
+    )
     np.testing.assert_allclose(our_probs, sm_probs, atol=1e-5)
 
 
@@ -120,6 +127,7 @@ def test_predict_jax_differentiable(ordered_fit_array, df_ordered):
 # ---------------------------------------------------------------------------
 # Design matrix and metadata
 # ---------------------------------------------------------------------------
+
 
 def test_design_matrix_array(ordered_fit_array, df_ordered):
     adapter = StatsmodelsOrderedAdapter(ordered_fit_array, training_data=df_ordered)
@@ -151,6 +159,7 @@ def test_column_index_raises_for_binary(ordered_fit_array, df_ordered):
 # End-to-end via Margins session
 # ---------------------------------------------------------------------------
 
+
 def test_margins_predict_aap(ordered_fit_array, df_ordered):
     adapter = StatsmodelsOrderedAdapter(ordered_fit_array, training_data=df_ordered)
     m = Margins.linear_scale(ordered_fit_array, adapter=adapter)
@@ -171,6 +180,7 @@ def test_margins_dydx(ordered_fit_array, df_ordered):
 # Refit
 # ---------------------------------------------------------------------------
 
+
 def test_refit_array(ordered_fit_array, df_ordered):
     adapter = StatsmodelsOrderedAdapter(ordered_fit_array, training_data=df_ordered)
     new_adapter = adapter.refit(df_ordered)
@@ -185,6 +195,7 @@ def test_refit_array(ordered_fit_array, df_ordered):
 # ---------------------------------------------------------------------------
 # Outcome subsetting
 # ---------------------------------------------------------------------------
+
 
 def test_predict_outcome_subset(ordered_fit_array, df_ordered):
     adapter = StatsmodelsOrderedAdapter(ordered_fit_array, training_data=df_ordered)
@@ -214,9 +225,11 @@ def test_result_outcome_helper(ordered_fit_array, df_ordered):
 # Attach validation
 # ---------------------------------------------------------------------------
 
+
 def test_attach_rejects_bad_vcov(ordered_fit_array, df_ordered):
     adapter = StatsmodelsOrderedAdapter(ordered_fit_array, training_data=df_ordered)
     from unittest.mock import MagicMock
+
     session = MagicMock()
     session.vcov_spec = "HAC"
     with pytest.raises(ValueError, match="HAC"):

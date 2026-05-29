@@ -13,11 +13,13 @@ from pymargins import Margins
 def df_logit():
     rng = np.random.default_rng(42)
     n = 400
-    df = pd.DataFrame({
-        "age": rng.normal(50, 10, size=n),
-        "treatment": rng.binomial(1, 0.5, size=n),
-        "sex": rng.choice(["M", "F"], size=n),
-    })
+    df = pd.DataFrame(
+        {
+            "age": rng.normal(50, 10, size=n),
+            "treatment": rng.binomial(1, 0.5, size=n),
+            "sex": rng.choice(["M", "F"], size=n),
+        }
+    )
     lp = -2.0 + 0.05 * df["age"] + 0.8 * df["treatment"] + 0.3 * (df["sex"] == "M")
     df["outcome"] = rng.binomial(1, 1 / (1 + np.exp(-lp)))
     return df
@@ -36,11 +38,13 @@ def fit_logit(df_logit):
 def df_ols():
     rng = np.random.default_rng(42)
     n = 300
-    df = pd.DataFrame({
-        "age": rng.normal(50, 10, size=n),
-        "treatment": rng.binomial(1, 0.5, size=n),
-        "sex": rng.choice(["M", "F"], size=n),
-    })
+    df = pd.DataFrame(
+        {
+            "age": rng.normal(50, 10, size=n),
+            "treatment": rng.binomial(1, 0.5, size=n),
+            "sex": rng.choice(["M", "F"], size=n),
+        }
+    )
     df["y"] = (
         10.0
         + 0.2 * df["age"]
@@ -59,6 +63,7 @@ def fit_ols(df_ols):
 # ---------------------------------------------------------------------------
 # summary()
 # ---------------------------------------------------------------------------
+
 
 def test_summary_contains_title_and_columns(fit_ols):
     m = Margins.linear_scale(fit_ols, at="typical")
@@ -143,6 +148,7 @@ def test_summary_for_dydx(fit_ols):
 # to_latex()
 # ---------------------------------------------------------------------------
 
+
 def test_to_latex_basic_structure(fit_ols):
     m = Margins.linear_scale(fit_ols, at="typical")
     pred = m.predict(atexog={"treatment": [0, 1]})
@@ -175,6 +181,7 @@ def test_to_latex_stars(fit_ols):
 # to_html()
 # ---------------------------------------------------------------------------
 
+
 def test_to_html_basic_structure(fit_ols):
     m = Margins.linear_scale(fit_ols, at="typical")
     pred = m.predict(atexog={"treatment": [0, 1]})
@@ -205,6 +212,7 @@ def test_to_html_stars(fit_ols):
 # Edge cases
 # ---------------------------------------------------------------------------
 
+
 def test_materialized_result_summary_still_works(fit_ols):
     m = Margins.linear_scale(fit_ols, at="typical")
     pred = m.predict(atexog={"treatment": [0, 1]})
@@ -220,6 +228,7 @@ def test_summary_custom_float_fmt(fit_ols):
     s = pred.summary(float_fmt=".2f")
     # Check that estimates are formatted to 2 decimals
     import re
+
     matches = re.findall(r"\d+\.\d{2}", s)
     assert len(matches) > 0
 

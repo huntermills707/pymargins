@@ -38,34 +38,40 @@ from the public ``pymargins.adapters`` module — you rarely need them since
 override detection or select a non-default scale.
 """
 
-from .margins import Margins
-from ._result import MarginsResult, TestResult, DiagnosticResult, AdjustedResults, adjust
-from ._adapters import register_adapter
 from ._adapter import (
-    ModelAdapter,
-    GLMAdapter,
-    LinearPredictionAdapter,
-    WrappedFDAdapter,
     BootstrapOnlyAdapter,
-    VariableInfo,
+    GLMAdapter,
     InferenceMethod,
+    LinearPredictionAdapter,
+    ModelAdapter,
+    VariableInfo,
+    WrappedFDAdapter,
 )
+from ._adapters import register_adapter
 from ._gradients import (
-    make_predict_with_fd_jvp,
-    make_glm_jvp_wrapper,
     GradientBackend,
+    make_glm_jvp_wrapper,
+    make_predict_with_fd_jvp,
 )
+from ._result import (
+    AdjustedResults,
+    DiagnosticResult,
+    MarginsResult,
+    TestResult,
+    adjust,
+)
+from .margins import Margins
+from .matching import PysmatchClient
 from .scenarios import (
-    pairwise,
-    reference,
+    all_pairwise,
     at_levels,
-    grid,
     did,
     diff,
     diff_matrix,
-    all_pairwise,
+    grid,
+    pairwise,
+    reference,
 )
-from .matching import PysmatchClient
 
 __all__ = [
     # Main entry point
@@ -105,7 +111,8 @@ __all__ = [
     "__version__",
 ]
 
-from importlib.metadata import PackageNotFoundError, version as _pkg_version
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 
 try:
     __version__ = _pkg_version("pymargins")

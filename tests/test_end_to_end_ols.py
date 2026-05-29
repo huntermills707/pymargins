@@ -8,7 +8,6 @@ import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import pytest
-import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
 jax.config.update("jax_enable_x64", True)
@@ -20,12 +19,20 @@ from pymargins import Margins
 def df_ols():
     rng = np.random.default_rng(42)
     n = 300
-    df = pd.DataFrame({
-        "age": rng.normal(50, 10, size=n),
-        "treatment": rng.binomial(1, 0.5, size=n),
-        "sex": rng.choice(["M", "F"], size=n),
-    })
-    df["y"] = 10.0 + 0.2 * df["age"] + 3.0 * df["treatment"] + 1.5 * (df["sex"] == "M") + rng.standard_normal(n) * 2.0
+    df = pd.DataFrame(
+        {
+            "age": rng.normal(50, 10, size=n),
+            "treatment": rng.binomial(1, 0.5, size=n),
+            "sex": rng.choice(["M", "F"], size=n),
+        }
+    )
+    df["y"] = (
+        10.0
+        + 0.2 * df["age"]
+        + 3.0 * df["treatment"]
+        + 1.5 * (df["sex"] == "M")
+        + rng.standard_normal(n) * 2.0
+    )
     return df
 
 
@@ -109,6 +116,7 @@ def test_hc3_vcov(fit_ols):
 # Additional coverage for testing gaps
 # ---------------------------------------------------------------------------
 
+
 def test_evaluate_ratio(fit_ols):
     """Nonlinear composition via evaluate()."""
     m = Margins.linear_scale(fit_ols, at="typical")
@@ -126,7 +134,9 @@ def test_evaluate_ratio(fit_ols):
 
 def test_simulation_method(fit_ols):
     """Explicit simulation method for OLS."""
-    m = Margins.linear_scale(fit_ols, at="typical", method="simulation", n_sim=2000, rng_seed=42)
+    m = Margins.linear_scale(
+        fit_ols, at="typical", method="simulation", n_sim=2000, rng_seed=42
+    )
 
     rd = m.contrasts(
         scenarios=[
@@ -142,7 +152,9 @@ def test_simulation_method(fit_ols):
 
 def test_bootstrap_method(fit_ols):
     """Bootstrap method for OLS."""
-    m = Margins.linear_scale(fit_ols, at="typical", method="bootstrap", n_boot=50, rng_seed=42)
+    m = Margins.linear_scale(
+        fit_ols, at="typical", method="bootstrap", n_boot=50, rng_seed=42
+    )
 
     rd = m.contrasts(
         scenarios=[
@@ -174,6 +186,7 @@ def test_dydx_on_categorical_raises(fit_ols):
 # Total marginal effects (R/Stata semantics)
 # ---------------------------------------------------------------------------
 
+
 def test_dydx_includes_interaction_chain_rule():
     """dydx(x1) for y ~ x1*x2 must be β_x1 + β_{x1:x2}*x2 (total derivative).
 
@@ -182,11 +195,19 @@ def test_dydx_includes_interaction_chain_rule():
     """
     rng = np.random.default_rng(7)
     n = 500
-    df = pd.DataFrame({
-        "x1": rng.normal(size=n),
-        "x2": rng.normal(size=n),
-    })
-    df["y"] = 1.0 + 2.0 * df["x1"] - 0.5 * df["x2"] + 1.5 * df["x1"] * df["x2"] + rng.standard_normal(n) * 0.1
+    df = pd.DataFrame(
+        {
+            "x1": rng.normal(size=n),
+            "x2": rng.normal(size=n),
+        }
+    )
+    df["y"] = (
+        1.0
+        + 2.0 * df["x1"]
+        - 0.5 * df["x2"]
+        + 1.5 * df["x1"] * df["x2"]
+        + rng.standard_normal(n) * 0.1
+    )
 
     fit = smf.ols("y ~ x1 * x2", data=df).fit()
     # Column ordering: ['Intercept', 'x1', 'x2', 'x1:x2']

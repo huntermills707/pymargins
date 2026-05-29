@@ -1,33 +1,37 @@
 """Tests for StatsmodelsNominalGEEAdapter."""
 
+import jax.numpy as jnp
 import numpy as np
 import pandas as pd
-import jax.numpy as jnp
 import pytest
 import statsmodels.api as sm
 
 from pymargins._adapters.statsmodels_nominal_gee import StatsmodelsNominalGEEAdapter
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def df_nominal():
     np.random.seed(42)
     n = 300
-    df = pd.DataFrame({
-        "x1": np.random.randn(n),
-        "x2": np.random.randn(n),
-        "group": np.repeat(range(30), 10),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": np.random.randn(n),
+            "x2": np.random.randn(n),
+            "group": np.repeat(range(30), 10),
+        }
+    )
     # Multinomial outcome with 3 categories
-    logits = np.column_stack([
-        np.zeros(n),
-        0.3 + 0.5 * df["x1"] - 0.4 * df["x2"],
-        -0.2 + 0.2 * df["x1"] + 0.3 * df["x2"],
-    ])
+    logits = np.column_stack(
+        [
+            np.zeros(n),
+            0.3 + 0.5 * df["x1"] - 0.4 * df["x2"],
+            -0.2 + 0.2 * df["x1"] + 0.3 * df["x2"],
+        ]
+    )
     probs = np.exp(logits - np.max(logits, axis=1, keepdims=True))
     probs /= probs.sum(axis=1, keepdims=True)
     df["y"] = np.array([np.random.choice([0, 1, 2], p=p) for p in probs])
@@ -37,6 +41,7 @@ def df_nominal():
 @pytest.fixture
 def nominal_fit_formula(df_nominal):
     from statsmodels.genmod.generalized_estimating_equations import NominalGEE
+
     return NominalGEE.from_formula(
         "y ~ x1 + x2", groups=df_nominal["group"], data=df_nominal
     ).fit()
@@ -45,25 +50,28 @@ def nominal_fit_formula(df_nominal):
 @pytest.fixture
 def nominal_fit_array(df_nominal):
     from statsmodels.genmod.generalized_estimating_equations import NominalGEE
+
     exog = sm.add_constant(df_nominal[["x1", "x2"]])
     return NominalGEE(
         df_nominal["y"].values, exog, groups=df_nominal["group"].values
     ).fit()
 
 
-
 # ---------------------------------------------------------------------------
 # Construction / auto-detect
 # ---------------------------------------------------------------------------
 
+
 def test_auto_detect_formula(nominal_fit_formula):
     from pymargins._adapters import auto_detect_adapter
+
     adapter = auto_detect_adapter(nominal_fit_formula)
     assert isinstance(adapter, StatsmodelsNominalGEEAdapter)
 
 
 def test_auto_detect_array_requires_training_data(nominal_fit_array):
     from pymargins._adapters import auto_detect_adapter
+
     with pytest.raises(ValueError, match="training_data"):
         auto_detect_adapter(nominal_fit_array)
 
@@ -71,6 +79,7 @@ def test_auto_detect_array_requires_training_data(nominal_fit_array):
 # ---------------------------------------------------------------------------
 # Coefficients
 # ---------------------------------------------------------------------------
+
 
 def test_coefficients_formula(nominal_fit_formula):
     adapter = StatsmodelsNominalGEEAdapter(nominal_fit_formula)
@@ -91,6 +100,7 @@ def test_coefficients_array(nominal_fit_array, df_nominal):
 # Training data
 # ---------------------------------------------------------------------------
 
+
 def test_training_data_formula(nominal_fit_formula, df_nominal):
     adapter = StatsmodelsNominalGEEAdapter(nominal_fit_formula)
     assert adapter.training_data is not None
@@ -107,10 +117,14 @@ def test_training_data_array(nominal_fit_array, df_nominal):
 # Covariance
 # ---------------------------------------------------------------------------
 
+
 def test_covariance_default(nominal_fit_formula):
     adapter = StatsmodelsNominalGEEAdapter(nominal_fit_formula)
     cov = adapter.covariance()
-    assert cov.shape == (len(nominal_fit_formula.params), len(nominal_fit_formula.params))
+    assert cov.shape == (
+        len(nominal_fit_formula.params),
+        len(nominal_fit_formula.params),
+    )
     # Only compare if JAX-converted values are finite (float32 may overflow)
     if np.isfinite(np.asarray(cov)).all():
         np.testing.assert_allclose(cov, nominal_fit_formula.cov_params())
@@ -147,6 +161,7 @@ def test_covariance_invalid(nominal_fit_formula):
 # Prediction
 # ---------------------------------------------------------------------------
 
+
 def test_predict_matches_fittedvalues_formula(nominal_fit_formula):
     adapter = StatsmodelsNominalGEEAdapter(nominal_fit_formula)
     beta = adapter.coefficients()
@@ -177,6 +192,7 @@ def test_predict_matches_fittedvalues_array(nominal_fit_array, df_nominal):
 # Design matrix
 # ---------------------------------------------------------------------------
 
+
 def test_design_matrix_from_df_formula(nominal_fit_formula, df_nominal):
     adapter = StatsmodelsNominalGEEAdapter(nominal_fit_formula)
     X = adapter.design_matrix_from_df(df_nominal)
@@ -195,6 +211,7 @@ def test_design_matrix_from_df_array(nominal_fit_array, df_nominal):
 # Variable metadata / column index
 # ---------------------------------------------------------------------------
 
+
 def test_variable_metadata(nominal_fit_formula):
     adapter = StatsmodelsNominalGEEAdapter(nominal_fit_formula)
     meta = adapter.variable_metadata()
@@ -211,6 +228,7 @@ def test_column_index_of_variable(nominal_fit_formula):
 # ---------------------------------------------------------------------------
 # Refit
 # ---------------------------------------------------------------------------
+
 
 def test_refit_formula(nominal_fit_formula, df_nominal):
     adapter = StatsmodelsNominalGEEAdapter(nominal_fit_formula)
@@ -229,14 +247,17 @@ def test_refit_array(nominal_fit_array, df_nominal):
 # Attach validation
 # ---------------------------------------------------------------------------
 
+
 def test_attach_validates_vcov(nominal_fit_formula):
     adapter = StatsmodelsNominalGEEAdapter(nominal_fit_formula)
 
     class FakeSession:
         vcov_spec = "robust"
+
     adapter.attach(FakeSession())
 
     class FakeSession2:
         vcov_spec = "invalid"
+
     with pytest.raises(ValueError):
         adapter.attach(FakeSession2())

@@ -1,15 +1,18 @@
 from __future__ import annotations
-from typing import Callable, Optional
+
 import warnings
+from collections.abc import Callable
+
 import jax.numpy as jnp
 import numpy as np
-from .._estimands import is_jax_differentiable
-from .._adapter import ModelAdapter, InferenceMethod
+
+from .._adapter import ModelAdapter
 from .._delta import delta_wald_test
+from .._estimands import is_jax_differentiable
+from ._bootstrap import _run_bootstrap
 from ._config import InferenceConfig
 from ._delta import _run_delta
 from ._simulation import _run_simulation
-from ._bootstrap import _run_bootstrap
 
 
 def run_inference(
@@ -17,8 +20,8 @@ def run_inference(
     adapter: ModelAdapter,
     config: InferenceConfig,
     *,
-    estimand_metadata: Optional[dict] = None,
-    h_factory: Optional[Callable[[ModelAdapter], Callable]] = None,
+    estimand_metadata: dict | None = None,
+    h_factory: Callable[[ModelAdapter], Callable] | None = None,
 ) -> dict:
     """Compute estimate, SE, CI, and diagnostics for an estimand.
 
@@ -64,18 +67,30 @@ def run_inference(
                 # Auto-route to simulation with a warning marker in the result
                 warnings.warn(
                     "Estimand is not JAX-differentiable; falling back to simulation.",
-                    UserWarning, stacklevel=3,
+                    UserWarning,
+                    stacklevel=3,
                 )
-                return _run_simulation(h, adapter, config, estimand_metadata,
-                                       fallback_reason="non_differentiable")
+                return _run_simulation(
+                    h,
+                    adapter,
+                    config,
+                    estimand_metadata,
+                    fallback_reason="non_differentiable",
+                )
             elif "bootstrap" in supported and h_factory is not None:
                 warnings.warn(
                     "Estimand is not JAX-differentiable; falling back to bootstrap.",
-                    UserWarning, stacklevel=3,
+                    UserWarning,
+                    stacklevel=3,
                 )
-                return _run_bootstrap(h, adapter, config, estimand_metadata,
-                                      fallback_reason="non_differentiable",
-                                      h_factory=h_factory)
+                return _run_bootstrap(
+                    h,
+                    adapter,
+                    config,
+                    estimand_metadata,
+                    fallback_reason="non_differentiable",
+                    h_factory=h_factory,
+                )
             else:
                 raise ValueError(
                     "Estimand is not JAX-differentiable, and no fallback "
@@ -87,7 +102,9 @@ def run_inference(
         return _run_simulation(h, adapter, config, estimand_metadata)
 
     elif method == "bootstrap":
-        return _run_bootstrap(h, adapter, config, estimand_metadata, h_factory=h_factory)
+        return _run_bootstrap(
+            h, adapter, config, estimand_metadata, h_factory=h_factory
+        )
 
     else:
         raise ValueError(f"Unknown method: {method!r}")
@@ -95,9 +112,9 @@ def run_inference(
 
 def run_test(
     estimate: np.ndarray,
-    grad: Optional[np.ndarray],
-    cov_params: Optional[jnp.ndarray],
-    draws: Optional[np.ndarray],
+    grad: np.ndarray | None,
+    cov_params: jnp.ndarray | None,
+    draws: np.ndarray | None,
     *,
     null_value: float = 0.0,
     alternative: str = "two-sided",
@@ -173,6 +190,4 @@ def run_test(
         statistic = estimate - null_value
         return statistic, np.asarray(p)
     else:
-        raise ValueError(
-            "Cannot run test: result has neither gradient nor draws."
-        )
+        raise ValueError("Cannot run test: result has neither gradient nor draws.")

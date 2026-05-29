@@ -1,29 +1,30 @@
-"""Tests for LifelinesCRCSplineAdapter.
-"""
+"""Tests for LifelinesCRCSplineAdapter."""
 
 import jax
-import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import pytest
+
 pytest.importorskip("lifelines")
 from lifelines import CRCSplineFitter
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins._adapters.lifelines_crc_spline import LifelinesCRCSplineAdapter
-from pymargins._adapter import auto_detect_adapter
 from pymargins import Margins
+from pymargins._adapter import auto_detect_adapter
+from pymargins._adapters.lifelines_crc_spline import LifelinesCRCSplineAdapter
 
 
 @pytest.fixture
 def df_survival():
     rng = np.random.default_rng(42)
     n = 200
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+        }
+    )
     hazard = np.exp(0.5 + 0.3 * df["x1"] - 0.2 * df["x2"])
     df["T"] = rng.exponential(1.0 / hazard)
     df["E"] = (rng.random(n) < 0.8).astype(int)
@@ -34,8 +35,10 @@ def df_survival():
 def crc_fit(df_survival):
     crc = CRCSplineFitter(n_baseline_knots=3)
     crc.fit(
-        df_survival, duration_col="T", event_col="E",
-        regressors={"beta_": "x1 + x2", "gamma0_": "1", "gamma1_": "1", "gamma2_": "1"}
+        df_survival,
+        duration_col="T",
+        event_col="E",
+        regressors={"beta_": "x1 + x2", "gamma0_": "1", "gamma1_": "1", "gamma2_": "1"},
     )
     return crc
 
@@ -81,8 +84,14 @@ def test_supported_inference_methods(crc_fit, df_survival):
 
 def test_bootstrap_end_to_end(crc_fit, df_survival):
     adapter = LifelinesCRCSplineAdapter(crc_fit, training_data=df_survival)
-    m = Margins(crc_fit, adapter=adapter, at="typical",
-                method="bootstrap", n_boot=50, rng_seed=42)
+    m = Margins(
+        crc_fit,
+        adapter=adapter,
+        at="typical",
+        method="bootstrap",
+        n_boot=50,
+        rng_seed=42,
+    )
     rd = m.predict()
     assert rd.method == "bootstrap"
     assert np.isfinite(float(rd.estimate))

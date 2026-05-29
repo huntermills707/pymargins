@@ -3,7 +3,6 @@
 import numpy as np
 import pandas as pd
 import pytest
-
 import statsmodels.api as sm
 
 from pymargins import Margins
@@ -31,6 +30,7 @@ def m(df):
 # ---------------------------------------------------------------------------
 # Core columns
 # ---------------------------------------------------------------------------
+
 
 def test_to_frame_has_core_columns(m):
     result = m.dydx("x1")
@@ -70,6 +70,7 @@ def test_to_frame_term_is_list_for_multi_dydx(m):
 # Scenario columns for predictions
 # ---------------------------------------------------------------------------
 
+
 def test_to_frame_prediction_has_scenario_columns(m):
     result = m.predict(atexog={"x1": [0, 1, 2]})
     df = result.to_frame()
@@ -87,6 +88,7 @@ def test_to_frame_prediction_single_atexog_has_scenario(m):
 # ---------------------------------------------------------------------------
 # Over columns
 # ---------------------------------------------------------------------------
+
 
 def test_to_frame_over_columns(m):
     result = m.dydx("x1", over="group")
@@ -109,17 +111,19 @@ def test_to_frame_over_with_prediction(m):
 # Diagnostics
 # ---------------------------------------------------------------------------
 
+
 def test_to_frame_fallback_columns(m):
     result = m.dydx("x1")
     df = result.to_frame()
     assert "fallback_triggered" in df.columns
     assert "kappa" in df.columns
-    assert df["fallback_triggered"].iloc[0] == False
+    assert not df["fallback_triggered"].iloc[0]
 
 
 # ---------------------------------------------------------------------------
 # Contrasts and evaluate (minimal metadata)
 # ---------------------------------------------------------------------------
+
 
 def test_to_frame_contrasts_has_scenarios(m):
     scenarios, weights = pairwise("x1", [0, 1])
@@ -150,6 +154,7 @@ def test_to_frame_evaluate_has_scenarios(m):
 # Row count matches
 # ---------------------------------------------------------------------------
 
+
 def test_to_frame_row_count_matches_grid(m):
     result = m.predict(atexog={"x1": [0, 1, 2], "x2": [10, 20]})
     df = result.to_frame()
@@ -167,6 +172,7 @@ def test_to_frame_row_count_matches_over(m):
 # ---------------------------------------------------------------------------
 # Type preservation
 # ---------------------------------------------------------------------------
+
 
 def test_to_frame_preserves_numeric_types(m):
     result = m.predict(atexog={"x1": [0.5, 1.5]})

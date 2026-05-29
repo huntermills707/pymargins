@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint & format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff
+        run: pip install ruff
+      - name: ruff check
+        run: ruff check .
+      - name: ruff format --check
+        run: ruff format --check .
+
+  test:
+    name: Test (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install package with all backends
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[test,statsmodels,linearmodels,lifelines,sklearn]"
+      - name: Run tests
+        run: pytest --cov=pymargins --cov-report=term-missing --cov-report=xml
+      - name: Upload coverage
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+
+  backend-isolation:
+    name: Isolated (${{ matrix.backend }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - backend: statsmodels
+            pattern: tests/test_adapter_statsmodels_*.py
+          - backend: lifelines
+            pattern: tests/test_adapter_lifelines_*.py
+          - backend: linearmodels
+            pattern: tests/test_adapter_linearmodels_*.py
+          - backend: sklearn
+            pattern: tests/test_adapter_sklearn_*.py
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install with only the ${{ matrix.backend }} backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[test,${{ matrix.backend }}]"
+      - name: Import cleanly without other backends
+        run: python -c "import pymargins; print(pymargins.__version__)"
+      - name: Run this backend's adapter tests
+        run: pytest ${{ matrix.pattern }}
+
+  docs:
+    name: Docs build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install docs dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[docs]"
+      - name: Build HTML
+        # Reuse the committed docs/.jupyter_cache (as RTD does) instead of
+        # re-executing every notebook. Notebooks legitimately emit warnings,
+        # so no -W; execution *errors* still fail (nb_execution_raise_on_error).
+        env:
+          PYMARGINS_DOCS_EXEC: cache
+        run: sphinx-build --keep-going -b html docs docs/_build/html

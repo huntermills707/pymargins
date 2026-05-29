@@ -14,14 +14,15 @@ different sessions cannot be composed without explicit scale conversion.
 """
 
 from __future__ import annotations
-from typing import Optional, Union, Literal, Any, Callable
+
 import dataclasses
+import pickle
+import warnings
+import weakref
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-import hashlib
-import pickle
-import weakref
-import warnings
+from typing import Any, Literal
 
 import jax
 import jax.numpy as jnp
@@ -29,14 +30,14 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from ._test import TestResult
-from .._inference import run_test
 from .._delta import delta_confint_from_se, joint_wald_test
-
+from .._inference import run_test
+from ._test import TestResult
 
 # ---------------------------------------------------------------------------
 # Hypothesis test result
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class MarginsResult:
@@ -141,6 +142,7 @@ class MarginsResult:
     n_boot_failed : int, optional
         Number of bootstrap replicates that failed to refit.
     """
+
     estimate: np.ndarray
     std_error: np.ndarray
     conf_int_lower: np.ndarray
@@ -148,23 +150,23 @@ class MarginsResult:
     method: str
     level: float
     n_obs: int = 0
-    kappa: Optional[np.ndarray] = None
-    delta_sim_disagreement: Optional[float] = None
+    kappa: np.ndarray | None = None
+    delta_sim_disagreement: float | None = None
     fallback_triggered: bool = False
-    fallback_reason: Optional[str] = None
+    fallback_reason: str | None = None
     estimand_metadata: dict = field(default_factory=dict)
-    gradient: Optional[np.ndarray] = None
-    draws: Optional[np.ndarray] = None
-    draws_inf: Optional[np.ndarray] = None
-    cov_params: Optional[np.ndarray] = None
-    phi: Optional[Callable] = None
-    phi_inv: Optional[Callable] = None
-    session: Optional[Any] = None
-    ci_method: Optional[str] = None
-    bootstrap_extras: Optional[dict] = None
-    resample_bank_id: Optional[str] = None
-    n_boot_effective: Optional[int] = None
-    n_boot_failed: Optional[int] = None
+    gradient: np.ndarray | None = None
+    draws: np.ndarray | None = None
+    draws_inf: np.ndarray | None = None
+    cov_params: np.ndarray | None = None
+    phi: Callable | None = None
+    phi_inv: Callable | None = None
+    session: Any | None = None
+    ci_method: str | None = None
+    bootstrap_extras: dict | None = None
+    resample_bank_id: str | None = None
+    n_boot_effective: int | None = None
+    n_boot_failed: int | None = None
 
     # -----------------------------------------------------------------------
     # Reporting
@@ -238,7 +240,7 @@ class MarginsResult:
         star_levels: tuple[float, float, float] = (0.01, 0.05, 0.10),
         float_fmt: str = ".4f",
         pvalue_fmt: str = ".3f",
-        max_rows: Optional[int] = None,
+        max_rows: int | None = None,
     ) -> str:
         """Human-readable summary including diagnostics.
 
@@ -281,7 +283,7 @@ class MarginsResult:
         if has_stat:
             stat_header = rows[0].get("stat_label", "z") if rows else "z"
             data_keys.extend([("statistic", stat_header), ("pvalue", "P>|z|")])
-        data_keys.append(("ci", f"[{self.level*100:.0f}% Conf. Int.]"))
+        data_keys.append(("ci", f"[{self.level * 100:.0f}% Conf. Int.]"))
 
         def _fmt(key, row):
             if key == "ci":
@@ -303,7 +305,9 @@ class MarginsResult:
             fmt_rows.append([r["label"]] + [_fmt(k, r) for k, _ in data_keys])
 
         all_display = [[""] + [h for _, h in data_keys]] + fmt_rows
-        widths = [max(len(r[i]) for r in all_display) for i in range(len(data_keys) + 1)]
+        widths = [
+            max(len(r[i]) for r in all_display) for i in range(len(data_keys) + 1)
+        ]
 
         def _line(cells, aligns):
             parts = []
@@ -357,7 +361,9 @@ class MarginsResult:
                 )
                 footers.append(f"κ: {kappa_str}")
         if self.delta_sim_disagreement is not None:
-            footers.append(f"Delta-vs-sim disagreement: {self.delta_sim_disagreement:.3%}")
+            footers.append(
+                f"Delta-vs-sim disagreement: {self.delta_sim_disagreement:.3%}"
+            )
         if footers:
             out_lines.extend([""] + footers)
 
@@ -457,6 +463,7 @@ class MarginsResult:
                     vals = []
                     for o in over:
                         import re
+
                         m = re.search(rf"{o}=([^,]+)", lab)
                         if m:
                             vals.append(m.group(1).strip())
@@ -484,7 +491,9 @@ class MarginsResult:
                 for key in all_keys:
                     col_values = [s.get(key, np.nan) for s in scenarios]
                     data[key] = col_values
-            elif outcome_shape is not None and len(scenarios) == outcome_shape["n_atoms"]:
+            elif (
+                outcome_shape is not None and len(scenarios) == outcome_shape["n_atoms"]
+            ):
                 # Multi-scenario × multi-outcome: tile each scenario once per
                 # outcome to match the atom-major / outcome-minor ravel order.
                 n_outcomes = outcome_shape["n_outcomes"]
@@ -512,8 +521,8 @@ class MarginsResult:
         star_levels: tuple[float, float, float] = (0.01, 0.05, 0.10),
         float_fmt: str = ".4f",
         pvalue_fmt: str = ".3f",
-        caption: Optional[str] = None,
-        label: Optional[str] = None,
+        caption: str | None = None,
+        label: str | None = None,
     ) -> str:
         """LaTeX tabular representation of the result.
 
@@ -543,7 +552,7 @@ class MarginsResult:
         if has_stat:
             stat_header = rows[0].get("stat_label", "z") if rows else "z"
             data_keys.extend([("statistic", stat_header), ("pvalue", "P>|z|")])
-        data_keys.append(("ci", f"[{self.level*100:.0f}\\% Conf. Int.]"))
+        data_keys.append(("ci", f"[{self.level * 100:.0f}\\% Conf. Int.]"))
 
         def _fmt(key, row):
             if key == "ci":
@@ -588,7 +597,7 @@ class MarginsResult:
         star_levels: tuple[float, float, float] = (0.01, 0.05, 0.10),
         float_fmt: str = ".4f",
         pvalue_fmt: str = ".3f",
-        caption: Optional[str] = None,
+        caption: str | None = None,
     ) -> str:
         """HTML table representation of the result.
 
@@ -616,7 +625,7 @@ class MarginsResult:
         if has_stat:
             stat_header = rows[0].get("stat_label", "z") if rows else "z"
             data_keys.extend([("statistic", stat_header), ("pvalue", "P>|z|")])
-        data_keys.append(("ci", f"[{self.level*100:.0f}% Conf. Int.]"))
+        data_keys.append(("ci", f"[{self.level * 100:.0f}% Conf. Int.]"))
 
         def _fmt(key, row):
             if key == "ci":
@@ -636,7 +645,11 @@ class MarginsResult:
         if caption:
             lines.append(f"<caption>{caption}</caption>")
         lines.append("<thead>")
-        lines.append("<tr>" + "".join(f"<th>{h}</th>" for h in ([""] + [h for _, h in data_keys])) + "</tr>")
+        lines.append(
+            "<tr>"
+            + "".join(f"<th>{h}</th>" for h in ([""] + [h for _, h in data_keys]))
+            + "</tr>"
+        )
         lines.append("</thead>")
         lines.append("<tbody>")
         for r in rows:
@@ -648,7 +661,7 @@ class MarginsResult:
 
     def conf_int(
         self,
-        level: Optional[float] = None,
+        level: float | None = None,
         simultaneous: bool = False,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Recompute CI at a different confidence level.
@@ -685,9 +698,7 @@ class MarginsResult:
                 return self.conf_int_lower, self.conf_int_upper
 
         est_inf = (
-            self.phi_inv(self.estimate)
-            if self.phi_inv is not None
-            else self.estimate
+            self.phi_inv(self.estimate) if self.phi_inv is not None else self.estimate
         )
 
         if self.gradient is not None and self.cov_params is not None:
@@ -695,6 +706,7 @@ class MarginsResult:
             if simultaneous:
                 # sup-t band from correlation structure of J Σ̂ Jᵀ.
                 from .._delta import joint_covariance_of_results
+
                 grad = jnp.asarray(self.gradient)
                 if grad.ndim == 1:
                     grad = grad[None, :]
@@ -738,7 +750,10 @@ class MarginsResult:
                 upper_inf = est_inf + crit * se_vec
             else:
                 lower_inf, upper_inf = delta_confint_from_se(
-                    est_inf, self.std_error, level=level, phi=None,
+                    est_inf,
+                    self.std_error,
+                    level=level,
+                    phi=None,
                 )
 
             if self.phi is not None:
@@ -779,10 +794,16 @@ class MarginsResult:
             alpha = (1.0 - level) / 2.0
 
             if self.ci_method == "basic":
-                lower_inf = 2 * np.asarray(est_inf) - np.quantile(self.draws_inf, 1.0 - alpha, axis=0)
-                upper_inf = 2 * np.asarray(est_inf) - np.quantile(self.draws_inf, alpha, axis=0)
+                lower_inf = 2 * np.asarray(est_inf) - np.quantile(
+                    self.draws_inf, 1.0 - alpha, axis=0
+                )
+                upper_inf = 2 * np.asarray(est_inf) - np.quantile(
+                    self.draws_inf, alpha, axis=0
+                )
                 if self.phi is not None:
-                    return np.asarray(self.phi(lower_inf)), np.asarray(self.phi(upper_inf))
+                    return np.asarray(self.phi(lower_inf)), np.asarray(
+                        self.phi(upper_inf)
+                    )
                 return lower_inf, upper_inf
 
             elif self.ci_method == "bca" and self.bootstrap_extras is not None:
@@ -790,8 +811,14 @@ class MarginsResult:
                 a = self.bootstrap_extras.get("a")
                 if z0 is not None:
                     from .._inference import _bca_confint
+
                     lower, upper = _bca_confint(
-                        self.draws_inf, est_inf, level, z0, a, self.phi,
+                        self.draws_inf,
+                        est_inf,
+                        level,
+                        z0,
+                        a,
+                        self.phi,
                     )
                     return np.asarray(lower), np.asarray(upper)
 
@@ -804,7 +831,9 @@ class MarginsResult:
                     lower_inf = np.asarray(est_inf) - t_upper * se_hat
                     upper_inf = np.asarray(est_inf) - t_lower * se_hat
                     if self.phi is not None:
-                        return np.asarray(self.phi(lower_inf)), np.asarray(self.phi(upper_inf))
+                        return np.asarray(self.phi(lower_inf)), np.asarray(
+                            self.phi(upper_inf)
+                        )
                     return lower_inf, upper_inf
 
             # Default to percentile
@@ -907,10 +936,17 @@ class MarginsResult:
             )
 
         # Get inference-scale estimate and draws
-        est_inf = self.phi_inv(self.estimate) if self.phi_inv is not None else self.estimate
+        est_inf = (
+            self.phi_inv(self.estimate) if self.phi_inv is not None else self.estimate
+        )
         draws_inf = (
-            self.draws_inf if self.draws_inf is not None else
-            (self.phi_inv(self.draws) if self.phi_inv is not None and self.draws is not None else self.draws)
+            self.draws_inf
+            if self.draws_inf is not None
+            else (
+                self.phi_inv(self.draws)
+                if self.phi_inv is not None and self.draws is not None
+                else self.draws
+            )
         )
 
         if self.gradient is not None and self.cov_params is None:
@@ -942,7 +978,7 @@ class MarginsResult:
 
     def joint_test(
         self,
-        value: Optional[np.ndarray] = None,
+        value: np.ndarray | None = None,
         kind: str = "wald",
         null_scale: Literal["reporting", "inference"] = "reporting",
     ) -> TestResult:
@@ -985,9 +1021,7 @@ class MarginsResult:
         result : TestResult
         """
         if kind not in ("wald", "empirical"):
-            raise ValueError(
-                f"kind must be 'wald' or 'empirical', got {kind!r}"
-            )
+            raise ValueError(f"kind must be 'wald' or 'empirical', got {kind!r}")
 
         if value is None:
             # Default null = zero on the inference scale (the universal
@@ -1014,7 +1048,9 @@ class MarginsResult:
         if not np.all(np.isfinite(value_arr)):
             raise ValueError("value must be finite (no NaN or Inf)")
 
-        est_inf = self.phi_inv(self.estimate) if self.phi_inv is not None else self.estimate
+        est_inf = (
+            self.phi_inv(self.estimate) if self.phi_inv is not None else self.estimate
+        )
 
         if self.gradient is not None and self.cov_params is not None:
             # Delta-method joint Wald test
@@ -1084,7 +1120,7 @@ class MarginsResult:
     # Composability across calls (same session only)
     # -----------------------------------------------------------------------
 
-    def _check_compatible(self, other: "MarginsResult") -> None:
+    def _check_compatible(self, other: MarginsResult) -> None:
         """Verify two results came from the same session and are composable."""
         self_sess = self._session_obj()
         other_sess = other._session_obj()
@@ -1099,7 +1135,7 @@ class MarginsResult:
                 "covariances; composition is not well-defined."
             )
 
-    def __sub__(self, other: "MarginsResult") -> "MarginsResult":
+    def __sub__(self, other: MarginsResult) -> MarginsResult:
         """Difference of two estimands with proper joint inference.
 
         Computes the delta-method variance of the difference using the joint
@@ -1108,21 +1144,25 @@ class MarginsResult:
         """
         self._check_compatible(other)
         return _combine_results(
-            self, other, lambda a, b: a - b,
+            self,
+            other,
+            lambda a, b: a - b,
             grad_combine=lambda g1, g2: g1 - g2,
             label_combine=lambda l1, l2: f"({l1}) - ({l2})",
         )
 
-    def __add__(self, other: "MarginsResult") -> "MarginsResult":
+    def __add__(self, other: MarginsResult) -> MarginsResult:
         """Add two estimands with proper joint inference via the delta method."""
         self._check_compatible(other)
         return _combine_results(
-            self, other, lambda a, b: a + b,
+            self,
+            other,
+            lambda a, b: a + b,
             grad_combine=lambda g1, g2: g1 + g2,
             label_combine=lambda l1, l2: f"({l1}) + ({l2})",
         )
 
-    def __mul__(self, other) -> "MarginsResult":
+    def __mul__(self, other) -> MarginsResult:
         """Scale the estimand by a scalar, with inference-aware transforms."""
         if isinstance(other, MarginsResult):
             raise ValueError(
@@ -1159,11 +1199,14 @@ class MarginsResult:
             delta_sim_disagreement=self.delta_sim_disagreement,
             fallback_triggered=self.fallback_triggered,
             fallback_reason=self.fallback_reason,
-            estimand_metadata={**self.estimand_metadata,
-                               "labels": [f"({l})*{scalar}"
-                                          for l in self.estimand_metadata.get("labels", [])]},
-            gradient=(self.gradient * scalar
-                      if self.gradient is not None else None),
+            estimand_metadata={
+                **self.estimand_metadata,
+                "labels": [
+                    f"({lbl})*{scalar}"
+                    for lbl in self.estimand_metadata.get("labels", [])
+                ],
+            },
+            gradient=(self.gradient * scalar if self.gradient is not None else None),
             draws=new_draws,
             draws_inf=(self.draws_inf * scalar if self.draws_inf is not None else None),
             cov_params=self.cov_params,
@@ -1177,7 +1220,7 @@ class MarginsResult:
             n_boot_failed=self.n_boot_failed,
         )
 
-    def __truediv__(self, other) -> "MarginsResult":
+    def __truediv__(self, other) -> MarginsResult:
         """Scale the estimand by the reciprocal of a scalar."""
         if isinstance(other, MarginsResult):
             raise ValueError(
@@ -1191,7 +1234,7 @@ class MarginsResult:
     # Cosmetic transformations (don't affect inference)
     # -----------------------------------------------------------------------
 
-    def scaled(self, by: float, units: Optional[str] = None) -> "MarginsResult":
+    def scaled(self, by: float, units: str | None = None) -> MarginsResult:
         """Cosmetic rescaling of the estimate and CI for reporting.
 
         Multiplies the estimate, SE, and CI bounds by `by`. Useful for unit
@@ -1216,7 +1259,7 @@ class MarginsResult:
             new.estimand_metadata["units"] = units
         return new
 
-    def outcome(self, index: Union[int, str]) -> "MarginsResult":
+    def outcome(self, index: int | str) -> MarginsResult:
         """Slice a multi-outcome result to a single outcome.
 
         Parameters
@@ -1273,10 +1316,11 @@ class MarginsResult:
                     return a[mask]
                 return arr
 
-            new_labels = [
-                labels[i] for i in range(len(labels))
-                if i % n_outcomes == outcome_idx
-            ] if labels else None
+            new_labels = (
+                [labels[i] for i in range(len(labels)) if i % n_outcomes == outcome_idx]
+                if labels
+                else None
+            )
             new_meta = dict(self.estimand_metadata)
             new_meta["labels"] = new_labels
             new_meta["outcome_sliced"] = True
@@ -1413,7 +1457,7 @@ class MarginsResult:
             n_boot_failed=self.n_boot_failed,
         )
 
-    def materialize(self) -> "MarginsResult":
+    def materialize(self) -> MarginsResult:
         """Drop underlying machinery (gradient, draws, session) to reduce
         memory.
 
@@ -1458,8 +1502,8 @@ class MarginsResult:
     def contrast(
         self,
         C: np.ndarray,
-        labels: Optional[list[str]] = None,
-    ) -> "MarginsResult":
+        labels: list[str] | None = None,
+    ) -> MarginsResult:
         """Apply a contrast matrix to a vector result.
 
         Parameters
@@ -1482,9 +1526,7 @@ class MarginsResult:
             )
         C = jnp.asarray(C)
         est_inf = (
-            self.phi_inv(self.estimate)
-            if self.phi_inv is not None
-            else self.estimate
+            self.phi_inv(self.estimate) if self.phi_inv is not None else self.estimate
         )
         new_est_inf = C @ jnp.asarray(est_inf)
         new_grad = C @ jnp.asarray(self.gradient)  # (m, p)
@@ -1516,8 +1558,8 @@ class MarginsResult:
 
     def pairwise_contrasts(
         self,
-        labels: Optional[list[str]] = None,
-    ) -> "MarginsResult":
+        labels: list[str] | None = None,
+    ) -> MarginsResult:
         """All pairwise differences between components of a vector result.
 
         Parameters
@@ -1533,9 +1575,7 @@ class MarginsResult:
             Labels are formatted as ``"j - i"``.
         """
         if self.gradient is None:
-            raise ValueError(
-                "pairwise_contrasts() requires a delta-method result."
-            )
+            raise ValueError("pairwise_contrasts() requires a delta-method result.")
         est = np.atleast_1d(self.estimate)
         k = int(est.size)
         if k < 2:
@@ -1545,6 +1585,7 @@ class MarginsResult:
         if labels is None or len(labels) != k:
             labels = [f"[{i}]" for i in range(k)]
         from ..scenarios import diff_matrix
+
         C = diff_matrix(k, kind="pairwise")
         new_labels = []
         row = 0
@@ -1604,13 +1645,13 @@ class MarginsResult:
             sess = self._session_obj()
             adapter = getattr(sess, "adapter", None) if sess is not None else None
             if adapter is not None and hasattr(adapter, "score_obs"):
-                S = np.asarray(adapter.score_obs())          # (n, p)
-                cov = np.asarray(self.cov_params)            # (p, p)
-                g = np.asarray(self.gradient)                # (p,) or (k, p)
-                beta_infl = S @ cov                          # (n, p) ≈ β̂ − β̂_(−i)
+                S = np.asarray(adapter.score_obs())  # (n, p)
+                cov = np.asarray(self.cov_params)  # (p, p)
+                g = np.asarray(self.gradient)  # (p,) or (k, p)
+                beta_infl = S @ cov  # (n, p) ≈ β̂ − β̂_(−i)
                 if g.ndim == 1:
-                    return beta_infl @ g                     # (n,)
-                return beta_infl @ g.T                       # (n, k)
+                    return beta_infl @ g  # (n,)
+                return beta_infl @ g.T  # (n, k)
         raise NotImplementedError(
             "Influence requires either a BCa bootstrap result or a "
             "delta-method result whose adapter exposes score_obs(). The "
@@ -1622,48 +1663,64 @@ class MarginsResult:
     # Disk persistence helpers
     # -----------------------------------------------------------------------
 
-    def to_disk(self, path: Union[str, Path], *, format: str = "pickle") -> None:
+    def to_disk(self, path: str | Path, *, format: str = "pickle") -> None:
         """Persist a materialized result to disk. Auto-materializes."""
         if format != "pickle":
-            raise ValueError(f"Unsupported format: {format!r}. Only 'pickle' is supported.")
-        obj = self.materialize() if (
-            self.gradient is not None or self.draws is not None or self.session is not None
-        ) else self
+            raise ValueError(
+                f"Unsupported format: {format!r}. Only 'pickle' is supported."
+            )
+        obj = (
+            self.materialize()
+            if (
+                self.gradient is not None
+                or self.draws is not None
+                or self.session is not None
+            )
+            else self
+        )
         from .. import __version__
+
         phi_name = _phi_to_name(obj.phi)
         phi_inv_name = _phi_to_name(obj.phi_inv)
         if phi_name is None and obj.phi is not None:
             warnings.warn(
                 "MarginsResult.phi is a custom function and cannot be serialized; "
                 "it will be set to None on load.",
-                UserWarning, stacklevel=2,
+                UserWarning,
+                stacklevel=2,
             )
         if phi_inv_name is None and obj.phi_inv is not None:
             warnings.warn(
                 "MarginsResult.phi_inv is a custom function and cannot be serialized; "
                 "it will be set to None on load.",
-                UserWarning, stacklevel=2,
+                UserWarning,
+                stacklevel=2,
             )
         obj = dataclasses.replace(obj, session=None, phi=None, phi_inv=None)
         with open(path, "wb") as f:
-            pickle.dump({
-                "version": __version__,
-                "result": obj,
-                "phi_name": phi_name,
-                "phi_inv_name": phi_inv_name,
-            }, f)
+            pickle.dump(
+                {
+                    "version": __version__,
+                    "result": obj,
+                    "phi_name": phi_name,
+                    "phi_inv_name": phi_inv_name,
+                },
+                f,
+            )
 
     @classmethod
-    def from_disk(cls, path: Union[str, Path]) -> "MarginsResult":
+    def from_disk(cls, path: str | Path) -> MarginsResult:
         """Load a MarginsResult from disk."""
         with open(path, "rb") as f:
             blob = pickle.load(f)
         from .. import __version__
+
         if blob.get("version") != __version__:
             warnings.warn(
                 f"Result was saved with pymargins {blob.get('version')}; "
                 f"current version is {__version__}. Schema may differ.",
                 UserWarning,
+                stacklevel=2,
             )
         result = blob["result"]
         phi = _name_to_phi(blob.get("phi_name"))
@@ -1691,6 +1748,7 @@ def _phi_to_name(phi):
     # Try to match by identity against known JAX functions
     try:
         import jax.numpy as jnp
+
         if phi is jnp.exp:
             return "jax.numpy.exp"
         if phi is jnp.log:
@@ -1703,6 +1761,7 @@ def _phi_to_name(phi):
         pass
     try:
         from jax.scipy.special import expit
+
         if phi is expit:
             return "jax.scipy.special.expit"
     except Exception:
@@ -1717,7 +1776,9 @@ def _name_to_phi(name):
         return None
     module, attr = _KNOWN_PHI_MAP.get(name, (None, None))
     if module is None:
-        warnings.warn(f"Unknown phi name {name!r}; returning None.", UserWarning)
+        warnings.warn(
+            f"Unknown phi name {name!r}; returning None.", UserWarning, stacklevel=2
+        )
         return None
     try:
         mod = __import__(module, fromlist=[attr])
@@ -1726,6 +1787,7 @@ def _name_to_phi(name):
         warnings.warn(
             f"Could not reconstruct phi {name!r}: {exc}. Returning None.",
             UserWarning,
+            stacklevel=2,
         )
         return None
 
@@ -1733,6 +1795,7 @@ def _name_to_phi(name):
 # ---------------------------------------------------------------------------
 # Internal: result combination helper
 # ---------------------------------------------------------------------------
+
 
 def _join_fallback_reasons(a_reason, b_reason):
     """Combine fallback reasons from two results."""
@@ -1849,7 +1912,7 @@ def _combine_results(
         else:
             # g has shape (n_components, n_params)
             # var[i] = g[i] @ cov @ g[i]
-            var = jnp.einsum('ij,jk,ik->i', g, cov, g)
+            var = jnp.einsum("ij,jk,ik->i", g, cov, g)
             se = np.asarray(jnp.sqrt(var))
 
         z = stats.norm.ppf(0.5 + a.level / 2.0)
@@ -1865,10 +1928,16 @@ def _combine_results(
             lower_report = lo_inf
             upper_report = hi_inf
 
-        a_label = (a.estimand_metadata.get("labels", [""])[0]
-                   if a.estimand_metadata.get("labels") else "A")
-        b_label = (b.estimand_metadata.get("labels", [""])[0]
-                   if b.estimand_metadata.get("labels") else "B")
+        a_label = (
+            a.estimand_metadata.get("labels", [""])[0]
+            if a.estimand_metadata.get("labels")
+            else "A"
+        )
+        b_label = (
+            b.estimand_metadata.get("labels", [""])[0]
+            if b.estimand_metadata.get("labels")
+            else "B"
+        )
 
         # G4: conservative κ propagation
         kappa = _conservative_kappa(a.kappa, b.kappa)
@@ -1884,7 +1953,9 @@ def _combine_results(
             kappa=kappa,
             delta_sim_disagreement=None,
             fallback_triggered=a.fallback_triggered or b.fallback_triggered,
-            fallback_reason=_join_fallback_reasons(a.fallback_reason, b.fallback_reason),
+            fallback_reason=_join_fallback_reasons(
+                a.fallback_reason, b.fallback_reason
+            ),
             estimand_metadata={"labels": [label_combine(a_label, b_label)]},
             gradient=new_grad,
             draws=None,
@@ -1943,10 +2014,16 @@ def _combine_results(
             upper_report = hi_inf
             combined_draws = combined_draws_inf
 
-        a_label = (a.estimand_metadata.get("labels", [""])[0]
-                   if a.estimand_metadata.get("labels") else "A")
-        b_label = (b.estimand_metadata.get("labels", [""])[0]
-                   if b.estimand_metadata.get("labels") else "B")
+        a_label = (
+            a.estimand_metadata.get("labels", [""])[0]
+            if a.estimand_metadata.get("labels")
+            else "A"
+        )
+        b_label = (
+            b.estimand_metadata.get("labels", [""])[0]
+            if b.estimand_metadata.get("labels")
+            else "B"
+        )
 
         kappa = _conservative_kappa(a.kappa, b.kappa)
 
@@ -1961,7 +2038,9 @@ def _combine_results(
             kappa=kappa,
             delta_sim_disagreement=None,
             fallback_triggered=a.fallback_triggered or b.fallback_triggered,
-            fallback_reason=_join_fallback_reasons(a.fallback_reason, b.fallback_reason),
+            fallback_reason=_join_fallback_reasons(
+                a.fallback_reason, b.fallback_reason
+            ),
             estimand_metadata={"labels": [label_combine(a_label, b_label)]},
             gradient=None,
             draws=combined_draws,
@@ -1988,10 +2067,11 @@ def _combine_results(
 # Nonlinear multi-result composition (G3)
 # ---------------------------------------------------------------------------
 
+
 def compose_results(
     results: list[MarginsResult],
     fn: Callable,
-    label: Optional[str] = None,
+    label: str | None = None,
 ) -> MarginsResult:
     """Compose multiple results nonlinearly via an explicit function.
 
@@ -2034,9 +2114,7 @@ def compose_results(
     # Validate same session
     sessions = [r._session_obj() for r in results]
     if any(s is None for s in sessions):
-        raise ValueError(
-            "All results must carry a session reference for composition."
-        )
+        raise ValueError("All results must carry a session reference for composition.")
     first_sess = sessions[0]
     if not all(s is first_sess for s in sessions[1:]):
         raise ValueError(
@@ -2060,10 +2138,12 @@ def compose_results(
     n_obs = max(r.n_obs for r in results)
 
     # Inference-scale estimates
-    theta_inf = jnp.stack([
-        jnp.asarray(phi_inv(r.estimate) if phi_inv is not None else r.estimate)
-        for r in results
-    ])
+    theta_inf = jnp.stack(
+        [
+            jnp.asarray(phi_inv(r.estimate) if phi_inv is not None else r.estimate)
+            for r in results
+        ]
+    )
 
     # Evaluate fn at the point estimate
     composed_inf = jnp.asarray(fn(theta_inf))
@@ -2117,7 +2197,7 @@ def compose_results(
                 raise NotImplementedError(
                     f"Expected J.ndim==2 for vector composition, got {J.ndim}"
                 )
-            combined_grad = jnp.einsum('ij,ijk->jk', J, stacked)  # (k, p)
+            combined_grad = jnp.einsum("ij,ijk->jk", J, stacked)  # (k, p)
         else:
             raise NotImplementedError(
                 "Mixed scalar/vector gradients not supported in compose_results."
@@ -2128,7 +2208,11 @@ def compose_results(
         # not a length-1 vector.
         if combined_grad.shape[0] == 1 and composed_inf.ndim == 0:
             combined_grad = combined_grad[0]
-            composed_inf = composed_inf.item() if hasattr(composed_inf, 'item') else float(composed_inf)
+            composed_inf = (
+                composed_inf.item()
+                if hasattr(composed_inf, "item")
+                else float(composed_inf)
+            )
 
         # SE from delta method
         cov = jnp.asarray(cov_params)
@@ -2136,7 +2220,7 @@ def compose_results(
             var = float(jnp.dot(combined_grad, cov @ combined_grad))
             se = float(jnp.sqrt(var))
         else:
-            var = jnp.einsum('ij,jk,ik->i', combined_grad, cov, combined_grad)
+            var = jnp.einsum("ij,jk,ik->i", combined_grad, cov, combined_grad)
             se = np.asarray(jnp.sqrt(var))
 
         z = stats.norm.ppf(0.5 + level / 2.0)
@@ -2154,8 +2238,8 @@ def compose_results(
 
         # Reduce κ over all results
         from functools import reduce
-        kappa = reduce(_conservative_kappa,
-                       [r.kappa for r in results])
+
+        kappa = reduce(_conservative_kappa, [r.kappa for r in results])
 
         return MarginsResult(
             estimate=np.asarray(estimate_report),
@@ -2170,7 +2254,8 @@ def compose_results(
             fallback_triggered=any(r.fallback_triggered for r in results),
             fallback_reason="; ".join(
                 r.fallback_reason for r in results if r.fallback_reason
-            ) or None,
+            )
+            or None,
             estimand_metadata={"labels": [label or "composed"]},
             gradient=combined_grad,
             draws=None,
@@ -2209,7 +2294,8 @@ def compose_results(
                 f"generally valid on a derived quantity without recomputing "
                 f"acceleration/studentization on the composition.  Use "
                 f"evaluate() if you need those CI methods.",
-                UserWarning, stacklevel=2,
+                UserWarning,
+                stacklevel=2,
             )
 
         draws_list = [np.asarray(r.draws_inf) for r in results]
@@ -2219,7 +2305,6 @@ def compose_results(
                 draws_list[i] = d[:, None]
 
         n_draws = draws_list[0].shape[0]
-        n_results = len(results)
 
         # Stack along axis 1: (n_draws, n_results, n_components_per_result)
         # For scalar results, each is (n_draws, 1)
@@ -2265,8 +2350,8 @@ def compose_results(
             composed_draws = composed_draws_inf
 
         from functools import reduce
-        kappa = reduce(_conservative_kappa,
-                       [r.kappa for r in results])
+
+        kappa = reduce(_conservative_kappa, [r.kappa for r in results])
 
         return MarginsResult(
             estimate=np.asarray(estimate_report),
@@ -2281,7 +2366,8 @@ def compose_results(
             fallback_triggered=any(r.fallback_triggered for r in results),
             fallback_reason="; ".join(
                 r.fallback_reason for r in results if r.fallback_reason
-            ) or None,
+            )
+            or None,
             estimand_metadata={"labels": [label or "composed"]},
             gradient=None,
             draws=np.asarray(composed_draws),

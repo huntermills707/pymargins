@@ -4,15 +4,15 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from pymargins._adapter import ModelAdapter, VariableInfo, WrappedFDAdapter
 from pymargins._adapters._common import (
-    column_index_of_variable,
-    build_variable_metadata,
     _infer_variable_type,
+    build_variable_metadata,
+    column_index_of_variable,
     design_matrix_from_df,
-    validate_vcov_spec,
     extract_training_data,
+    validate_vcov_spec,
 )
-from pymargins._adapter import VariableInfo, ModelAdapter, WrappedFDAdapter
 
 
 def test_column_index_exact_match():
@@ -94,11 +94,13 @@ def test_infer_variable_type_integer_is_continuous():
 
 
 def test_build_variable_metadata():
-    df = pd.DataFrame({
-        "x": [1.0, 2.0, 3.0],
-        "g": ["a", "b", "a"],
-        "b": [0, 1, 0],
-    })
+    df = pd.DataFrame(
+        {
+            "x": [1.0, 2.0, 3.0],
+            "g": ["a", "b", "a"],
+            "b": [0, 1, 0],
+        }
+    )
     meta = build_variable_metadata(df)
     assert meta["x"].var_type == "continuous"
     assert meta["g"].var_type == "categorical"
@@ -108,11 +110,14 @@ def test_build_variable_metadata():
 def test_design_matrix_from_df_auto_injects_intercept():
     """Array-fit fallback should auto-inject const/Intercept if missing."""
     import statsmodels.api as sm
-    df = pd.DataFrame({
-        "x1": [1.0, 2.0, 3.0],
-        "x2": [0.5, 1.5, 2.5],
-        "y": [1.0, 2.0, 3.0],
-    })
+
+    df = pd.DataFrame(
+        {
+            "x1": [1.0, 2.0, 3.0],
+            "x2": [0.5, 1.5, 2.5],
+            "y": [1.0, 2.0, 3.0],
+        }
+    )
     X = sm.add_constant(df[["x1", "x2"]])
     y = df["y"].values
     fit = sm.OLS(y, X).fit()
@@ -127,8 +132,10 @@ def test_design_matrix_from_df_auto_injects_intercept():
 def test_auto_detect_adapter_failure():
     """auto_detect_adapter should raise TypeError for unsupported models."""
     from pymargins._adapter import auto_detect_adapter
+
     class UnsupportedModel:
         pass
+
     with pytest.raises(TypeError) as exc_info:
         auto_detect_adapter(UnsupportedModel())
     msg = str(exc_info.value)
@@ -147,6 +154,7 @@ def test_auto_detect_adapter_failure_suggests_closest():
     # suggest statsmodels adapters.
     class FakeStatsmodelsResult:
         pass
+
     FakeStatsmodelsResult.__module__ = "statsmodels.something"
     FakeStatsmodelsResult.__name__ = "SomeResult"
 
@@ -163,6 +171,7 @@ def test_auto_detect_adapter_failure_suggests_ols():
 
     class FakeWLSResult:
         pass
+
     FakeWLSResult.__module__ = "statsmodels.regression"
     FakeWLSResult.__name__ = "WLSResults"
 
@@ -180,6 +189,7 @@ def test_auto_detect_adapter_failure_cls_only_weak_match():
 
     class FakeGLMResult:
         pass
+
     FakeGLMResult.__module__ = "sklearn.something"
     FakeGLMResult.__name__ = "FakeGLMResult"
 
@@ -193,6 +203,7 @@ def test_auto_detect_adapter_failure_cls_only_weak_match():
 # ---------------------------------------------------------------------------
 # validate_vcov_spec unit tests (IMPLEMENTATION_GUIDE.md §2.3)
 # ---------------------------------------------------------------------------
+
 
 def test_validate_vcov_spec_none():
     """None is always valid."""
@@ -250,6 +261,7 @@ def test_validate_vcov_spec_custom_adapter_name():
 def test_validate_vcov_spec_jax_array():
     """JAX arrays should be accepted as user-supplied vcov."""
     import jax.numpy as jnp
+
     validate_vcov_spec(jnp.eye(3))
 
 
@@ -258,6 +270,7 @@ def test_validate_vcov_spec_cluster_empty_groups():
     with pytest.raises(ValueError, match="groups' must not be empty"):
         validate_vcov_spec({"type": "cluster", "groups": []})
     import numpy as np
+
     with pytest.raises(ValueError, match="groups' must not be empty"):
         validate_vcov_spec({"type": "cluster", "groups": np.array([])})
 
@@ -266,9 +279,11 @@ def test_validate_vcov_spec_cluster_empty_groups():
 # ModelAdapter ABC
 # ---------------------------------------------------------------------------
 
+
 def test_model_adapter_is_abc():
     """ModelAdapter should inherit from abc.ABC and be uninstantiable."""
     import abc
+
     assert issubclass(ModelAdapter, abc.ABC)
     with pytest.raises(TypeError):
         ModelAdapter()
@@ -276,8 +291,10 @@ def test_model_adapter_is_abc():
 
 def test_model_adapter_abstract_methods():
     """Subclasses missing abstract methods should not be instantiable."""
+
     class Incomplete(ModelAdapter):
         pass
+
     with pytest.raises(TypeError):
         Incomplete()
 
@@ -286,19 +303,26 @@ def test_model_adapter_abstract_methods():
 # WrappedFDAdapter offset rejection
 # ---------------------------------------------------------------------------
 
+
 def test_wrapped_fd_adapter_rejects_offset():
     """WrappedFDAdapter.predict should raise NotImplementedError when offset is passed."""
+
     class DummyAdapter(WrappedFDAdapter):
         def coefficients(self):
             return np.array([1.0])
+
         def covariance(self, vcov_spec=None):
             return np.eye(1)
+
         def native_predict(self, beta_np, X):
             return X @ beta_np
+
         def design_matrix_from_df(self, df):
             return np.asarray(df)
+
         def column_index_of_variable(self, name):
             return 0
+
         def variable_metadata(self):
             return {}
 
@@ -311,9 +335,11 @@ def test_wrapped_fd_adapter_rejects_offset():
 # design_matrix_from_df missing columns
 # ---------------------------------------------------------------------------
 
+
 def test_design_matrix_from_df_missing_columns_raises():
     """Missing required columns should raise ValueError, not silently produce NaN."""
     import statsmodels.api as sm
+
     df = pd.DataFrame({"x1": [1.0, 2.0, 3.0], "y": [1.0, 2.0, 3.0]})
     X = sm.add_constant(df[["x1"]])
     fit = sm.OLS(df["y"], X).fit()
@@ -327,12 +353,16 @@ def test_design_matrix_from_df_missing_columns_raises():
 # extract_training_data None frame handling
 # ---------------------------------------------------------------------------
 
+
 def test_extract_training_data_none_frame():
     """If results.model.data.frame exists but is None, should raise ValueError."""
+
     class FakeData:
         frame = None
+
     class FakeModel:
         data = FakeData()
+
     class FakeResults:
         model = FakeModel()
 
@@ -343,6 +373,7 @@ def test_extract_training_data_none_frame():
 # ---------------------------------------------------------------------------
 # VariableType and _infer_variable_type no "discrete"
 # ---------------------------------------------------------------------------
+
 
 def test_infer_variable_type_never_returns_discrete():
     """_infer_variable_type should never emit 'discrete'."""
@@ -356,7 +387,9 @@ def test_infer_variable_type_never_returns_discrete():
 def test_variable_type_literal_excludes_discrete():
     """VariableType should not include 'discrete'."""
     from typing import get_args
+
     from pymargins._adapter import VariableType
+
     assert "discrete" not in get_args(VariableType)
 
 
@@ -364,7 +397,8 @@ def test_variable_type_literal_excludes_discrete():
 # validate_vcov_spec ndarray shape limitation
 # ---------------------------------------------------------------------------
 
+
 def test_validate_vcov_spec_accepts_any_ndarray_shape():
     """validate_vcov_spec cannot check parameter count, so any ndarray is accepted."""
     validate_vcov_spec(np.array([1.0, 2.0]))  # 1D array — accepted
-    validate_vcov_spec(np.zeros((2, 3)))     # non-square — accepted
+    validate_vcov_spec(np.zeros((2, 3)))  # non-square — accepted

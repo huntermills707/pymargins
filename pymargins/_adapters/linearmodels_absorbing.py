@@ -15,17 +15,18 @@ absorb columns.
 """
 
 from __future__ import annotations
-from typing import Optional, Any
+
+from typing import Any
+
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
-
 from linearmodels.iv import AbsorbingLS
 
 from .._adapter import LinearPredictionAdapter, VariableInfo
 from ._common import (
-    column_index_of_variable,
     build_variable_metadata,
+    column_index_of_variable,
     validate_vcov_spec,
 )
 
@@ -44,17 +45,25 @@ class LinearmodelsAbsorbingAdapter(LinearPredictionAdapter):
         ``results.model.exog``, and ``results.model._absorb``.
     """
 
-    def __init__(self, results, training_data: Optional[pd.DataFrame] = None, formula: Optional[str] = None):
+    def __init__(
+        self,
+        results,
+        training_data: pd.DataFrame | None = None,
+        formula: str | None = None,
+    ):
         self.results = results
         self._training_data = self._resolve_training_data(results, training_data)
         self._exog_names = list(results.params.index)
         self._formula_spec = None
         if formula is not None:
             from .._formula import FormulaSpec
+
             self._formula_spec = FormulaSpec(formula, self._training_data)
         self._dep = results.model.dependent
         self._exog = results.model.exog
-        self._absorb = results.model._absorb if hasattr(results.model, "_absorb") else None
+        self._absorb = (
+            results.model._absorb if hasattr(results.model, "_absorb") else None
+        )
 
     @property
     def training_data(self):
@@ -65,7 +74,7 @@ class LinearmodelsAbsorbingAdapter(LinearPredictionAdapter):
     # -----------------------------------------------------------------------
 
     @staticmethod
-    def _resolve_training_data(results, training_data: Optional[pd.DataFrame]):
+    def _resolve_training_data(results, training_data: pd.DataFrame | None):
         if training_data is not None:
             return training_data
         try:
@@ -100,7 +109,7 @@ class LinearmodelsAbsorbingAdapter(LinearPredictionAdapter):
     def coefficients(self) -> jnp.ndarray:
         return jnp.asarray(self.results.params.values)
 
-    def covariance(self, vcov_spec: Optional[Any] = None) -> jnp.ndarray:
+    def covariance(self, vcov_spec: Any | None = None) -> jnp.ndarray:
         if vcov_spec is None:
             return jnp.asarray(self.results.cov.values)
 
@@ -121,15 +130,12 @@ class LinearmodelsAbsorbingAdapter(LinearPredictionAdapter):
             if kind == "cluster":
                 groups = vcov_spec.get("groups")
                 if groups is None:
-                    raise ValueError(
-                        "cluster vcov requires 'groups' in the spec dict."
-                    )
+                    raise ValueError("cluster vcov requires 'groups' in the spec dict.")
                 return self._refit_and_extract_cov(
-                    cov_type="clustered", clusters=groups,
+                    cov_type="clustered",
+                    clusters=groups,
                 )
-            raise ValueError(
-                f"Unsupported vcov dict type for AbsorbingLS: {kind!r}"
-            )
+            raise ValueError(f"Unsupported vcov dict type for AbsorbingLS: {kind!r}")
 
         raise ValueError(f"Unsupported vcov_spec: {vcov_spec!r}")
 
@@ -142,7 +148,8 @@ class LinearmodelsAbsorbingAdapter(LinearPredictionAdapter):
             return self._formula_spec.get_model_matrix(df)
         aligned = df.reindex(columns=self._exog_names)
         missing_cols = [
-            col for col in self._exog_names
+            col
+            for col in self._exog_names
             if col not in df.columns and col not in ("const", "Intercept")
         ]
         if missing_cols:
@@ -160,7 +167,9 @@ class LinearmodelsAbsorbingAdapter(LinearPredictionAdapter):
 
     def column_index_of_variable(self, variable_name: str) -> int:
         return column_index_of_variable(
-            self._exog_names, self.variable_metadata(), variable_name,
+            self._exog_names,
+            self.variable_metadata(),
+            variable_name,
         )
 
     def variable_metadata(self) -> dict[str, VariableInfo]:
@@ -185,10 +194,14 @@ class LinearmodelsAbsorbingAdapter(LinearPredictionAdapter):
         )
         return jnp.asarray(new_results.cov.values)
 
-    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "LinearmodelsAbsorbingAdapter":
+    def refit(
+        self, resampled_data: pd.DataFrame, *, index=None
+    ) -> LinearmodelsAbsorbingAdapter:
         """Refit the model on resampled data."""
         dep = resampled_data[self._dep.cols]
         exog = resampled_data[self._exog.cols]
-        absorb = resampled_data[self._absorb.columns] if self._absorb is not None else None
+        absorb = (
+            resampled_data[self._absorb.columns] if self._absorb is not None else None
+        )
         new_results = AbsorbingLS(dep, exog, absorb=absorb).fit()
         return LinearmodelsAbsorbingAdapter(new_results, training_data=resampled_data)

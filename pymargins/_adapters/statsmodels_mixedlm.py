@@ -12,7 +12,9 @@ integrate out random effects.
 """
 
 from __future__ import annotations
-from typing import Optional, Any
+
+from typing import Any
+
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
@@ -20,11 +22,10 @@ import statsmodels.api as sm
 
 from .._adapter import LinearPredictionAdapter, VariableInfo
 from ._common import (
-    extract_training_data,
-    design_matrix_from_df,
-    column_index_of_variable,
     build_variable_metadata,
-    validate_vcov_spec,
+    column_index_of_variable,
+    design_matrix_from_df,
+    extract_training_data,
 )
 
 
@@ -49,7 +50,7 @@ class StatsmodelsMixedLMAdapter(LinearPredictionAdapter):
         for direct-array fits — provide explicitly in that case.
     """
 
-    def __init__(self, results, training_data: Optional[pd.DataFrame] = None):
+    def __init__(self, results, training_data: pd.DataFrame | None = None):
         self.results = results
         self._training_data = extract_training_data(results, training_data)
         self._exog_names = list(results.model.exog_names)
@@ -84,7 +85,7 @@ class StatsmodelsMixedLMAdapter(LinearPredictionAdapter):
         # fe_params excludes random-effects parameters
         return jnp.asarray(self.results.fe_params)
 
-    def covariance(self, vcov_spec: Optional[Any] = None) -> jnp.ndarray:
+    def covariance(self, vcov_spec: Any | None = None) -> jnp.ndarray:
         """Return Σ̂ of the fixed effects.
 
         statsmodels MixedLM's ``cov_params()`` returns the covariance of the
@@ -127,7 +128,9 @@ class StatsmodelsMixedLMAdapter(LinearPredictionAdapter):
 
     def column_index_of_variable(self, variable_name: str) -> int:
         return column_index_of_variable(
-            self._exog_names, self.variable_metadata(), variable_name,
+            self._exog_names,
+            self.variable_metadata(),
+            variable_name,
         )
 
     def variable_metadata(self) -> dict[str, VariableInfo]:
@@ -141,7 +144,9 @@ class StatsmodelsMixedLMAdapter(LinearPredictionAdapter):
 
     # MixedLM does not support cov_type refitting; no _refit_and_extract_cov.
 
-    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "StatsmodelsMixedLMAdapter":
+    def refit(
+        self, resampled_data: pd.DataFrame, *, index=None
+    ) -> StatsmodelsMixedLMAdapter:
         """Refit the model on resampled data.
 
         Reconstructs the formula or array inputs from the original results and
@@ -153,7 +158,9 @@ class StatsmodelsMixedLMAdapter(LinearPredictionAdapter):
             if groups is not None and not isinstance(groups, str) and index is not None:
                 groups = np.asarray(groups)[index]
             new_results = smf_mixedlm(
-                formula, data=resampled_data, groups=groups,
+                formula,
+                data=resampled_data,
+                groups=groups,
             ).fit()
             return StatsmodelsMixedLMAdapter(new_results, training_data=resampled_data)
 
@@ -197,10 +204,12 @@ class StatsmodelsMixedLMAdapter(LinearPredictionAdapter):
             exog_re = np.asarray(exog_re)[index]
 
         new_results = sm.MixedLM(
-            endog, exog_df, groups=groups, exog_re=exog_re,
+            endog,
+            exog_df,
+            groups=groups,
+            exog_re=exog_re,
         ).fit()
         return StatsmodelsMixedLMAdapter(new_results, training_data=resampled_data)
 
 
-# Local import to avoid polluting module namespace at load time
-from statsmodels.formula.api import mixedlm as smf_mixedlm
+from statsmodels.formula.api import mixedlm as smf_mixedlm  # noqa: E402

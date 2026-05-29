@@ -1,40 +1,41 @@
 import os
 import sys
-sys.path.insert(0, os.path.abspath('..'))
 
-project = 'pymargins'
-copyright = '2026'
-author = 'Hunter Mills'
-release = '0.1.1'
+sys.path.insert(0, os.path.abspath(".."))
+
+project = "pymargins"
+copyright = "2026"
+author = "Hunter Mills"
+release = "0.1.1"
 
 extensions = [
-    'sphinx.ext.autodoc',
-    'sphinx.ext.autosummary',
-    'sphinx.ext.napoleon',
-    'sphinx.ext.mathjax',
-    'sphinx.ext.intersphinx',
-    'myst_nb',
-    'sphinx_design',
+    "sphinx.ext.autodoc",
+    "sphinx.ext.autosummary",
+    "sphinx.ext.napoleon",
+    "sphinx.ext.mathjax",
+    "sphinx.ext.intersphinx",
+    "myst_nb",
+    "sphinx_design",
 ]
 
 source_suffix = {
-    '.rst': 'restructuredtext',
-    '.md': 'myst-nb',
-    '.ipynb': 'myst-nb',
+    ".rst": "restructuredtext",
+    ".md": "myst-nb",
+    ".ipynb": "myst-nb",
 }
 
 napoleon_numpy_docstring = True
 napoleon_google_docstring = False
 
 autosummary_generate = True
-autodoc_member_order = 'bysource'
+autodoc_member_order = "bysource"
 
 # MyST + notebook execution
 myst_enable_extensions = [
-    'dollarmath',
-    'amsmath',
-    'colon_fence',
-    'deflist',
+    "dollarmath",
+    "amsmath",
+    "colon_fence",
+    "deflist",
 ]
 myst_heading_anchors = 3
 
@@ -52,42 +53,42 @@ nb_execution_raise_on_error = True
 nb_execution_show_tb = True
 
 intersphinx_mapping = {
-    'numpy': ('https://numpy.org/doc/stable/', None),
-    'scipy': ('https://docs.scipy.org/doc/scipy/', None),
-    'pandas': ('https://pandas.pydata.org/docs/', None),
-    'statsmodels': ('https://www.statsmodels.org/stable/', None),
-    'matplotlib': ('https://matplotlib.org/stable/', None),
-    'jax': ('https://docs.jax.dev/en/latest/', None),
-    'lifelines': ('https://lifelines.readthedocs.io/en/latest/', None),
-    'linearmodels': ('https://bashtage.github.io/linearmodels/', None),
+    "numpy": ("https://numpy.org/doc/stable/", None),
+    "scipy": ("https://docs.scipy.org/doc/scipy/", None),
+    "pandas": ("https://pandas.pydata.org/docs/", None),
+    "statsmodels": ("https://www.statsmodels.org/stable/", None),
+    "matplotlib": ("https://matplotlib.org/stable/", None),
+    "jax": ("https://docs.jax.dev/en/latest/", None),
+    "lifelines": ("https://lifelines.readthedocs.io/en/latest/", None),
+    "linearmodels": ("https://bashtage.github.io/linearmodels/", None),
 }
 
 exclude_patterns = [
-    '_build',
-    'jupyter_execute',
-    '**/jupyter_execute',
-    '.jupyter_cache',
-    '**/.jupyter_cache',
-    'tutorials/README.md',
-    'howto/README.md',
-    'explanations/README.md',
-    '**/README.md',
+    "_build",
+    "jupyter_execute",
+    "**/jupyter_execute",
+    ".jupyter_cache",
+    "**/.jupyter_cache",
+    "tutorials/README.md",
+    "howto/README.md",
+    "explanations/README.md",
+    "**/README.md",
 ]
 
-html_theme = 'alabaster'
-html_static_path = ['_static']
-html_css_files = ['custom.css']
+html_theme = "alabaster"
+html_static_path = ["_static"]
+html_css_files = ["custom.css"]
 
 html_theme_options = {
-    'github_user': 'huntermills707',
-    'github_repo': 'pymargins',
-    'github_button': True,
-    'github_type': 'star',
-    'description': 'Expert-mode marginal effects for Python.',
-    'extra_nav_links': {
-        'GitHub repository': 'https://github.com/huntermills707/pymargins',
-        'Issue tracker': 'https://github.com/huntermills707/pymargins/issues',
-        'Changelog': 'https://github.com/huntermills707/pymargins/blob/main/CHANGELOG.md',
-        'PyPI': 'https://pypi.org/project/pymargins/',
+    "github_user": "huntermills707",
+    "github_repo": "pymargins",
+    "github_button": True,
+    "github_type": "star",
+    "description": "Expert-mode marginal effects for Python.",
+    "extra_nav_links": {
+        "GitHub repository": "https://github.com/huntermills707/pymargins",
+        "Issue tracker": "https://github.com/huntermills707/pymargins/issues",
+        "Changelog": "https://github.com/huntermills707/pymargins/blob/main/CHANGELOG.md",
+        "PyPI": "https://pypi.org/project/pymargins/",
     },
 }

@@ -1,34 +1,36 @@
-"""Tests for LifelinesWeibullAFTAdapter.
-"""
+"""Tests for LifelinesWeibullAFTAdapter."""
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import pytest
+
 pytest.importorskip("lifelines")
 from lifelines import WeibullAFTFitter
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins._adapters.lifelines_weibull_aft import LifelinesWeibullAFTAdapter
-from pymargins._adapter import auto_detect_adapter
 from pymargins import Margins
-
+from pymargins._adapter import auto_detect_adapter
+from pymargins._adapters.lifelines_weibull_aft import LifelinesWeibullAFTAdapter
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def df_survival():
     """Synthetic survival data."""
     rng = np.random.default_rng(42)
     n = 200
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+        }
+    )
     hazard = np.exp(0.5 + 0.3 * df["x1"] - 0.2 * df["x2"])
     df["T"] = rng.exponential(1.0 / hazard)
     df["E"] = (rng.random(n) < 0.8).astype(int)
@@ -46,6 +48,7 @@ def weibull_fit_array(df_survival):
 # Auto-detection
 # ---------------------------------------------------------------------------
 
+
 def test_auto_detect_array_requires_training_data(weibull_fit_array):
     with pytest.raises(ValueError, match="training_data"):
         auto_detect_adapter(weibull_fit_array)
@@ -55,20 +58,24 @@ def test_auto_detect_array_requires_training_data(weibull_fit_array):
 # Construction and core data access
 # ---------------------------------------------------------------------------
 
+
 def test_adapter_coefficients(weibull_fit_array, df_survival):
     adapter = LifelinesWeibullAFTAdapter(weibull_fit_array, training_data=df_survival)
     beta = adapter.coefficients()
     assert beta.ndim == 1
-    expected = np.concatenate([
-        weibull_fit_array.params_.loc["lambda_"].values,
-        weibull_fit_array.params_.loc["rho_"].values,
-    ])
+    expected = np.concatenate(
+        [
+            weibull_fit_array.params_.loc["lambda_"].values,
+            weibull_fit_array.params_.loc["rho_"].values,
+        ]
+    )
     np.testing.assert_allclose(np.asarray(beta), expected, rtol=1e-10)
 
 
 # ---------------------------------------------------------------------------
 # Prediction
 # ---------------------------------------------------------------------------
+
 
 def test_predict_matches_lifelines(weibull_fit_array, df_survival):
     adapter = LifelinesWeibullAFTAdapter(weibull_fit_array, training_data=df_survival)
@@ -100,6 +107,7 @@ def test_predict_jax_differentiable(weibull_fit_array, df_survival):
 # ---------------------------------------------------------------------------
 # Coefficients and covariance
 # ---------------------------------------------------------------------------
+
 
 def test_coefficients_shape(weibull_fit_array, df_survival):
     adapter = LifelinesWeibullAFTAdapter(weibull_fit_array, training_data=df_survival)
@@ -139,6 +147,7 @@ def test_covariance_matches_reordered_variance_matrix(weibull_fit_array, df_surv
 # Design matrix and metadata
 # ---------------------------------------------------------------------------
 
+
 def test_design_matrix(weibull_fit_array, df_survival):
     adapter = LifelinesWeibullAFTAdapter(weibull_fit_array, training_data=df_survival)
     df = adapter.training_data
@@ -173,6 +182,7 @@ def test_variable_metadata_is_cached(weibull_fit_array, df_survival):
 # End-to-end via Margins session
 # ---------------------------------------------------------------------------
 
+
 def test_margins_predict(weibull_fit_array, df_survival):
     adapter = LifelinesWeibullAFTAdapter(weibull_fit_array, training_data=df_survival)
     m = Margins(weibull_fit_array, adapter=adapter)
@@ -192,10 +202,17 @@ def test_margins_dydx(weibull_fit_array, df_survival):
 # Bootstrap end-to-end
 # ---------------------------------------------------------------------------
 
+
 def test_bootstrap_end_to_end(weibull_fit_array, df_survival):
     adapter = LifelinesWeibullAFTAdapter(weibull_fit_array, training_data=df_survival)
-    m = Margins(weibull_fit_array, adapter=adapter, at="typical",
-                method="bootstrap", n_boot=50, rng_seed=42)
+    m = Margins(
+        weibull_fit_array,
+        adapter=adapter,
+        at="typical",
+        method="bootstrap",
+        n_boot=50,
+        rng_seed=42,
+    )
     rd = m.dydx("x1")
     assert rd.method == "bootstrap"
     assert np.isfinite(float(rd.estimate))
@@ -207,16 +224,25 @@ def test_bootstrap_end_to_end(weibull_fit_array, df_survival):
 # Attach-time validation
 # ---------------------------------------------------------------------------
 
+
 def test_attach_rejects_unsupported_vcov_string(weibull_fit_array, df_survival):
     adapter = LifelinesWeibullAFTAdapter(weibull_fit_array, training_data=df_survival)
-    with pytest.raises(ValueError, match="LifelinesWeibullAFTAdapter only supports vcov=None"):
+    with pytest.raises(
+        ValueError, match="LifelinesWeibullAFTAdapter only supports vcov=None"
+    ):
         Margins(weibull_fit_array, adapter=adapter, vcov="HC0")
 
 
 def test_attach_rejects_unsupported_vcov_dict(weibull_fit_array, df_survival):
     adapter = LifelinesWeibullAFTAdapter(weibull_fit_array, training_data=df_survival)
-    with pytest.raises(ValueError, match="LifelinesWeibullAFTAdapter only supports vcov=None"):
-        Margins(weibull_fit_array, adapter=adapter, vcov={"type": "cluster", "groups": df_survival["E"]})
+    with pytest.raises(
+        ValueError, match="LifelinesWeibullAFTAdapter only supports vcov=None"
+    ):
+        Margins(
+            weibull_fit_array,
+            adapter=adapter,
+            vcov={"type": "cluster", "groups": df_survival["E"]},
+        )
 
 
 def test_attach_accepts_supported_vcov(weibull_fit_array, df_survival):
@@ -234,6 +260,7 @@ def test_attach_accepts_supported_vcov(weibull_fit_array, df_survival):
 # Refit
 # ---------------------------------------------------------------------------
 
+
 def test_refit_array(weibull_fit_array, df_survival):
     adapter = LifelinesWeibullAFTAdapter(weibull_fit_array, training_data=df_survival)
     new_adapter = adapter.refit(df_survival)
@@ -247,7 +274,9 @@ def test_refit_array(weibull_fit_array, df_survival):
 
 def test_refit_changes_coefficients(weibull_fit_array, df_survival):
     adapter = LifelinesWeibullAFTAdapter(weibull_fit_array, training_data=df_survival)
-    resampled = df_survival.sample(frac=1.0, replace=True, random_state=42).reset_index(drop=True)
+    resampled = df_survival.sample(frac=1.0, replace=True, random_state=42).reset_index(
+        drop=True
+    )
     new_adapter = adapter.refit(resampled)
     assert isinstance(new_adapter, LifelinesWeibullAFTAdapter)
     assert not np.allclose(
@@ -259,6 +288,7 @@ def test_refit_changes_coefficients(weibull_fit_array, df_survival):
 # ---------------------------------------------------------------------------
 # Prediction time
 # ---------------------------------------------------------------------------
+
 
 def test_default_prediction_time(weibull_fit_array, df_survival):
     adapter = LifelinesWeibullAFTAdapter(weibull_fit_array, training_data=df_survival)

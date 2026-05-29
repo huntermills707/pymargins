@@ -1,29 +1,32 @@
-"""Tests for LifelinesPiecewiseExponentialAdapter.
-"""
+"""Tests for LifelinesPiecewiseExponentialAdapter."""
 
 import jax
-import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import pytest
+
 pytest.importorskip("lifelines")
 from lifelines import PiecewiseExponentialRegressionFitter
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins._adapters.lifelines_piecewise_exponential import LifelinesPiecewiseExponentialAdapter
-from pymargins._adapter import auto_detect_adapter
 from pymargins import Margins
+from pymargins._adapter import auto_detect_adapter
+from pymargins._adapters.lifelines_piecewise_exponential import (
+    LifelinesPiecewiseExponentialAdapter,
+)
 
 
 @pytest.fixture
 def df_survival():
     rng = np.random.default_rng(42)
     n = 200
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+        }
+    )
     hazard = np.exp(0.5 + 0.3 * df["x1"] - 0.2 * df["x2"])
     df["T"] = rng.exponential(1.0 / hazard)
     df["E"] = (rng.random(n) < 0.8).astype(int)
@@ -78,8 +81,14 @@ def test_supported_inference_methods(pe_fit, df_survival):
 
 def test_bootstrap_end_to_end(pe_fit, df_survival):
     adapter = LifelinesPiecewiseExponentialAdapter(pe_fit, training_data=df_survival)
-    m = Margins(pe_fit, adapter=adapter, at="typical",
-                method="bootstrap", n_boot=50, rng_seed=42)
+    m = Margins(
+        pe_fit,
+        adapter=adapter,
+        at="typical",
+        method="bootstrap",
+        n_boot=50,
+        rng_seed=42,
+    )
     rd = m.predict()
     assert rd.method == "bootstrap"
     assert np.isfinite(float(rd.estimate))
