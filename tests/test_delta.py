@@ -6,29 +6,27 @@ See IMPLEMENTATION_GUIDE.md §0.2.
 import jax
 import jax.numpy as jnp
 import numpy as np
-import pandas as pd
 import pytest
 import statsmodels.api as sm
-import statsmodels.formula.api as smf
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins._gradients import gradient
 from pymargins._delta import (
-    delta_variance,
-    delta_se,
+    combined_gradient,
     delta_confint,
     delta_confint_from_se,
+    delta_se,
+    delta_variance,
     delta_wald_test,
-    joint_wald_test,
-    combined_gradient,
     joint_covariance_of_results,
+    joint_wald_test,
 )
-
+from pymargins._gradients import gradient
 
 # ---------------------------------------------------------------------------
 # 1. delta_se against statsmodels OLS t_test
 # ---------------------------------------------------------------------------
+
 
 def test_delta_se_matches_ols_t_test():
     """For a linear contrast c@beta, delta_se must match OLS t_test SE."""
@@ -52,7 +50,7 @@ def test_delta_se_matches_ols_t_test():
         se_sm = float(np.asarray(ttest.sd).item())
 
         # pymargins delta_se
-        def h(b):
+        def h(b, c=c):
             return c @ b
 
         grad = gradient(h, beta, backend="autodiff")
@@ -64,6 +62,7 @@ def test_delta_se_matches_ols_t_test():
 # ---------------------------------------------------------------------------
 # 2. delta_confint against statsmodels get_prediction
 # ---------------------------------------------------------------------------
+
 
 def test_delta_confint_matches_ols_prediction():
     """For OLS, delta CIs on predictions should match statsmodels."""
@@ -140,6 +139,7 @@ def test_delta_confint_logit_prediction():
 # 3. joint_wald_test against statsmodels wald_test
 # ---------------------------------------------------------------------------
 
+
 def test_joint_wald_test_matches_statsmodels():
     """Joint Wald test on multiple contrasts must match statsmodels."""
     rng = np.random.default_rng(42)
@@ -153,8 +153,7 @@ def test_joint_wald_test_matches_statsmodels():
     beta = jnp.asarray(model.params)
 
     # Test H0: beta_3 = beta_4 = 0
-    R = np.array([[0, 0, 0, 1, 0],
-                  [0, 0, 0, 0, 1]])
+    R = np.array([[0, 0, 0, 1, 0], [0, 0, 0, 0, 1]])
 
     def h(b):
         return R @ b
@@ -180,6 +179,7 @@ def test_joint_wald_test_matches_statsmodels():
 # 4. delta_wald_test per-component
 # ---------------------------------------------------------------------------
 
+
 def test_delta_wald_test_two_sided():
     """Per-component Wald test against known values."""
     rng = np.random.default_rng(42)
@@ -200,8 +200,9 @@ def test_delta_wald_test_two_sided():
     grad = gradient(h, beta, backend="autodiff")
     estimate = h(beta)
 
-    z_pm, p_pm = delta_wald_test(estimate, grad, Sigma, null_value=0.0,
-                                  alternative="two-sided")
+    z_pm, p_pm = delta_wald_test(
+        estimate, grad, Sigma, null_value=0.0, alternative="two-sided"
+    )
 
     ttest = model.t_test(c)
     z_sm = float(np.asarray(ttest.tvalue).item())
@@ -232,23 +233,28 @@ def test_delta_wald_test_one_sided():
     grad = gradient(h, beta, backend="autodiff")
     estimate = h(beta)
 
-    _, p_two = delta_wald_test(estimate, grad, Sigma, null_value=0.0,
-                                alternative="two-sided")
-    _, p_greater = delta_wald_test(estimate, grad, Sigma, null_value=0.0,
-                                    alternative="greater")
-    _, p_less = delta_wald_test(estimate, grad, Sigma, null_value=0.0,
-                                 alternative="less")
+    _, p_two = delta_wald_test(
+        estimate, grad, Sigma, null_value=0.0, alternative="two-sided"
+    )
+    _, p_greater = delta_wald_test(
+        estimate, grad, Sigma, null_value=0.0, alternative="greater"
+    )
+    _, p_less = delta_wald_test(
+        estimate, grad, Sigma, null_value=0.0, alternative="less"
+    )
 
     # Two-sided should be roughly 2*min(one-sided, 1-one-sided)
     assert 0.0 <= p_greater <= 1.0
     assert 0.0 <= p_less <= 1.0
-    assert np.isclose(p_two, 2 * min(p_greater, p_less), rtol=1e-3) or \
-           np.isclose(p_two, 2 * min(p_greater, p_less), atol=1e-6)
+    assert np.isclose(p_two, 2 * min(p_greater, p_less), rtol=1e-3) or np.isclose(
+        p_two, 2 * min(p_greater, p_less), atol=1e-6
+    )
 
 
 # ---------------------------------------------------------------------------
 # 5. Variance and covariance helpers
 # ---------------------------------------------------------------------------
+
 
 def test_delta_variance_scalar():
     """For scalar g, delta_variance returns a scalar."""
@@ -261,8 +267,7 @@ def test_delta_variance_scalar():
 
 def test_delta_variance_vector():
     """For vector g, delta_variance returns the full covariance matrix."""
-    grad = jnp.array([[1.0, 0.0, 1.0],
-                      [0.0, 1.0, 1.0]])  # (2, 3)
+    grad = jnp.array([[1.0, 0.0, 1.0], [0.0, 1.0, 1.0]])  # (2, 3)
     Sigma = jnp.eye(3)
     var = delta_variance(grad, Sigma)
     expected = grad @ Sigma @ grad.T
@@ -300,7 +305,7 @@ def test_combined_gradient_stacked_scenarios():
     grads = [jnp.asarray(rng.standard_normal(p)) for _ in range(n)]
     weights = jnp.asarray(rng.standard_normal(n))
     combined = combined_gradient(grads, weights)
-    expected = sum(float(w) * g for w, g in zip(weights, grads))
+    expected = sum(float(w) * g for w, g in zip(weights, grads, strict=False))
     np.testing.assert_allclose(combined, expected, rtol=1e-10)
 
 
@@ -320,14 +325,14 @@ def test_joint_covariance_of_results():
     var2 = float(g2 @ Sigma @ g2)
     cov12 = float(g1 @ Sigma @ g2)
 
-    expected = jnp.array([[var1, cov12],
-                          [cov12, var2]])
+    expected = jnp.array([[var1, cov12], [cov12, var2]])
     np.testing.assert_allclose(cov_joint, expected, rtol=1e-10)
 
 
 # ---------------------------------------------------------------------------
 # 6. delta_confint_from_se
 # ---------------------------------------------------------------------------
+
 
 def test_delta_confint_from_se_recovers_original():
     """delta_confint_from_se with the same level should reproduce the CI."""
@@ -442,6 +447,7 @@ def test_delta_confint_from_se_with_phi():
 # 7. Edge cases
 # ---------------------------------------------------------------------------
 
+
 def test_delta_se_zero_gradient():
     """When gradient is zero, SE should be zero (not NaN)."""
     grad = jnp.zeros(3)
@@ -455,9 +461,7 @@ def test_delta_se_negative_variance_clipped():
     grad = jnp.array([1.0, 1.0, 1.0])
     # Manually construct a covariance with a tiny negative on the diagonal
     # after the quadratic form (simulating numerical noise)
-    Sigma = jnp.array([[1.0, 0.0, 0.0],
-                       [0.0, -1e-15, 0.0],
-                       [0.0, 0.0, -1e-15]])
+    Sigma = jnp.array([[1.0, 0.0, 0.0], [0.0, -1e-15, 0.0], [0.0, 0.0, -1e-15]])
     # For this gradient, variance = 1.0 - 1e-15 - 1e-15 ≈ 1.0 (positive after clip)
     se = delta_se(grad, Sigma)
     assert np.isfinite(float(se))
@@ -470,16 +474,22 @@ def test_delta_wald_test_zero_se():
 
     # Case 1: estimate == null -> z = 0, p = 1.0
     z, p = delta_wald_test(
-        jnp.array(0.0), grad, Sigma,
-        null_value=0.0, alternative="two-sided",
+        jnp.array(0.0),
+        grad,
+        Sigma,
+        null_value=0.0,
+        alternative="two-sided",
     )
     assert float(z) == 0.0
     assert float(p) == 1.0
 
     # Case 2: estimate > null -> z = +inf, p = 0.0
     z, p = delta_wald_test(
-        jnp.array(1.0), grad, Sigma,
-        null_value=0.0, alternative="two-sided",
+        jnp.array(1.0),
+        grad,
+        Sigma,
+        null_value=0.0,
+        alternative="two-sided",
     )
     assert float(z) == float("inf")
     assert float(p) == 0.0
@@ -519,12 +529,15 @@ def test_delta_wald_test_greater_less():
     grad = gradient(h, beta, backend="autodiff")
     estimate = h(beta)
 
-    z_two, p_two = delta_wald_test(estimate, grad, Sigma, null_value=0.0,
-                                    alternative="two-sided")
-    z_greater, p_greater = delta_wald_test(estimate, grad, Sigma, null_value=0.0,
-                                            alternative="greater")
-    z_less, p_less = delta_wald_test(estimate, grad, Sigma, null_value=0.0,
-                                      alternative="less")
+    z_two, p_two = delta_wald_test(
+        estimate, grad, Sigma, null_value=0.0, alternative="two-sided"
+    )
+    z_greater, p_greater = delta_wald_test(
+        estimate, grad, Sigma, null_value=0.0, alternative="greater"
+    )
+    z_less, p_less = delta_wald_test(
+        estimate, grad, Sigma, null_value=0.0, alternative="less"
+    )
 
     # z-statistics should be identical regardless of alternative
     np.testing.assert_allclose(z_two, z_greater, rtol=1e-10)
@@ -609,7 +622,6 @@ def test_delta_variance_bad_ndim():
         delta_variance(grad, Sigma)
 
 
-
 def test_delta_confint_level_validation():
     """delta_confint must reject level outside (0,1)."""
     grad = jnp.array([1.0, 0.0, 0.0])
@@ -640,8 +652,11 @@ def test_delta_wald_test_near_zero_se():
     grad = jnp.array([1e-20, 0.0, 0.0])
     Sigma = jnp.eye(3) * 0.01
     z, p = delta_wald_test(
-        jnp.array(1.0), grad, Sigma,
-        null_value=0.0, alternative="two-sided",
+        jnp.array(1.0),
+        grad,
+        Sigma,
+        null_value=0.0,
+        alternative="two-sided",
     )
     assert float(z) == float("inf")
     assert float(p) == 0.0

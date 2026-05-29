@@ -301,9 +301,8 @@ def register_adapter(
         def predicate(model):
             module = type(model).__module__
             cls_name = type(model).__name__
-            return (
-                any(module.startswith(m) for m in _mods)
-                and any(hint in cls_name for hint in _names)
+            return any(module.startswith(m) for m in _mods) and any(
+                hint in cls_name for hint in _names
             )
 
     _DETECTION_REGISTRY.append((predicate, adapter_class))
@@ -358,6 +357,7 @@ def _suggest_adapters(cls_name, module):
 # Auto-detection
 # ---------------------------------------------------------------------------
 
+
 def _detect_adapter_class(model):
     """Inspect a fitted model and return the appropriate adapter class.
 
@@ -379,19 +379,24 @@ def _detect_adapter_class(model):
     # statsmodels GLM
     if module.startswith("statsmodels.") and "GLM" in cls_name:
         from .statsmodels_glm import StatsmodelsGLMAdapter
+
         return StatsmodelsGLMAdapter
 
     # statsmodels QuantReg (also uses RegressionResultsWrapper, so check first)
     if module.startswith("statsmodels.") and cls_name == "RegressionResultsWrapper":
-        if hasattr(model, "q") or getattr(getattr(model, "model", None), "__class__", None).__name__ == "QuantReg":
+        if (
+            hasattr(model, "q")
+            or getattr(getattr(model, "model", None), "__class__", None).__name__
+            == "QuantReg"
+        ):
             from .statsmodels_quantreg import StatsmodelsQuantRegAdapter
+
             return StatsmodelsQuantRegAdapter
 
     # statsmodels OLS / WLS / GLS
-    if module.startswith("statsmodels.") and cls_name in (
-        "RegressionResultsWrapper",
-    ):
+    if module.startswith("statsmodels.") and cls_name in ("RegressionResultsWrapper",):
         from .statsmodels_ols import StatsmodelsOLSAdapter
+
         return StatsmodelsOLSAdapter
 
     # statsmodels Logit / Probit (discrete binary models)
@@ -404,26 +409,27 @@ def _detect_adapter_class(model):
     ):
         # For BinaryResultsWrapper, distinguish Logit/Probit from other binary
         # models by inspecting the underlying model class.
-        model_cls_name = getattr(getattr(model, "model", None), "__class__", None).__name__
+        model_cls_name = getattr(
+            getattr(model, "model", None), "__class__", None
+        ).__name__
         if model_cls_name in ("Logit", "Probit") or cls_name in (
             "LogitResultsWrapper",
             "ProbitResultsWrapper",
         ):
             from .statsmodels_discrete_binary import StatsmodelsDiscreteBinaryAdapter
+
             return StatsmodelsDiscreteBinaryAdapter
 
     # statsmodels MNLogit
-    if module.startswith("statsmodels.") and cls_name in (
-        "MultinomialResultsWrapper",
-    ):
+    if module.startswith("statsmodels.") and cls_name in ("MultinomialResultsWrapper",):
         from .statsmodels_mnlogit import StatsmodelsMNLogitAdapter
+
         return StatsmodelsMNLogitAdapter
 
     # statsmodels OrderedModel
-    if module.startswith("statsmodels.") and cls_name in (
-        "OrderedResultsWrapper",
-    ):
+    if module.startswith("statsmodels.") and cls_name in ("OrderedResultsWrapper",):
         from .statsmodels_ordered import StatsmodelsOrderedAdapter
+
         return StatsmodelsOrderedAdapter
 
     # statsmodels discrete count models
@@ -434,6 +440,7 @@ def _detect_adapter_class(model):
         "GeneralizedPoissonResultsWrapper",
     ):
         from .statsmodels_discrete_count import StatsmodelsDiscreteCountAdapter
+
         return StatsmodelsDiscreteCountAdapter
 
     # statsmodels zero-inflated count models
@@ -443,83 +450,73 @@ def _detect_adapter_class(model):
         "ZeroInflatedGeneralizedPoissonResultsWrapper",
     ):
         from .statsmodels_zi import StatsmodelsZIAdapter
+
         return StatsmodelsZIAdapter
 
     # statsmodels RLM
-    if module.startswith("statsmodels.") and cls_name in (
-        "RLMResultsWrapper",
-    ):
+    if module.startswith("statsmodels.") and cls_name in ("RLMResultsWrapper",):
         from .statsmodels_rlm import StatsmodelsRLMAdapter
+
         return StatsmodelsRLMAdapter
 
     # statsmodels QuantReg
-    if module.startswith("statsmodels.") and cls_name in (
-        "QuantRegResults",
-    ):
+    if module.startswith("statsmodels.") and cls_name in ("QuantRegResults",):
         from .statsmodels_quantreg import StatsmodelsQuantRegAdapter
+
         return StatsmodelsQuantRegAdapter
 
     # statsmodels PHReg (Cox proportional hazards)
-    if module.startswith("statsmodels.") and cls_name in (
-        "PHRegResults",
-    ):
+    if module.startswith("statsmodels.") and cls_name in ("PHRegResults",):
         from .statsmodels_phreg import StatsmodelsPHRegAdapter
+
         return StatsmodelsPHRegAdapter
 
     # statsmodels GEE
-    if module.startswith("statsmodels.") and cls_name in (
-        "GEEResultsWrapper",
-    ):
+    if module.startswith("statsmodels.") and cls_name in ("GEEResultsWrapper",):
         from .statsmodels_gee import StatsmodelsGEEAdapter
+
         return StatsmodelsGEEAdapter
 
     # statsmodels NominalGEE
-    if module.startswith("statsmodels.") and cls_name in (
-        "NominalGEEResultsWrapper",
-    ):
+    if module.startswith("statsmodels.") and cls_name in ("NominalGEEResultsWrapper",):
         from .statsmodels_nominal_gee import StatsmodelsNominalGEEAdapter
+
         return StatsmodelsNominalGEEAdapter
 
     # statsmodels OrdinalGEE
-    if module.startswith("statsmodels.") and cls_name in (
-        "OrdinalGEEResultsWrapper",
-    ):
+    if module.startswith("statsmodels.") and cls_name in ("OrdinalGEEResultsWrapper",):
         from .statsmodels_ordinal_gee import StatsmodelsOrdinalGEEAdapter
+
         return StatsmodelsOrdinalGEEAdapter
 
     # statsmodels MixedLM
-    if module.startswith("statsmodels.") and cls_name in (
-        "MixedLMResultsWrapper",
-    ):
+    if module.startswith("statsmodels.") and cls_name in ("MixedLMResultsWrapper",):
         from .statsmodels_mixedlm import StatsmodelsMixedLMAdapter
+
         return StatsmodelsMixedLMAdapter
 
     # lifelines CoxPHFitter
-    if module.startswith("lifelines.") and cls_name in (
-        "CoxPHFitter",
-    ):
+    if module.startswith("lifelines.") and cls_name in ("CoxPHFitter",):
         from .lifelines_coxph import LifelinesCoxPHAdapter
+
         return LifelinesCoxPHAdapter
 
     # lifelines WeibullAFTFitter
-    if module.startswith("lifelines.") and cls_name in (
-        "WeibullAFTFitter",
-    ):
+    if module.startswith("lifelines.") and cls_name in ("WeibullAFTFitter",):
         from .lifelines_weibull_aft import LifelinesWeibullAFTAdapter
+
         return LifelinesWeibullAFTAdapter
 
     # lifelines LogNormalAFTFitter
-    if module.startswith("lifelines.") and cls_name in (
-        "LogNormalAFTFitter",
-    ):
+    if module.startswith("lifelines.") and cls_name in ("LogNormalAFTFitter",):
         from .lifelines_lognormal_aft import LifelinesLogNormalAFTAdapter
+
         return LifelinesLogNormalAFTAdapter
 
     # lifelines LogLogisticAFTFitter
-    if module.startswith("lifelines.") and cls_name in (
-        "LogLogisticAFTFitter",
-    ):
+    if module.startswith("lifelines.") and cls_name in ("LogLogisticAFTFitter",):
         from .lifelines_loglogistic_aft import LifelinesLogLogisticAFTAdapter
+
         return LifelinesLogLogisticAFTAdapter
 
     # lifelines GeneralizedGammaRegressionFitter
@@ -527,34 +524,35 @@ def _detect_adapter_class(model):
         "GeneralizedGammaRegressionFitter",
     ):
         from .lifelines_generalized_gamma import LifelinesGeneralizedGammaAdapter
+
         return LifelinesGeneralizedGammaAdapter
 
     # lifelines PiecewiseExponentialRegressionFitter
     if module.startswith("lifelines.") and cls_name in (
         "PiecewiseExponentialRegressionFitter",
     ):
-        from .lifelines_piecewise_exponential import LifelinesPiecewiseExponentialAdapter
+        from .lifelines_piecewise_exponential import (
+            LifelinesPiecewiseExponentialAdapter,
+        )
+
         return LifelinesPiecewiseExponentialAdapter
 
     # lifelines CRCSplineFitter
-    if module.startswith("lifelines.") and cls_name in (
-        "CRCSplineFitter",
-    ):
+    if module.startswith("lifelines.") and cls_name in ("CRCSplineFitter",):
         from .lifelines_crc_spline import LifelinesCRCSplineAdapter
+
         return LifelinesCRCSplineAdapter
 
     # lifelines CoxTimeVaryingFitter
-    if module.startswith("lifelines.") and cls_name in (
-        "CoxTimeVaryingFitter",
-    ):
+    if module.startswith("lifelines.") and cls_name in ("CoxTimeVaryingFitter",):
         from .lifelines_coxtimevarying import LifelinesCoxTimeVaryingAdapter
+
         return LifelinesCoxTimeVaryingAdapter
 
     # lifelines AalenAdditiveFitter
-    if module.startswith("lifelines.") and cls_name in (
-        "AalenAdditiveFitter",
-    ):
+    if module.startswith("lifelines.") and cls_name in ("AalenAdditiveFitter",):
         from .lifelines_aalen_additive import LifelinesAalenAdditiveAdapter
+
         return LifelinesAalenAdditiveAdapter
 
     # linearmodels panel models
@@ -567,6 +565,7 @@ def _detect_adapter_class(model):
         "FamaMacBethResults",
     ):
         from .linearmodels_panel import LinearmodelsPanelAdapter
+
         return LinearmodelsPanelAdapter
 
     # linearmodels IV models
@@ -577,13 +576,13 @@ def _detect_adapter_class(model):
         "OLSResults",
     ):
         from .linearmodels_iv import LinearmodelsIVAdapter
+
         return LinearmodelsIVAdapter
 
     # linearmodels AbsorbingLS
-    if module.startswith("linearmodels.") and cls_name in (
-        "AbsorbingLSResults",
-    ):
+    if module.startswith("linearmodels.") and cls_name in ("AbsorbingLSResults",):
         from .linearmodels_absorbing import LinearmodelsAbsorbingAdapter
+
         return LinearmodelsAbsorbingAdapter
 
     # Note: LifelinesCoxPHSurvivalAdapter and StatsmodelsPHRegSurvivalAdapter

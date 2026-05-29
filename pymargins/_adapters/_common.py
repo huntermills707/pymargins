@@ -6,20 +6,25 @@ across OLS, GLM, and other statsmodels adapters.
 """
 
 from __future__ import annotations
-from typing import Optional
+
 import warnings
+
+import jax.numpy as jnp
 import numpy as np
 import pandas as pd
-import jax.numpy as jnp
 
 from .._adapter import VariableInfo
 
 
-def extract_training_data(results, training_data: Optional[pd.DataFrame]) -> pd.DataFrame:
+def extract_training_data(results, training_data: pd.DataFrame | None) -> pd.DataFrame:
     """Resolve training data from explicit argument or model attribute."""
     if training_data is not None:
         return training_data
-    if hasattr(results, "model") and hasattr(results.model, "data") and hasattr(results.model.data, "frame"):
+    if (
+        hasattr(results, "model")
+        and hasattr(results.model, "data")
+        and hasattr(results.model.data, "frame")
+    ):
         frame = results.model.data.frame
         if frame is not None:
             return frame
@@ -29,7 +34,9 @@ def extract_training_data(results, training_data: Optional[pd.DataFrame]) -> pd.
     )
 
 
-def design_matrix_from_df(results, exog_names: list[str], df: pd.DataFrame, formula_spec=None) -> jnp.ndarray:
+def design_matrix_from_df(
+    results, exog_names: list[str], df: pd.DataFrame, formula_spec=None
+) -> jnp.ndarray:
     """Build a design matrix from a DataFrame using the model's formula.
 
     Resolution order:
@@ -39,8 +46,14 @@ def design_matrix_from_df(results, exog_names: list[str], df: pd.DataFrame, form
          present).
     """
     # Path 1: live framework design_info
-    if hasattr(results, "model") and results.model is not None and hasattr(results.model, "data") and hasattr(results.model.data, "design_info"):
+    if (
+        hasattr(results, "model")
+        and results.model is not None
+        and hasattr(results.model, "data")
+        and hasattr(results.model.data, "design_info")
+    ):
         from patsy import dmatrix
+
         design_info = results.model.data.design_info
         X_np = np.asarray(dmatrix(design_info, df, return_type="matrix"))
         return jnp.asarray(X_np)
@@ -60,7 +73,11 @@ def design_matrix_from_df(results, exog_names: list[str], df: pd.DataFrame, form
         )
     aligned = df.reindex(columns=exog_names)
     # Detect missing columns that became NaN after reindexing
-    missing_cols = [col for col in exog_names if col not in df.columns and col not in ("const", "Intercept")]
+    missing_cols = [
+        col
+        for col in exog_names
+        if col not in df.columns and col not in ("const", "Intercept")
+    ]
     if missing_cols:
         raise ValueError(
             f"Missing columns required by the model's exog_names: {missing_cols}. "
@@ -132,9 +149,14 @@ def build_variable_metadata(training_data: pd.DataFrame) -> dict[str, VariableIn
         metadata[col] = VariableInfo(
             name=col,
             var_type=var_type,
-            levels=(list(series.unique()) if var_type in ("binary", "categorical") else None),
-            support=((float(series.min()), float(series.max()))
-                     if pd.api.types.is_numeric_dtype(series) else None),
+            levels=(
+                list(series.unique()) if var_type in ("binary", "categorical") else None
+            ),
+            support=(
+                (float(series.min()), float(series.max()))
+                if pd.api.types.is_numeric_dtype(series)
+                else None
+            ),
         )
     return metadata
 

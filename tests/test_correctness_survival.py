@@ -27,21 +27,21 @@ packages with seed=42 and n=200.
 """
 
 import jax
+
 jax.config.update("jax_enable_x64", True)
 
-import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import pytest
-pytest.importorskip("lifelines")
-from statsmodels.duration.hazard_regression import PHReg
-from lifelines import CoxPHFitter, WeibullAFTFitter
 
-from pymargins._adapters.statsmodels_phreg import StatsmodelsPHRegAdapter
+pytest.importorskip("lifelines")
+from lifelines import CoxPHFitter, WeibullAFTFitter
+from statsmodels.duration.hazard_regression import PHReg
+
+from pymargins import Margins
 from pymargins._adapters.lifelines_coxph import LifelinesCoxPHAdapter
 from pymargins._adapters.lifelines_weibull_aft import LifelinesWeibullAFTAdapter
-from pymargins import Margins
-
+from pymargins._adapters.statsmodels_phreg import StatsmodelsPHRegAdapter
 
 # ---------------------------------------------------------------------------
 # Shared data and reference values
@@ -53,9 +53,9 @@ from pymargins import Margins
 # (the fixture below loads from the same CSV that R wrote)
 
 # R marginaleffects reference values for Cox PH (type='risk', centered)
-R_COX_PREDICTIONS = np.array([
-    2.4117432289, 0.8161434690, 0.7631968846, 0.6169463370, 1.6514428206
-])
+R_COX_PREDICTIONS = np.array(
+    [2.4117432289, 0.8161434690, 0.7631968846, 0.6169463370, 1.6514428206]
+)
 R_COX_AME_X1 = 0.2114106
 R_COX_AME_X2 = -0.3195936
 
@@ -64,9 +64,9 @@ MANUAL_PHREG_AME_X1 = 0.20955182966947716
 MANUAL_PHREG_AME_X2 = -0.31678367693654086
 
 # Weibull AFT reference (manual analytical)
-MANUAL_WEIBULL_SURV_PROBS = np.array([
-    0.3058085, 0.6488832, 0.6632869, 0.7124786, 0.4357468
-])
+MANUAL_WEIBULL_SURV_PROBS = np.array(
+    [0.3058085, 0.6488832, 0.6632869, 0.7124786, 0.4357468]
+)
 MANUAL_WEIBULL_AME_X1 = -0.05793763
 MANUAL_WEIBULL_AME_X2 = 0.08307657
 
@@ -76,6 +76,7 @@ def df_survival():
     """Load the exact same data used for R reference values."""
     # Try to load from the R-generated CSV first
     import os
+
     csv_path = "/tmp/survival_data.csv"
     if os.path.exists(csv_path):
         return pd.read_csv(csv_path)
@@ -84,10 +85,12 @@ def df_survival():
     # so the CSV is the preferred source)
     rng = np.random.default_rng(42)
     n = 200
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+        }
+    )
     hazard = np.exp(0.5 + 0.3 * df["x1"] - 0.2 * df["x2"])
     df["time"] = rng.exponential(1.0 / hazard)
     df["status"] = (rng.random(n) < 0.8).astype(int)
@@ -97,6 +100,7 @@ def df_survival():
 # ---------------------------------------------------------------------------
 # 1. Statsmodels PHReg (raw hazard ratio scale)
 # ---------------------------------------------------------------------------
+
 
 def test_phreg_predictions_match_analytical(df_survival):
     """PHReg predict() should return raw exp(X @ beta)."""
@@ -133,7 +137,9 @@ def test_phreg_predictions_differ_from_centered_risk(df_survival):
     # R marginaleffects type='risk' is centered at the mean
     # The ratio should be roughly constant = exp(-mean(X @ beta))
     mean_lp = np.mean(df_survival[["x1", "x2"]].values @ fit.params)
-    centered_manual = np.exp(df_survival[["x1", "x2"]].head(5).values @ fit.params - mean_lp)
+    centered_manual = np.exp(
+        df_survival[["x1", "x2"]].head(5).values @ fit.params - mean_lp
+    )
 
     np.testing.assert_allclose(pred / centered_manual, np.exp(mean_lp), rtol=1e-10)
 
@@ -166,10 +172,14 @@ def test_phreg_ame_matches_analytical(df_survival):
 # 2. Lifelines CoxPH (centered partial hazard scale)
 # ---------------------------------------------------------------------------
 
+
 def _skip_if_no_r_data():
     import os
+
     if not os.path.exists("/tmp/survival_data.csv"):
-        pytest.skip("R-generated survival data CSV not found; skipping R reference comparison")
+        pytest.skip(
+            "R-generated survival data CSV not found; skipping R reference comparison"
+        )
 
 
 def test_coxph_predictions_match_marginaleffects(df_survival):
@@ -240,6 +250,7 @@ def test_coxph_predictions_match_lifelines(df_survival):
 # 3. Lifelines Weibull AFT (survival probability scale)
 # ---------------------------------------------------------------------------
 
+
 def test_weibull_predictions_match_analytical(df_survival):
     """Survival probabilities should match analytical S(t|x) formula."""
     fit = WeibullAFTFitter()
@@ -254,7 +265,7 @@ def test_weibull_predictions_match_analytical(df_survival):
 
     X5 = np.asarray(adapter.design_matrix_from_df(df_survival.head(5)))
     lambda_x = np.exp(X5 @ beta_lambda)
-    manual_S = np.exp(-(t_med / lambda_x) ** rho)
+    manual_S = np.exp(-((t_med / lambda_x) ** rho))
 
     pred = np.asarray(adapter.predict(adapter.coefficients(), X5))
 
@@ -281,7 +292,7 @@ def test_weibull_ame_matches_analytical(df_survival):
 
     X_all = np.asarray(adapter.design_matrix_from_df(df_survival))
     lambda_all = np.exp(X_all @ beta_lambda)
-    S_all = np.exp(-(t_med / lambda_all) ** rho)
+    S_all = np.exp(-((t_med / lambda_all) ** rho))
 
     manual_ame_x1 = np.mean(S_all * rho * (t_med / lambda_all) ** rho * beta_lambda[0])
     manual_ame_x2 = np.mean(S_all * rho * (t_med / lambda_all) ** rho * beta_lambda[1])
@@ -310,9 +321,13 @@ def test_weibull_predictions_match_lifelines(df_survival):
 # 4. Lifelines CoxPH survival-probability scale
 # ---------------------------------------------------------------------------
 
+
 def test_coxph_survival_predictions_match_manual(df_survival):
     """S(t|x) = S_0(t) ^ PH(x) should match manual computation."""
-    from pymargins._adapters.lifelines_coxph_survival import LifelinesCoxPHSurvivalAdapter
+    from pymargins._adapters.lifelines_coxph_survival import (
+        LifelinesCoxPHSurvivalAdapter,
+    )
+
     fit = CoxPHFitter()
     fit.fit(df_survival, duration_col="time", event_col="status", formula="x1 + x2")
     adapter = LifelinesCoxPHSurvivalAdapter(fit, training_data=df_survival)
@@ -331,14 +346,17 @@ def test_coxph_survival_predictions_match_manual(df_survival):
         times = times[::-1]
         surv = surv[::-1]
     S0_t = float(np.interp(t, times, surv))
-    manual = S0_t ** ph
+    manual = S0_t**ph
 
     np.testing.assert_allclose(pred, manual, rtol=1e-6)
 
 
 def test_coxph_survival_predictions_match_lifelines(df_survival):
     """Adapter predict() should agree with lifelines predict_survival_function."""
-    from pymargins._adapters.lifelines_coxph_survival import LifelinesCoxPHSurvivalAdapter
+    from pymargins._adapters.lifelines_coxph_survival import (
+        LifelinesCoxPHSurvivalAdapter,
+    )
+
     fit = CoxPHFitter()
     fit.fit(df_survival, duration_col="time", event_col="status", formula="x1 + x2")
     adapter = LifelinesCoxPHSurvivalAdapter(fit, training_data=df_survival)
@@ -357,9 +375,13 @@ def test_coxph_survival_predictions_match_lifelines(df_survival):
 # 5. Statsmodels PHReg survival-probability scale
 # ---------------------------------------------------------------------------
 
+
 def test_phreg_survival_predictions_match_statsmodels(df_survival):
     """Adapter predict() should agree with statsmodels PHReg pred_type='surv'."""
-    from pymargins._adapters.statsmodels_phreg_survival import StatsmodelsPHRegSurvivalAdapter
+    from pymargins._adapters.statsmodels_phreg_survival import (
+        StatsmodelsPHRegSurvivalAdapter,
+    )
+
     fit = PHReg(
         df_survival["time"].values,
         df_survival[["x1", "x2"]].values,
@@ -384,9 +406,11 @@ def test_phreg_survival_predictions_match_statsmodels(df_survival):
 # 6. Lifelines LogNormal AFT
 # ---------------------------------------------------------------------------
 
+
 def test_lognormal_predictions_match_analytical(df_survival):
     """S(t|x) = 1 - Φ((log(t) - μ) / σ) should match manual computation."""
     from lifelines import LogNormalAFTFitter
+
     from pymargins._adapters.lifelines_lognormal_aft import LifelinesLogNormalAFTAdapter
 
     fit = LogNormalAFTFitter()
@@ -403,6 +427,7 @@ def test_lognormal_predictions_match_analytical(df_survival):
     mu = X5 @ beta_mu
     sigma = np.exp(beta_sigma)
     from scipy.stats import norm
+
     manual = 1.0 - norm.cdf((np.log(t) - mu) / sigma)
 
     np.testing.assert_allclose(pred, manual, rtol=1e-6)
@@ -411,6 +436,7 @@ def test_lognormal_predictions_match_analytical(df_survival):
 def test_lognormal_predictions_match_lifelines(df_survival):
     """Adapter predict() should agree with lifelines predict_survival_function."""
     from lifelines import LogNormalAFTFitter
+
     from pymargins._adapters.lifelines_lognormal_aft import LifelinesLogNormalAFTAdapter
 
     fit = LogNormalAFTFitter()
@@ -431,10 +457,14 @@ def test_lognormal_predictions_match_lifelines(df_survival):
 # 7. Lifelines LogLogistic AFT
 # ---------------------------------------------------------------------------
 
+
 def test_loglogistic_predictions_match_analytical(df_survival):
     """S(t|x) = 1 / (1 + (t / α)^β) should match manual computation."""
     from lifelines import LogLogisticAFTFitter
-    from pymargins._adapters.lifelines_loglogistic_aft import LifelinesLogLogisticAFTAdapter
+
+    from pymargins._adapters.lifelines_loglogistic_aft import (
+        LifelinesLogLogisticAFTAdapter,
+    )
 
     fit = LogLogisticAFTFitter()
     fit.fit(df_survival, duration_col="time", event_col="status")
@@ -457,7 +487,10 @@ def test_loglogistic_predictions_match_analytical(df_survival):
 def test_loglogistic_predictions_match_lifelines(df_survival):
     """Adapter predict() should agree with lifelines predict_survival_function."""
     from lifelines import LogLogisticAFTFitter
-    from pymargins._adapters.lifelines_loglogistic_aft import LifelinesLogLogisticAFTAdapter
+
+    from pymargins._adapters.lifelines_loglogistic_aft import (
+        LifelinesLogLogisticAFTAdapter,
+    )
 
     fit = LogLogisticAFTFitter()
     fit.fit(df_survival, duration_col="time", event_col="status")
@@ -477,10 +510,14 @@ def test_loglogistic_predictions_match_lifelines(df_survival):
 # 8. Lifelines GeneralizedGamma (bootstrap-only, compare against lifelines)
 # ---------------------------------------------------------------------------
 
+
 def test_generalized_gamma_predictions_match_lifelines(df_survival):
     """Adapter predict() should agree with lifelines predict_survival_function."""
     from lifelines import GeneralizedGammaRegressionFitter
-    from pymargins._adapters.lifelines_generalized_gamma import LifelinesGeneralizedGammaAdapter
+
+    from pymargins._adapters.lifelines_generalized_gamma import (
+        LifelinesGeneralizedGammaAdapter,
+    )
 
     fit = GeneralizedGammaRegressionFitter()
     fit.fit(df_survival, duration_col="time", event_col="status")
@@ -500,10 +537,14 @@ def test_generalized_gamma_predictions_match_lifelines(df_survival):
 # 9. Lifelines PiecewiseExponential (bootstrap-only, compare against lifelines)
 # ---------------------------------------------------------------------------
 
+
 def test_piecewise_exponential_predictions_match_lifelines(df_survival):
     """Adapter predict() should agree with lifelines predict_survival_function."""
     from lifelines import PiecewiseExponentialRegressionFitter
-    from pymargins._adapters.lifelines_piecewise_exponential import LifelinesPiecewiseExponentialAdapter
+
+    from pymargins._adapters.lifelines_piecewise_exponential import (
+        LifelinesPiecewiseExponentialAdapter,
+    )
 
     fit = PiecewiseExponentialRegressionFitter(breakpoints=[1, 3])
     fit.fit(df_survival, duration_col="time", event_col="status")
@@ -523,25 +564,31 @@ def test_piecewise_exponential_predictions_match_lifelines(df_survival):
 # 10. Lifelines CRCSpline (bootstrap-only, compare against lifelines)
 # ---------------------------------------------------------------------------
 
+
 def test_crc_spline_predictions_match_lifelines():
     """Adapter predict() should agree with lifelines predict_survival_function."""
     from lifelines import CRCSplineFitter
+
     from pymargins._adapters.lifelines_crc_spline import LifelinesCRCSplineAdapter
 
     rng = np.random.default_rng(42)
     n = 200
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+        }
+    )
     hazard = np.exp(0.5 + 0.3 * df["x1"] - 0.2 * df["x2"])
     df["T"] = rng.exponential(1.0 / hazard)
     df["E"] = (rng.random(n) < 0.8).astype(int)
 
     fit = CRCSplineFitter(n_baseline_knots=3)
     fit.fit(
-        df, duration_col="T", event_col="E",
-        regressors={"beta_": "x1 + x2", "gamma0_": "1", "gamma1_": "1", "gamma2_": "1"}
+        df,
+        duration_col="T",
+        event_col="E",
+        regressors={"beta_": "x1 + x2", "gamma0_": "1", "gamma1_": "1", "gamma2_": "1"},
     )
     adapter = LifelinesCRCSplineAdapter(fit, training_data=df)
 
@@ -559,10 +606,14 @@ def test_crc_spline_predictions_match_lifelines():
 # 11. Lifelines AalenAdditive (bootstrap-only, compare against lifelines)
 # ---------------------------------------------------------------------------
 
+
 def test_aalen_additive_predictions_match_lifelines(df_survival):
     """Adapter predict() should agree with lifelines predict_survival_function."""
     from lifelines import AalenAdditiveFitter
-    from pymargins._adapters.lifelines_aalen_additive import LifelinesAalenAdditiveAdapter
+
+    from pymargins._adapters.lifelines_aalen_additive import (
+        LifelinesAalenAdditiveAdapter,
+    )
 
     fit = AalenAdditiveFitter()
     fit.fit(df_survival, duration_col="time", event_col="status")
@@ -573,7 +624,9 @@ def test_aalen_additive_predictions_match_lifelines(df_survival):
     our_pred = np.asarray(adapter.predict(adapter.coefficients(), X5))
     # AalenAdditiveFitter ignores times= and returns all observed times;
     # extract the row closest to prediction_time.
-    ll_pred_full = fit.predict_survival_function(df_survival[["x1", "x2"]].head(5), times=[t])
+    ll_pred_full = fit.predict_survival_function(
+        df_survival[["x1", "x2"]].head(5), times=[t]
+    )
     idx = ll_pred_full.index.get_indexer([t], method="nearest")[0]
     ll_pred = ll_pred_full.iloc[idx].values
 
@@ -584,25 +637,31 @@ def test_aalen_additive_predictions_match_lifelines(df_survival):
 # 12. Lifelines CRCSplineHR (hazard-ratio scale)
 # ---------------------------------------------------------------------------
 
+
 def test_crc_spline_hr_predictions_match_analytical():
     """HR = exp(X @ beta_beta) should match manual computation."""
     from lifelines import CRCSplineFitter
+
     from pymargins._adapters.lifelines_crc_spline_hr import LifelinesCRCSplineHRAdapter
 
     rng = np.random.default_rng(42)
     n = 200
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+        }
+    )
     hazard = np.exp(0.5 + 0.3 * df["x1"] - 0.2 * df["x2"])
     df["T"] = rng.exponential(1.0 / hazard)
     df["E"] = (rng.random(n) < 0.8).astype(int)
 
     fit = CRCSplineFitter(n_baseline_knots=3)
     fit.fit(
-        df, duration_col="T", event_col="E",
-        regressors={"beta_": "x1 + x2", "gamma0_": "1", "gamma1_": "1", "gamma2_": "1"}
+        df,
+        duration_col="T",
+        event_col="E",
+        regressors={"beta_": "x1 + x2", "gamma0_": "1", "gamma1_": "1", "gamma2_": "1"},
     )
     adapter = LifelinesCRCSplineHRAdapter(fit, training_data=df)
 
@@ -619,17 +678,23 @@ def test_crc_spline_hr_predictions_match_analytical():
 # 13. Lifelines CoxTimeVarying partial-hazard AME
 # ---------------------------------------------------------------------------
 
+
 def test_cox_timevarying_ame_matches_analytical():
     """AME on partial-hazard scale should match mean(beta * exp((X - X_mean) @ beta))."""
     from lifelines import CoxTimeVaryingFitter
-    from pymargins._adapters.lifelines_coxtimevarying import LifelinesCoxTimeVaryingAdapter
+
+    from pymargins._adapters.lifelines_coxtimevarying import (
+        LifelinesCoxTimeVaryingAdapter,
+    )
 
     rng = np.random.default_rng(42)
     n = 200
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+        }
+    )
     hazard = np.exp(0.5 + 0.3 * df["x1"] - 0.2 * df["x2"])
     T = rng.exponential(1.0 / hazard)
     E = (rng.random(n) < 0.8).astype(int)
@@ -661,17 +726,23 @@ def test_cox_timevarying_ame_matches_analytical():
 # 14. Lifelines CoxTimeVarying survival-probability scale
 # ---------------------------------------------------------------------------
 
+
 def test_cox_timevarying_survival_predictions_match_manual():
     """S(t|x) = S_0(t) ^ PH(x) should match manual computation."""
     from lifelines import CoxTimeVaryingFitter
-    from pymargins._adapters.lifelines_cox_timevarying import LifelinesCoxTimeVaryingSurvivalAdapter
+
+    from pymargins._adapters.lifelines_cox_timevarying import (
+        LifelinesCoxTimeVaryingSurvivalAdapter,
+    )
 
     rng = np.random.default_rng(42)
     n = 200
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+        }
+    )
     hazard = np.exp(0.5 + 0.3 * df["x1"] - 0.2 * df["x2"])
     T = rng.exponential(1.0 / hazard)
     E = (rng.random(n) < 0.8).astype(int)
@@ -698,6 +769,6 @@ def test_cox_timevarying_survival_predictions_match_manual():
         times = times[::-1]
         surv = surv[::-1]
     S0_t = float(np.interp(t, times, surv))
-    manual = S0_t ** ph
+    manual = S0_t**ph
 
     np.testing.assert_allclose(pred, manual, rtol=1e-4)

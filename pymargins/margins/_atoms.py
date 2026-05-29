@@ -7,7 +7,8 @@ construction logic.
 """
 
 from __future__ import annotations
-from typing import Optional, Union, Any
+
+from collections.abc import Callable
 
 import jax.numpy as jnp
 import numpy as np
@@ -49,9 +50,9 @@ def _enumerate_groups(
 def _format_atom_label(
     session,
     group_label,
-    over_keys: Optional[list[str]],
-    suffix: Optional[str],
-) -> Optional[str]:
+    over_keys: list[str] | None,
+    suffix: str | None,
+) -> str | None:
     """Build a stable label for one atom of a stacked estimand.
 
     Combines an over-group identifier (``"region=west"``) with an
@@ -62,7 +63,7 @@ def _format_atom_label(
     parts: list[str] = []
     if over_keys is not None:
         gl = group_label if isinstance(group_label, tuple) else (group_label,)
-        parts.extend(f"{k}={v}" for k, v in zip(over_keys, gl))
+        parts.extend(f"{k}={v}" for k, v in zip(over_keys, gl, strict=False))
     if suffix is not None:
         parts.append(suffix)
     return ", ".join(parts) if parts else None
@@ -70,8 +71,8 @@ def _format_atom_label(
 
 def _finalize_atoms(
     session,
-    atoms: list[tuple[Optional[str], Callable]],
-) -> tuple[Callable, Optional[list[str]]]:
+    atoms: list[tuple[str | None, Callable]],
+) -> tuple[Callable, list[str] | None]:
     """Reduce a list of (label, h_atom) pairs to (h, labels).
 
     Single atom: return its h directly with no labels. Multiple atoms:
@@ -89,15 +90,17 @@ def _finalize_atoms(
         return atoms[0][1], ([label] if label is not None else None)
     individual_h = [h for _, h in atoms]
     labels = [lab for lab, _ in atoms]
+
     def h_vector(beta):
         return jnp.stack([hi(beta) for hi in individual_h])
+
     return h_vector, labels
 
 
 def _slice_by_outcome(
     session,
     result_data: dict,
-    outcome: Union[int, list[int]],
+    outcome: int | list[int],
 ) -> dict:
     """Slice result arrays to the requested outcome indices.
 
@@ -150,8 +153,15 @@ def _slice_by_outcome(
         return arr
 
     result = dict(result_data)
-    for key in ("estimate", "std_error", "conf_int_lower", "conf_int_upper",
-                "gradient", "draws", "kappa"):
+    for key in (
+        "estimate",
+        "std_error",
+        "conf_int_lower",
+        "conf_int_upper",
+        "gradient",
+        "draws",
+        "kappa",
+    ):
         if key in result:
             result[key] = _slice(result[key])
 

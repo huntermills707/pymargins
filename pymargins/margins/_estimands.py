@@ -1,25 +1,26 @@
 """Estimand builders for predictions, slopes, contrasts, and evaluate."""
 
 from __future__ import annotations
-from typing import Callable, Optional
+
+from collections.abc import Callable
 
 import jax.numpy as jnp
 
 from .._adapter import ModelAdapter
-from .._scenarios import (
-    expand_scenario,
-    make_aggregation_resolver,
-    _auto_label_from_atexog,
-)
 from .._estimands import (
+    make_evaluate_estimand,
+    make_linear_combination_estimand,
     make_prediction_estimand,
     make_slope_estimand,
-    make_linear_combination_estimand,
-    make_evaluate_estimand,
+)
+from .._scenarios import (
+    _auto_label_from_atexog,
+    expand_scenario,
+    make_aggregation_resolver,
 )
 
 
-def _get_base_data(session, adapter: Optional[ModelAdapter] = None):
+def _get_base_data(session, adapter: ModelAdapter | None = None):
     """Get base data from an adapter, applying matching if active.
 
     For the original session adapter, ``matching.matched_data`` is used
@@ -42,9 +43,9 @@ def _get_base_data(session, adapter: Optional[ModelAdapter] = None):
 def _build_prediction_estimand(
     session,
     scenario: dict,
-    transform: Optional[Callable],
-    adapter: Optional[ModelAdapter] = None,
-) -> tuple[Callable, Optional[list[str]], list[dict]]:
+    transform: Callable | None,
+    adapter: ModelAdapter | None = None,
+) -> tuple[Callable, list[str] | None, list[dict]]:
     """Construct the prediction estimand for predict() calls.
 
     Resolves the scenario into a design matrix using the session's
@@ -67,18 +68,23 @@ def _build_prediction_estimand(
     base_data = _get_base_data(session, adapter)
     var_meta = adapter.variable_metadata()
     resolver = make_aggregation_resolver(session.at, session.weights)
-    from ._atoms import _enumerate_groups, _format_atom_label, _finalize_atoms
+    from ._atoms import _enumerate_groups, _finalize_atoms, _format_atom_label
+
     groups, over_keys = _enumerate_groups(session, scenario, base_data, var_meta)
 
     sub_scenario = {k: v for k, v in scenario.items() if k != "over"}
-    atoms: list[tuple[Optional[str], Callable]] = []
+    atoms: list[tuple[str | None, Callable]] = []
     scenarios: list[dict] = []
 
     for group_label, group_df in groups:
         df, meta = expand_scenario(
-            sub_scenario, group_df, resolver, var_meta,
+            sub_scenario,
+            group_df,
+            resolver,
+            var_meta,
         )
         from .._tabular import to_pandas_if_needed
+
         X = adapter.design_matrix_from_df(to_pandas_if_needed(df))
         n_grid = meta.get("n_grid_points", 1)
         rows_per = meta.get("rows_per_grid_point", len(df))
@@ -103,19 +109,31 @@ def _build_prediction_estimand(
             else:
                 agg_kind = "none" if X_i.shape[0] == 1 else "overall"
             h_atom = make_prediction_estimand(
-                estimand_adapter, X_i,
+                estimand_adapter,
+                X_i,
                 aggregate=agg_kind,
-                weights=jnp.asarray(session.weights) if session.weights is not None else None,
+                weights=jnp.asarray(session.weights)
+                if session.weights is not None
+                else None,
                 phi_inv=session.phi_inv,
                 transform=transform,
             )
             if n_grid > 1:
-                grid_row = meta.get("grid_rows", [])[i] if i < len(meta.get("grid_rows", [])) else ()
+                grid_row = (
+                    meta.get("grid_rows", [])[i]
+                    if i < len(meta.get("grid_rows", []))
+                    else ()
+                )
                 grid_keys = meta.get("atexog_keys", [])
                 if grid_row and grid_keys:
-                    grid_suffix = ", ".join(f"{k}={v}" for k, v in zip(grid_keys, grid_row))
+                    grid_suffix = ", ".join(
+                        f"{k}={v}" for k, v in zip(grid_keys, grid_row, strict=False)
+                    )
                 else:
-                    grid_suffix = _auto_label_from_atexog(sub_scenario.get("atexog")) or f"grid[{i}]"
+                    grid_suffix = (
+                        _auto_label_from_atexog(sub_scenario.get("atexog"))
+                        or f"grid[{i}]"
+                    )
             else:
                 grid_suffix = _auto_label_from_atexog(sub_scenario.get("atexog"))
             label = _format_atom_label(session, group_label, over_keys, grid_suffix)
@@ -125,13 +143,17 @@ def _build_prediction_estimand(
             scen = {}
             if over_keys is not None:
                 gl = group_label if isinstance(group_label, tuple) else (group_label,)
-                for k, v in zip(over_keys, gl):
+                for k, v in zip(over_keys, gl, strict=False):
                     scen[k] = v
                 scen["_over_values"] = {ok: gl[i] for i, ok in enumerate(over_keys)}
             if n_grid > 1:
-                grid_row = meta.get("grid_rows", [])[i] if i < len(meta.get("grid_rows", [])) else ()
+                grid_row = (
+                    meta.get("grid_rows", [])[i]
+                    if i < len(meta.get("grid_rows", []))
+                    else ()
+                )
                 grid_keys = meta.get("atexog_keys", [])
-                for k, v in zip(grid_keys, grid_row):
+                for k, v in zip(grid_keys, grid_row, strict=False):
                     scen[k] = v
             else:
                 atexog = sub_scenario.get("atexog", {})
@@ -149,9 +171,9 @@ def _build_slope_estimand(
     session,
     scenario: dict,
     var_list: list[str],
-    transform: Optional[Callable],
-    adapter: Optional[ModelAdapter] = None,
-) -> tuple[Callable, Optional[list[str]], list[dict]]:
+    transform: Callable | None,
+    adapter: ModelAdapter | None = None,
+) -> tuple[Callable, list[str] | None, list[dict]]:
     """Construct the slope estimand for dydx() calls.
 
     Produces one atom per (over-group × variable). With a single
@@ -165,7 +187,8 @@ def _build_slope_estimand(
     base_data = _get_base_data(session, adapter)
     var_meta = adapter.variable_metadata()
     resolver = make_aggregation_resolver(session.at, session.weights)
-    from ._atoms import _enumerate_groups, _format_atom_label, _finalize_atoms
+    from ._atoms import _enumerate_groups, _finalize_atoms, _format_atom_label
+
     groups, over_keys = _enumerate_groups(session, scenario, base_data, var_meta)
 
     # Type-check each variable up front. column_index_of_variable raises
@@ -176,12 +199,15 @@ def _build_slope_estimand(
         adapter.column_index_of_variable(v)
 
     sub_scenario = {k: v for k, v in scenario.items() if k != "over"}
-    atoms: list[tuple[Optional[str], Callable]] = []
+    atoms: list[tuple[str | None, Callable]] = []
     scenarios: list[dict] = []
 
     for group_label, group_df in groups:
         df, meta = expand_scenario(
-            sub_scenario, group_df, resolver, var_meta,
+            sub_scenario,
+            group_df,
+            resolver,
+            var_meta,
         )
         if session.at == "overall":
             agg_kind = "overall"
@@ -192,7 +218,7 @@ def _build_slope_estimand(
         base_scen = {}
         if over_keys is not None:
             gl = group_label if isinstance(group_label, tuple) else (group_label,)
-            for k, v in zip(over_keys, gl):
+            for k, v in zip(over_keys, gl, strict=False):
                 base_scen[k] = v
             base_scen["_over_values"] = {ok: gl[i] for i, ok in enumerate(over_keys)}
         atexog = sub_scenario.get("atexog", {})
@@ -203,9 +229,13 @@ def _build_slope_estimand(
 
         for var_name in var_list:
             h_atom = make_slope_estimand(
-                estimand_adapter, df, var_name,
+                estimand_adapter,
+                df,
+                var_name,
                 aggregate=agg_kind,
-                weights=jnp.asarray(session.weights) if session.weights is not None else None,
+                weights=jnp.asarray(session.weights)
+                if session.weights is not None
+                else None,
                 phi_inv=session.phi_inv,
                 transform=transform,
                 fd_step=session.fd_step,
@@ -224,7 +254,7 @@ def _build_contrast_estimand(
     session,
     scenarios: list[dict],
     weights_arg,
-    adapter: Optional[ModelAdapter] = None,
+    adapter: ModelAdapter | None = None,
 ) -> Callable:
     """Construct a linear combination estimand for contrasts() calls."""
     adapter = adapter if adapter is not None else session.adapter
@@ -238,11 +268,13 @@ def _build_contrast_estimand(
             scenario,
             base_data=base_data,
             aggregation_resolver=make_aggregation_resolver(
-                session.at, session.weights,
+                session.at,
+                session.weights,
             ),
             variable_metadata=adapter.variable_metadata(),
         )
         from .._tabular import to_pandas_if_needed
+
         scenarios_X.append(adapter.design_matrix_from_df(to_pandas_if_needed(df)))
         scen_adapter = _scenario_adapter(adapter, scenario)
         if scen_adapter is not adapter:
@@ -283,7 +315,7 @@ def _build_evaluate_estimand(
     session,
     scenarios: list[dict],
     compose: Callable,
-    adapter: Optional[ModelAdapter] = None,
+    adapter: ModelAdapter | None = None,
 ) -> Callable:
     """Construct an arbitrary composition estimand for evaluate() calls."""
     adapter = adapter if adapter is not None else session.adapter
@@ -297,11 +329,13 @@ def _build_evaluate_estimand(
             scenario,
             base_data=base_data,
             aggregation_resolver=make_aggregation_resolver(
-                session.at, session.weights,
+                session.at,
+                session.weights,
             ),
             variable_metadata=adapter.variable_metadata(),
         )
         from .._tabular import to_pandas_if_needed
+
         scenarios_X.append(adapter.design_matrix_from_df(to_pandas_if_needed(df)))
         scen_adapter = _scenario_adapter(adapter, scenario)
         if scen_adapter is not adapter:

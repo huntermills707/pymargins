@@ -14,20 +14,20 @@ import statsmodels.api as sm
 jax.config.update("jax_enable_x64", True)
 
 from pymargins._gradients import (
-    gradient,
-    hessian,
-    directional_derivative,
-    hessian_vector_product,
-    make_predict_with_fd_jvp,
-    make_glm_jvp_wrapper,
     _jax_link_inverse,
     _jax_link_inverse_deriv,
+    directional_derivative,
+    gradient,
+    hessian,
+    hessian_vector_product,
+    make_glm_jvp_wrapper,
+    make_predict_with_fd_jvp,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def rng():
@@ -47,6 +47,7 @@ def x_row(rng):
 # ---------------------------------------------------------------------------
 # 1. Autodiff vs analytical gradients
 # ---------------------------------------------------------------------------
+
 
 def test_ols_gradient_exact():
     """For OLS, ∂(x·β)/∂β = x exactly."""
@@ -89,6 +90,7 @@ def test_vector_estimand_jacobian():
 # ---------------------------------------------------------------------------
 # 2. make_glm_jvp_wrapper vs pure JAX reimplementation
 # ---------------------------------------------------------------------------
+
 
 def test_glm_jvp_wrapper_matches_native_jax():
     """The custom-JVP GLM wrapper must agree with a pure-JAX GLM predict."""
@@ -207,6 +209,7 @@ def test_glm_jvp_wrapper_logc_link():
 # 3. FD vs autodiff agreement
 # ---------------------------------------------------------------------------
 
+
 def test_fd_gradient_agrees_with_autodiff():
     """Central-difference FD should agree with autodiff to ~10 digits."""
     rng = np.random.default_rng(99)
@@ -238,6 +241,7 @@ def test_fd_hessian_agrees_with_autodiff():
 # ---------------------------------------------------------------------------
 # 4. Custom-JVP wrapper composition
 # ---------------------------------------------------------------------------
+
 
 def test_fd_jvp_wrapper_composes_with_grad_and_hessian():
     """A non-JAX predict wrapped with FD-JVP must support jax.grad/hessian."""
@@ -326,6 +330,7 @@ def test_fd_jvp_wrapper_rejects_non_2d_X():
 # ---------------------------------------------------------------------------
 # 5. directional_derivative and hessian_vector_product
 # ---------------------------------------------------------------------------
+
 
 def test_directional_derivative_matches_grad_dot_v():
     """directional_derivative should equal grad·v."""
@@ -423,7 +428,7 @@ def test_hessian_fd_warns_for_large_n():
     beta = jnp.asarray(rng.standard_normal(60))
 
     def h(b):
-        return (b ** 2).sum()
+        return (b**2).sum()
 
     with pytest.warns(RuntimeWarning, match="O\\(n²\\) and explicitly slow"):
         hessian(h, beta, backend="fd", fd_step=1e-5)
@@ -440,7 +445,6 @@ def test_hessian_fd_vector_estimand_raises():
 
     with pytest.raises(ValueError, match="scalar-valued"):
         hessian(h, beta, backend="fd", fd_step=1e-5)
-
 
 
 def test_fd_jvp_wrapper_zero_tangents_scalar_output():
@@ -466,6 +470,7 @@ def test_fd_jvp_wrapper_zero_tangents_scalar_output():
 def test_jax_link_inverse_power_guard():
     """Power link inverse should not produce NaN for negative inputs."""
     import statsmodels.api as sm
+
     link = sm.families.links.Power(2.0)
     inv = _jax_link_inverse(link)
     z = jnp.array([-2.0, -1.0, 0.0, 1.0, 4.0])
@@ -479,6 +484,7 @@ def test_jax_link_inverse_power_guard():
 def test_jax_link_inverse_inv_power_guard():
     """InversePower link inverse should not produce inf at zero."""
     import statsmodels.api as sm
+
     link = sm.families.links.InversePower()
     inv = _jax_link_inverse(link)
     z = jnp.array([-1e-15, 0.0, 1e-15, 1.0])
@@ -489,6 +495,7 @@ def test_jax_link_inverse_inv_power_guard():
 def test_jax_link_inverse_inv_squared_guard():
     """InverseSquared link inverse should not produce NaN for z <= 0."""
     import statsmodels.api as sm
+
     link = sm.families.links.InverseSquared()
     inv = _jax_link_inverse(link)
     z = jnp.array([-1.0, 0.0, 1.0, 4.0])
@@ -504,6 +511,7 @@ def test_jax_link_inverse_inv_squared_guard():
 def test_jax_link_inverse_negative_binomial_guard():
     """NegativeBinomial link inverse should guard denominator near zero."""
     import statsmodels.api as sm
+
     link = sm.families.links.NegativeBinomial(alpha=1.0)
     inv = _jax_link_inverse(link)
     z = jnp.array([-100.0, 0.0, 1.0, 100.0])

@@ -32,21 +32,21 @@ Examples
 """
 
 from __future__ import annotations
-from typing import Optional, Union
+
 import itertools
 
 import numpy as np
-
 
 # ---------------------------------------------------------------------------
 # Single-variable helpers
 # ---------------------------------------------------------------------------
 
+
 def pairwise(
     variable: str,
     values,
     *,
-    label_fmt: Optional[str] = None,
+    label_fmt: str | None = None,
     **fixed,
 ):
     """Build two scenarios and a [+1, -1] contrast for a pairwise comparison.
@@ -104,7 +104,7 @@ def reference(
     levels,
     *,
     ref_level=None,
-    label_fmt: Optional[str] = None,
+    label_fmt: str | None = None,
     **fixed,
 ):
     """Build reference-level contrasts: each level vs a common baseline.
@@ -148,9 +148,7 @@ def reference(
         ref_level = levels[0]
 
     if ref_level not in levels:
-        raise ValueError(
-            f"ref_level {ref_level!r} not found in levels {levels}"
-        )
+        raise ValueError(f"ref_level {ref_level!r} not found in levels {levels}")
 
     if label_fmt is None:
         label_fmt = "{var}={val}"
@@ -167,7 +165,6 @@ def reference(
 
     n = len(scenarios)
     contrasts = {}
-    ref_label = label_fmt.format(var=variable, val=ref_level)
     for i, val in enumerate(ordered[1:], start=1):
         name = f"{val}_vs_{ref_level}"
         # Clean up name for use as a dict key
@@ -184,7 +181,7 @@ def at_levels(
     variable: str,
     *,
     levels,
-    label_fmt: Optional[str] = None,
+    label_fmt: str | None = None,
     **fixed,
 ):
     """Build one scenario per level of a categorical/binary variable.
@@ -232,7 +229,8 @@ def at_levels(
 # Multi-variable / factorial helpers
 # ---------------------------------------------------------------------------
 
-def grid(*, label_fmt: Optional[str] = None, **variables):
+
+def grid(*, label_fmt: str | None = None, **variables):
     """Cartesian product of variable values into a scenario list.
 
     Parameters
@@ -264,9 +262,9 @@ def grid(*, label_fmt: Optional[str] = None, **variables):
 
     scenarios = []
     for combo in itertools.product(*value_lists):
-        atexog = dict(zip(names, combo))
+        atexog = dict(zip(names, combo, strict=False))
         if label_fmt is None:
-            label = ", ".join(f"{n}={v}" for n, v in zip(names, combo))
+            label = ", ".join(f"{n}={v}" for n, v in zip(names, combo, strict=False))
         else:
             label = label_fmt.format(**atexog)
         scenarios.append({"atexog": atexog, "label": label})
@@ -282,7 +280,7 @@ def did(
     control_level=0,
     post_level=1,
     pre_level=0,
-    label_fmt: Optional[str] = None,
+    label_fmt: str | None = None,
     **fixed,
 ):
     """Build scenarios and contrast weights for a difference-in-differences design.
@@ -350,6 +348,7 @@ def did(
 # ---------------------------------------------------------------------------
 # Contrast-weight utilities
 # ---------------------------------------------------------------------------
+
 
 def diff(n: int):
     """Return a standard pairwise difference contrast vector.
@@ -431,7 +430,7 @@ def all_pairwise(
     variables,
     values_list,
     *,
-    label_fmt: Optional[str] = None,
+    label_fmt: str | None = None,
     **fixed,
 ):
     """Build all scenario combinations for a factorial design and return
@@ -440,7 +439,7 @@ def all_pairwise(
     For a single variable you may pass the name directly and the levels
     as a flat list (``all_pairwise("x", [0, 1])``); for multiple
     variables pass lists (``all_pairwise(["x", "y"], [[0, 1], ["A", "B"]])``).
-    
+
 
     Parameters
     ----------
@@ -481,9 +480,7 @@ def all_pairwise(
         values_list = [values_list]
 
     if len(variables) != len(values_list):
-        raise ValueError(
-            "variables and values_list must have the same length"
-        )
+        raise ValueError("variables and values_list must have the same length")
 
     combos = list(itertools.product(*values_list))
     if not combos:
@@ -492,9 +489,11 @@ def all_pairwise(
     scenarios = []
     for combo in combos:
         atexog = dict(fixed)
-        atexog.update(zip(variables, combo))
+        atexog.update(zip(variables, combo, strict=False))
         if label_fmt is None:
-            label = ", ".join(f"{v}={c}" for v, c in zip(variables, combo))
+            label = ", ".join(
+                f"{v}={c}" for v, c in zip(variables, combo, strict=False)
+            )
         else:
             label = label_fmt.format(**atexog)
         scenarios.append({"atexog": atexog, "label": label})

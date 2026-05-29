@@ -1,11 +1,16 @@
 """Tests for linearmodels panel adapters."""
 
+import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import pytest
-import jax.numpy as jnp
-
-from linearmodels.panel import PanelOLS, PooledOLS, RandomEffects, FirstDifferenceOLS, BetweenOLS
+from linearmodels.panel import (
+    BetweenOLS,
+    FirstDifferenceOLS,
+    PanelOLS,
+    PooledOLS,
+    RandomEffects,
+)
 
 from pymargins import Margins
 from pymargins._adapters.linearmodels_panel import LinearmodelsPanelAdapter
@@ -18,19 +23,22 @@ def panel_data():
     t = 5
     entities = np.repeat(np.arange(n), t)
     times = np.tile(np.arange(t), n)
-    df = pd.DataFrame({
-        "entity": entities,
-        "time": times,
-        "y": np.random.randn(n * t) + 0.5 * entities + 0.3 * times,
-        "x1": np.random.randn(n * t),
-        "x2": np.random.randn(n * t),
-    }).set_index(["entity", "time"])
+    df = pd.DataFrame(
+        {
+            "entity": entities,
+            "time": times,
+            "y": np.random.randn(n * t) + 0.5 * entities + 0.3 * times,
+            "x1": np.random.randn(n * t),
+            "x2": np.random.randn(n * t),
+        }
+    ).set_index(["entity", "time"])
     return df
 
 
 # ---------------------------------------------------------------------------
 # Adapter construction
 # ---------------------------------------------------------------------------
+
 
 def test_adapter_from_panelols(panel_data):
     mod = PanelOLS.from_formula("y ~ x1 + x2 + EntityEffects", data=panel_data)
@@ -76,6 +84,7 @@ def test_adapter_from_between(panel_data):
 # Design matrix
 # ---------------------------------------------------------------------------
 
+
 def test_design_matrix_from_df(panel_data):
     mod = PanelOLS.from_formula("y ~ x1 + x2 + EntityEffects", data=panel_data)
     res = mod.fit()
@@ -98,6 +107,7 @@ def test_design_matrix_injects_intercept(panel_data):
 # ---------------------------------------------------------------------------
 # Prediction
 # ---------------------------------------------------------------------------
+
 
 def test_predict_matches_native(panel_data):
     mod = PanelOLS.from_formula("y ~ x1 + x2 + EntityEffects", data=panel_data)
@@ -125,6 +135,7 @@ def test_predict_matches_native_pooled(panel_data):
 # Variable metadata
 # ---------------------------------------------------------------------------
 
+
 def test_variable_metadata(panel_data):
     mod = PanelOLS.from_formula("y ~ x1 + x2 + EntityEffects", data=panel_data)
     res = mod.fit()
@@ -137,6 +148,7 @@ def test_variable_metadata(panel_data):
 # ---------------------------------------------------------------------------
 # Bootstrap refit
 # ---------------------------------------------------------------------------
+
 
 def test_refit(panel_data):
     mod = PanelOLS.from_formula("y ~ x1 + x2 + EntityEffects", data=panel_data)
@@ -160,6 +172,7 @@ def test_refit_pooled(panel_data):
 # ---------------------------------------------------------------------------
 # End-to-end via Margins
 # ---------------------------------------------------------------------------
+
 
 def test_margins_predict_panelols(panel_data):
     mod = PanelOLS.from_formula("y ~ x1 + x2 + EntityEffects", data=panel_data)
@@ -206,8 +219,10 @@ def test_margins_contrasts_pooledols(panel_data):
 # Auto-detection
 # ---------------------------------------------------------------------------
 
+
 def test_auto_detect_panelols(panel_data):
     from pymargins._adapters import _detect_adapter_class
+
     mod = PanelOLS.from_formula("y ~ x1 + x2 + EntityEffects", data=panel_data)
     res = mod.fit()
     cls = _detect_adapter_class(res)
@@ -216,6 +231,7 @@ def test_auto_detect_panelols(panel_data):
 
 def test_auto_detect_pooledols(panel_data):
     from pymargins._adapters import _detect_adapter_class
+
     mod = PooledOLS.from_formula("y ~ x1 + x2", data=panel_data)
     res = mod.fit()
     cls = _detect_adapter_class(res)
@@ -226,6 +242,7 @@ def test_auto_detect_pooledols(panel_data):
 # Formula interface (Track B)
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def panel_poly_data():
     rng = np.random.default_rng(42)
@@ -234,19 +251,24 @@ def panel_poly_data():
     entities = np.repeat(np.arange(n), t)
     times = np.tile(np.arange(t), n)
     age = rng.normal(50, 10, size=n * t)
-    df = pd.DataFrame({
-        "entity": entities,
-        "time": times,
-        "age": age,
-        "y": 0.2 * age + 0.01 * (age ** 2) + 0.5 * entities + rng.normal(n * t),
-    }).set_index(["entity", "time"])
+    df = pd.DataFrame(
+        {
+            "entity": entities,
+            "time": times,
+            "age": age,
+            "y": 0.2 * age + 0.01 * (age**2) + 0.5 * entities + rng.normal(n * t),
+        }
+    ).set_index(["entity", "time"])
     return df
 
 
 def test_formula_verification_passes_panelols(panel_poly_data):
     """B.4 verification succeeds for a correctly specified formula (no intercept)."""
     from pymargins._formula import FormulaSpec
-    mod = PanelOLS.from_formula("y ~ age + I(age**2) + EntityEffects", data=panel_poly_data)
+
+    mod = PanelOLS.from_formula(
+        "y ~ age + I(age**2) + EntityEffects", data=panel_poly_data
+    )
     res = mod.fit()
     adapter = LinearmodelsPanelAdapter(res, training_data=panel_poly_data)
     # EntityEffects absorbs the intercept, so formula must suppress it
@@ -257,7 +279,10 @@ def test_formula_verification_passes_panelols(panel_poly_data):
 def test_formula_verification_fails_on_wrong_formula_panelols(panel_poly_data):
     """B.4 verification fails when the formula includes an absorbed intercept."""
     from pymargins._formula import FormulaSpec
-    mod = PanelOLS.from_formula("y ~ age + I(age**2) + EntityEffects", data=panel_poly_data)
+
+    mod = PanelOLS.from_formula(
+        "y ~ age + I(age**2) + EntityEffects", data=panel_poly_data
+    )
     res = mod.fit()
     adapter = LinearmodelsPanelAdapter(res, training_data=panel_poly_data)
     # Wrong: includes Intercept which the model absorbed
@@ -268,7 +293,9 @@ def test_formula_verification_fails_on_wrong_formula_panelols(panel_poly_data):
 
 def test_dydx_with_formula_panelols(panel_poly_data):
     """B.6 Acceptance #2: PanelOLS with I(age**2) yields correct dydx via formula=."""
-    mod = PanelOLS.from_formula("y ~ age + I(age**2) + EntityEffects", data=panel_poly_data)
+    mod = PanelOLS.from_formula(
+        "y ~ age + I(age**2) + EntityEffects", data=panel_poly_data
+    )
     res = mod.fit()
     # Use a larger fd_step to avoid float32 precision loss in the quadratic
     # finite-difference at age ~ 50 (default 1e-6 is too small for float32).
@@ -280,6 +307,9 @@ def test_dydx_with_formula_panelols(panel_poly_data):
         fd_step=1e-4,
     )
     slope = m.dydx("age")
-    expected = res.params["age"] + 2 * res.params["I(age ** 2)"] * panel_poly_data["age"].mean()
+    expected = (
+        res.params["age"]
+        + 2 * res.params["I(age ** 2)"] * panel_poly_data["age"].mean()
+    )
     assert np.isclose(float(slope.estimate), expected, rtol=1e-3)
     assert float(slope.std_error) > 0

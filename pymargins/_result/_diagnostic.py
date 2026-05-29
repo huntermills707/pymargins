@@ -4,16 +4,17 @@ Diagnostic result type.
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass
 
 import numpy as np
 
 from ._text import SummaryString
 
-
 # ---------------------------------------------------------------------------
 # Diagnostic result (from session_kappa)
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class DiagnosticResult:
@@ -44,6 +45,7 @@ class DiagnosticResult:
         One-line summary of the session's analytical posture (scale, vcov,
         method) for context in audit logs.
     """
+
     kappa_min: float
     kappa_median: float
     kappa_max: float

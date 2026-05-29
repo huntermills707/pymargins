@@ -3,7 +3,6 @@
 import numpy as np
 import pandas as pd
 import pytest
-
 from linearmodels.panel import FamaMacBeth
 
 from pymargins import Margins
@@ -19,12 +18,14 @@ def panel_df():
     times = np.tile(np.arange(t), n)
     x1 = np.random.randn(n * t)
     y = 1.0 + 2.0 * x1 + np.random.randn(n * t) * 0.5
-    return pd.DataFrame({
-        "entity": entities,
-        "time": times,
-        "y": y,
-        "x1": x1,
-    }).set_index(["entity", "time"])
+    return pd.DataFrame(
+        {
+            "entity": entities,
+            "time": times,
+            "y": y,
+            "x1": x1,
+        }
+    ).set_index(["entity", "time"])
 
 
 def test_auto_detect_famamacbeth(panel_df):
@@ -41,7 +42,9 @@ def test_margins_predict(panel_df):
 
     pred = m.predict()
     native_pred = res.predict(exog=panel_df[["x1"]])
-    assert np.isclose(float(pred.estimate), float(native_pred.mean().iloc[0]), rtol=1e-4)
+    assert np.isclose(
+        float(pred.estimate), float(native_pred.mean().iloc[0]), rtol=1e-4
+    )
 
 
 def test_margins_dydx(panel_df):

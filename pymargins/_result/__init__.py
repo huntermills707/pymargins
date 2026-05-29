@@ -3,9 +3,14 @@
 Re-exports all result types for backward compatibility.
 """
 
-from ._test import TestResult, AdjustedResults, adjust
 from ._diagnostic import DiagnosticResult
-from ._margins import MarginsResult, _join_fallback_reasons, _combine_results, compose_results
+from ._margins import (
+    MarginsResult,
+    _combine_results,
+    _join_fallback_reasons,
+    compose_results,
+)
+from ._test import AdjustedResults, TestResult, adjust
 
 __all__ = [
     "TestResult",

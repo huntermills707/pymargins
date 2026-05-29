@@ -24,10 +24,10 @@ jax.config.update("jax_enable_x64", True)
 
 from pymargins import Margins
 
-
 # ---------------------------------------------------------------------------
 # Fixture: exact data from Williams 2012 demo
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def df_williams():
@@ -55,16 +55,25 @@ def df_williams():
         + 2.6 * (agegrp == 6).astype(float)
     )
     diabetes = rng.binomial(1, 1 / (1 + np.exp(-lp)))
-    bp = 110 + 0.4 * age + 2.5 * black + 1.2 * female + 0.5 * bmi + rng.normal(0, 8, size=n)
-    return pd.DataFrame({
-        "diabetes": diabetes,
-        "bp": bp,
-        "black": black,
-        "female": female,
-        "age": age,
-        "agegrp": agegrp,
-        "bmi": bmi,
-    })
+    bp = (
+        110
+        + 0.4 * age
+        + 2.5 * black
+        + 1.2 * female
+        + 0.5 * bmi
+        + rng.normal(0, 8, size=n)
+    )
+    return pd.DataFrame(
+        {
+            "diabetes": diabetes,
+            "bp": bp,
+            "black": black,
+            "female": female,
+            "age": age,
+            "agegrp": agegrp,
+            "bmi": bmi,
+        }
+    )
 
 
 @pytest.fixture
@@ -153,6 +162,7 @@ OLS_AGE_CI = (0.378, 0.41)
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _assert_point_estimate(result, expected, abs_tol=1e-4):
     assert float(result.estimate) == pytest.approx(expected, abs=abs_tol)
 
@@ -165,6 +175,7 @@ def _assert_ci(result, expected_lo, expected_hi, abs_tol=1e-3):
 # ---------------------------------------------------------------------------
 # 2. Adjusted Predictions at the Means (APM)
 # ---------------------------------------------------------------------------
+
 
 def test_apm_point_estimates(fit_logit):
     m = Margins.log_scale(fit_logit, at="typical", kappa_threshold=float("inf"))
@@ -179,6 +190,7 @@ def test_apm_point_estimates(fit_logit):
 # 3. Average Adjusted Predictions (AAP)
 # ---------------------------------------------------------------------------
 
+
 def test_aap_point_estimates(fit_logit):
     m = Margins.log_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
     aap = m.predict(atexog={"agegrp": list(range(1, 7))})
@@ -191,6 +203,7 @@ def test_aap_point_estimates(fit_logit):
 # ---------------------------------------------------------------------------
 # 4. Predictions at Representative Values
 # ---------------------------------------------------------------------------
+
 
 def test_repr_values_point_estimates(fit_logit):
     m = Margins.log_scale(fit_logit, at="typical", kappa_threshold=float("inf"))
@@ -205,6 +218,7 @@ def test_repr_values_point_estimates(fit_logit):
 # 5. Marginal Effects at the Means (MEM) — continuous
 # ---------------------------------------------------------------------------
 
+
 def test_mem_age_point_estimate_and_ci(fit_logit):
     m = Margins.log_scale(fit_logit, at="typical", kappa_threshold=float("inf"))
     mem = m.dydx("age")
@@ -218,6 +232,7 @@ def test_mem_age_point_estimate_and_ci(fit_logit):
 # 6. Average Marginal Effects (AME) — continuous
 # ---------------------------------------------------------------------------
 
+
 def test_ame_age_point_estimate_and_ci(fit_logit):
     m = Margins.log_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
     ame = m.dydx("age")
@@ -229,6 +244,7 @@ def test_ame_age_point_estimate_and_ci(fit_logit):
 # ---------------------------------------------------------------------------
 # 7. Discrete changes for dummy variables (risk ratios on log scale)
 # ---------------------------------------------------------------------------
+
 
 def test_discrete_black_risk_ratio_and_ci(fit_logit):
     m = Margins.log_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
@@ -260,6 +276,7 @@ def test_discrete_female_at_typical_risk_ratio_and_ci(fit_logit):
 # 8. Marginal Effects at Representative Values (MER)
 # ---------------------------------------------------------------------------
 
+
 def test_mer_black_female0_risk_ratio_and_ci(fit_logit):
     m = Margins.log_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
     mer = m.contrasts(
@@ -290,6 +307,7 @@ def test_mer_black_female1_risk_ratio_and_ci(fit_logit):
 # 9. Direct ratio via evaluate() on linear_scale
 # ---------------------------------------------------------------------------
 
+
 def test_direct_ratio_black_matches_log_scale_point_estimate(fit_logit):
     """Direct ratio via evaluate() should match log_scale RR point estimate."""
     m = Margins.linear_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
@@ -318,6 +336,7 @@ def test_direct_ratio_female_matches_log_scale_point_estimate(fit_logit):
 # ---------------------------------------------------------------------------
 # 10. True lift = RR - 1 (derived from log_scale)
 # ---------------------------------------------------------------------------
+
 
 def test_true_lift_black_from_log_scale(fit_logit):
     m = Margins.log_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
@@ -389,10 +408,14 @@ def test_evaluate_lift_black_matches_manual_and_rr_minus_one(fit_logit, df_willi
 
     # Point estimate matches manual exactly
     assert float(lift_eval.estimate) == pytest.approx(manual_lift, abs=1e-6)
-    assert float(lift_eval.estimate) == pytest.approx(EVALUATE_LIFT_BLACK_EXPECTED, abs=1e-4)
+    assert float(lift_eval.estimate) == pytest.approx(
+        EVALUATE_LIFT_BLACK_EXPECTED, abs=1e-4
+    )
 
     # CI matches reference (direct delta method on ratio scale)
-    _assert_ci(lift_eval, EVALUATE_LIFT_BLACK_CI[0], EVALUATE_LIFT_BLACK_CI[1], abs_tol=1e-3)
+    _assert_ci(
+        lift_eval, EVALUATE_LIFT_BLACK_CI[0], EVALUATE_LIFT_BLACK_CI[1], abs_tol=1e-3
+    )
 
     # Also matches RR - 1 from log_scale (point estimate only)
     m_rr = Margins.log_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
@@ -427,8 +450,12 @@ def test_evaluate_lift_female_matches_manual_and_rr_minus_one(fit_logit, df_will
     )
 
     assert float(lift_eval.estimate) == pytest.approx(manual_lift, abs=1e-6)
-    assert float(lift_eval.estimate) == pytest.approx(EVALUATE_LIFT_FEMALE_EXPECTED, abs=1e-4)
-    _assert_ci(lift_eval, EVALUATE_LIFT_FEMALE_CI[0], EVALUATE_LIFT_FEMALE_CI[1], abs_tol=1e-3)
+    assert float(lift_eval.estimate) == pytest.approx(
+        EVALUATE_LIFT_FEMALE_EXPECTED, abs=1e-4
+    )
+    _assert_ci(
+        lift_eval, EVALUATE_LIFT_FEMALE_CI[0], EVALUATE_LIFT_FEMALE_CI[1], abs_tol=1e-3
+    )
 
     m_rr = Margins.log_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
     rr = m_rr.contrasts(
@@ -445,6 +472,7 @@ def test_evaluate_lift_female_matches_manual_and_rr_minus_one(fit_logit, df_will
 # ---------------------------------------------------------------------------
 # 13. OLS model
 # ---------------------------------------------------------------------------
+
 
 def test_ols_mem_age_matches_coefficient_and_ci(fit_ols):
     m = Margins.linear_scale(fit_ols, at="typical", kappa_threshold=float("inf"))

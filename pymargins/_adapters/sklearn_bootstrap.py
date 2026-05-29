@@ -18,21 +18,20 @@ a clear error if the fallback cannot represent the term.
 """
 
 from __future__ import annotations
-from typing import Optional, Any
-import warnings
+
+from typing import Any
 
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
-
 from sklearn.base import clone
 
 from .._adapter import BootstrapOnlyAdapter, VariableInfo
 from ._common import (
-    column_index_of_variable,
-    build_variable_metadata,
-    validate_vcov_spec,
     _has_derived_terms,
+    build_variable_metadata,
+    column_index_of_variable,
+    validate_vcov_spec,
 )
 
 
@@ -64,9 +63,9 @@ class SklearnBootstrapAdapter(BootstrapOnlyAdapter):
         *,
         X_train=None,
         y_train=None,
-        formula: Optional[str] = None,
-        data: Optional[pd.DataFrame] = None,
-        target_name: Optional[str] = None,
+        formula: str | None = None,
+        data: pd.DataFrame | None = None,
+        target_name: str | None = None,
     ):
         self.model = model
         self._formula_spec = None
@@ -117,7 +116,7 @@ class SklearnBootstrapAdapter(BootstrapOnlyAdapter):
         self._dummy_beta = jnp.array([0.0])
 
     @staticmethod
-    def _split_data(data: pd.DataFrame, target_name: Optional[str] = None):
+    def _split_data(data: pd.DataFrame, target_name: str | None = None):
         """Split a DataFrame into X and y, inferring target if needed."""
         if target_name is not None:
             if target_name not in data.columns:
@@ -149,7 +148,7 @@ class SklearnBootstrapAdapter(BootstrapOnlyAdapter):
         """
         return self._dummy_beta
 
-    def covariance(self, vcov_spec: Optional[Any] = None) -> jnp.ndarray:
+    def covariance(self, vcov_spec: Any | None = None) -> jnp.ndarray:
         """Return a dummy covariance matrix."""
         return jnp.array([[0.0]])
 
@@ -157,7 +156,7 @@ class SklearnBootstrapAdapter(BootstrapOnlyAdapter):
         self,
         beta: jnp.ndarray,
         X: jnp.ndarray,
-        offset: Optional[jnp.ndarray] = None,
+        offset: jnp.ndarray | None = None,
     ) -> jnp.ndarray:
         """Predict using the fitted sklearn model, ignoring ``beta``."""
         X_np = np.asarray(X)
@@ -208,16 +207,13 @@ class SklearnBootstrapAdapter(BootstrapOnlyAdapter):
         missing = [c for c in self._feature_names if c not in df.columns]
         if missing:
             raise ValueError(
-                f"Missing feature columns: {missing}. "
-                f"Available: {list(df.columns)}."
+                f"Missing feature columns: {missing}. Available: {list(df.columns)}."
             )
         return jnp.asarray(aligned.values)
 
     def column_index_of_variable(self, variable_name: str) -> int:
         if self._feature_names is None:
-            raise ValueError(
-                "SklearnBootstrapAdapter: feature_names not available."
-            )
+            raise ValueError("SklearnBootstrapAdapter: feature_names not available.")
         return column_index_of_variable(
             self._feature_names,
             self.variable_metadata(),
@@ -227,9 +223,7 @@ class SklearnBootstrapAdapter(BootstrapOnlyAdapter):
     def variable_metadata(self) -> dict[str, VariableInfo]:
         if not hasattr(self, "_variable_metadata"):
             if self._training_data is not None:
-                self._variable_metadata = build_variable_metadata(
-                    self._training_data
-                )
+                self._variable_metadata = build_variable_metadata(self._training_data)
             elif self._X_train is not None and hasattr(self._X_train, "columns"):
                 self._variable_metadata = build_variable_metadata(self._X_train)
             else:
@@ -292,11 +286,14 @@ class SklearnBootstrapAdapter(BootstrapOnlyAdapter):
                 f"'Intercept' column."
             )
 
-    def refit(self, resampled_data, *, index=None) -> "SklearnBootstrapAdapter":
+    def refit(self, resampled_data, *, index=None) -> SklearnBootstrapAdapter:
         """Refit the sklearn model on resampled data."""
         if hasattr(resampled_data, "iloc"):
             # DataFrame input — could be full data (with target) or just X
-            if self._target_name is not None and self._target_name in resampled_data.columns:
+            if (
+                self._target_name is not None
+                and self._target_name in resampled_data.columns
+            ):
                 X_new, y_new = self._split_data(resampled_data, self._target_name)
             else:
                 # No target in resampled data — use stored y_train

@@ -9,10 +9,17 @@ Phase 2 (current): PolarsTabular — wraps polars.DataFrame, faster scenario plu
 """
 
 from __future__ import annotations
-from typing import Protocol, Iterable, Any, Union, runtime_checkable
-import numpy as np
 
-ArrayLike = Union[np.ndarray, Any]  # Any = jnp.ndarray when jax is available
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+import numpy as np
+import pandas as pd
+
+if TYPE_CHECKING:
+    import polars as pl
+
+ArrayLike = np.ndarray | Any  # Any = jnp.ndarray when jax is available
 
 # Hoist optional polars import to module level so that individual methods
 # do not pay the import lookup cost on every call.
@@ -35,6 +42,7 @@ __all__ = [
 # Protocol
 # ---------------------------------------------------------------------------
 
+
 @runtime_checkable
 class TabularData(Protocol):
     """Minimal tabular interface for the pymargins scenario engine."""
@@ -51,20 +59,20 @@ class TabularData(Protocol):
     # --- column access ---
     def __getitem__(self, key: str) -> ArrayLike: ...
 
-    def with_column(self, name: str, values: ArrayLike) -> "TabularData": ...
+    def with_column(self, name: str, values: ArrayLike) -> TabularData: ...
 
     # --- row slicing ---
-    def iloc(self, idx: Any) -> "TabularData": ...
+    def iloc(self, idx: Any) -> TabularData: ...
 
     # --- grouping ---
-    def groupby(self, keys: list[str]) -> Iterable[tuple[Any, "TabularData"]]: ...
+    def groupby(self, keys: list[str]) -> Iterable[tuple[Any, TabularData]]: ...
 
     # --- combination ---
     @staticmethod
-    def concat(tables: list["TabularData"]) -> "TabularData": ...
+    def concat(tables: list[TabularData]) -> TabularData: ...
 
     # --- conversion ---
-    def to_pandas(self) -> "pd.DataFrame": ...
+    def to_pandas(self) -> pd.DataFrame: ...
 
     def to_jax_dict(self) -> dict[str, Any]: ...  # dict[str, jnp.ndarray]
 
@@ -72,6 +80,7 @@ class TabularData(Protocol):
 # ---------------------------------------------------------------------------
 # Pandas backend (Phase 1)
 # ---------------------------------------------------------------------------
+
 
 class PandasTabular:
     """TabularData backend backed by pandas. Zero user-visible change.
@@ -82,11 +91,13 @@ class PandasTabular:
        for panel data) are handled correctly.
     """
 
-    def __init__(self, df: "pd.DataFrame"):
+    def __init__(self, df: pd.DataFrame):
         import pandas as pd
 
         if not isinstance(df, pd.DataFrame):
-            raise TypeError(f"PandasTabular expects pd.DataFrame, got {type(df).__name__}")
+            raise TypeError(
+                f"PandasTabular expects pd.DataFrame, got {type(df).__name__}"
+            )
         self._df = df
 
     # --- introspection ---
@@ -105,36 +116,34 @@ class PandasTabular:
     def __getitem__(self, key: str) -> np.ndarray:
         return self._df[key].values
 
-    def with_column(self, name: str, values: ArrayLike) -> "PandasTabular":
-        import pandas as pd
+    def with_column(self, name: str, values: ArrayLike) -> PandasTabular:
 
         df = self._df.copy()
         df[name] = values
         return PandasTabular(df)
 
     # --- row slicing ---
-    def iloc(self, idx: Any) -> "PandasTabular":
-        import pandas as pd
+    def iloc(self, idx: Any) -> PandasTabular:
 
         if hasattr(idx, "dtype") and idx.dtype == bool:
             return PandasTabular(self._df.loc[idx].reset_index(drop=True))
         return PandasTabular(self._df.iloc[idx].reset_index(drop=True))
 
     # --- grouping ---
-    def groupby(self, keys: list[str]) -> Iterable[tuple[Any, "PandasTabular"]]:
+    def groupby(self, keys: list[str]) -> Iterable[tuple[Any, PandasTabular]]:
         for g, gdf in self._df.groupby(keys, sort=True):
             yield (g, PandasTabular(gdf.reset_index(drop=True)))
 
     # --- combination ---
     @staticmethod
-    def concat(tables: list["PandasTabular"]) -> "PandasTabular":
+    def concat(tables: list[PandasTabular]) -> PandasTabular:
         import pandas as pd
 
         dfs = [t._df for t in tables]
         return PandasTabular(pd.concat(dfs, ignore_index=True))
 
     # --- conversion ---
-    def to_pandas(self) -> "pd.DataFrame":
+    def to_pandas(self) -> pd.DataFrame:
         return self._df.copy()
 
     def to_jax_dict(self) -> dict[str, Any]:
@@ -143,10 +152,10 @@ class PandasTabular:
         return {c: jnp.array(self._df[c].values) for c in self._df.columns}
 
     # --- pandas-specific escape hatches ---
-    def copy(self) -> "PandasTabular":
+    def copy(self) -> PandasTabular:
         return PandasTabular(self._df.copy())
 
-    def head(self, n: int = 5) -> "PandasTabular":
+    def head(self, n: int = 5) -> PandasTabular:
         return PandasTabular(self._df.head(n).copy())
 
     def __len__(self) -> int:
@@ -160,6 +169,7 @@ class PandasTabular:
 # Polars backend (Phase 2)
 # ---------------------------------------------------------------------------
 
+
 class PolarsTabular:
     """TabularData backend backed by Polars.
 
@@ -168,12 +178,14 @@ class PolarsTabular:
     compatibility.
     """
 
-    def __init__(self, df: "pl.DataFrame"):
+    def __init__(self, df: pl.DataFrame):
         if _pl is None:
             raise RuntimeError("polars is not installed")
 
         if not isinstance(df, _pl.DataFrame):
-            raise TypeError(f"PolarsTabular expects pl.DataFrame, got {type(df).__name__}")
+            raise TypeError(
+                f"PolarsTabular expects pl.DataFrame, got {type(df).__name__}"
+            )
         self._df = df
 
     # --- introspection ---
@@ -192,7 +204,7 @@ class PolarsTabular:
     def __getitem__(self, key: str) -> np.ndarray:
         return self._df[key].to_numpy()
 
-    def with_column(self, name: str, values: ArrayLike) -> "PolarsTabular":
+    def with_column(self, name: str, values: ArrayLike) -> PolarsTabular:
         if _pl is None:
             raise RuntimeError("polars is not installed")
 
@@ -212,7 +224,7 @@ class PolarsTabular:
         return PolarsTabular(self._df.with_columns(series))
 
     # --- row slicing ---
-    def iloc(self, idx: Any) -> "PolarsTabular":
+    def iloc(self, idx: Any) -> PolarsTabular:
         if _pl is None:
             raise RuntimeError("polars is not installed")
 
@@ -230,7 +242,7 @@ class PolarsTabular:
         return PolarsTabular(self._df[idx_arr.tolist()])
 
     # --- grouping ---
-    def groupby(self, keys: list[str]) -> Iterable[tuple[Any, "PolarsTabular"]]:
+    def groupby(self, keys: list[str]) -> Iterable[tuple[Any, PolarsTabular]]:
         for g, gdf in self._df.group_by(keys, maintain_order=True):
             # Polars returns tuple keys even for single key; unwrap for pandas compat
             if len(keys) == 1:
@@ -239,7 +251,7 @@ class PolarsTabular:
 
     # --- combination ---
     @staticmethod
-    def concat(tables: list["PolarsTabular"]) -> "PolarsTabular":
+    def concat(tables: list[PolarsTabular]) -> PolarsTabular:
         if _pl is None:
             raise RuntimeError("polars is not installed")
 
@@ -247,7 +259,7 @@ class PolarsTabular:
         return PolarsTabular(_pl.concat(dfs))
 
     # --- conversion ---
-    def to_pandas(self) -> "pd.DataFrame":
+    def to_pandas(self) -> pd.DataFrame:
         # Standard numpy-backed conversion for patsy/formulaic safety.
         # PyArrow-backed (use_pyarrow_extension_array=True) is faster but
         # patsy does not handle Arrow extension dtypes correctly.
@@ -259,10 +271,10 @@ class PolarsTabular:
         return {c: jnp.array(self._df[c].to_numpy()) for c in self._df.columns}
 
     # --- escape hatches ---
-    def copy(self) -> "PolarsTabular":
+    def copy(self) -> PolarsTabular:
         return PolarsTabular(self._df.clone())
 
-    def head(self, n: int = 5) -> "PolarsTabular":
+    def head(self, n: int = 5) -> PolarsTabular:
         return PolarsTabular(self._df.head(n))
 
     def __len__(self) -> int:
@@ -276,7 +288,8 @@ class PolarsTabular:
 # Factory
 # ---------------------------------------------------------------------------
 
-def as_tabular(data) -> Union[PandasTabular, PolarsTabular]:
+
+def as_tabular(data) -> PandasTabular | PolarsTabular:
     """Convert data to a TabularData backend.
 
     Supports pd.DataFrame, polars.DataFrame, and existing TabularData wrappers.
@@ -298,7 +311,7 @@ def as_tabular(data) -> Union[PandasTabular, PolarsTabular]:
     )
 
 
-def concat_tables(tables: list) -> Union[PandasTabular, PolarsTabular]:
+def concat_tables(tables: list) -> PandasTabular | PolarsTabular:
     """Concatenate a list of TabularData tables into one.
 
     Delegates to the dominant backend. Mixed lists are converted to pandas.

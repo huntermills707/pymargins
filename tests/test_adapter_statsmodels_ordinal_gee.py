@@ -1,54 +1,56 @@
 """Tests for StatsmodelsOrdinalGEEAdapter."""
 
+import jax.numpy as jnp
 import numpy as np
 import pandas as pd
-import jax.numpy as jnp
 import pytest
 import statsmodels.api as sm
 
 from pymargins._adapters.statsmodels_ordinal_gee import StatsmodelsOrdinalGEEAdapter
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def df_ordinal():
-    np.random.seed(42)
-    n = 1000
-    df = pd.DataFrame({
-        "x1": np.random.randn(n),
-        "x2": np.random.randn(n),
-        "group": np.repeat(range(50), 20),
-    })
-    # Ordered outcome with 3 categories
-    # Smaller effects and wider thresholds avoid degenerate fits on random data.
-    logit = 0.2 * df["x1"] - 0.15 * df["x2"]
-    u = np.random.rand(n)
-    df["y"] = (u > 1 / (1 + np.exp(-(-0.8 + logit)))).astype(int) + (
-        u > 1 / (1 + np.exp(-(0.8 + logit)))
-    ).astype(int)
-    return df
+    # Clean proportional-odds design. Strong fixed effects plus a modest
+    # cluster effect yield a well-separated, balanced 3-category outcome, so
+    # the GEE converges robustly and reproducibly across BLAS/numpy builds.
+    # (The previous weak-signal noisy outcome let the fit diverge to NaN
+    # params on some CI runners, producing NaN predictions.)
+    rng = np.random.default_rng(0)
+    n_groups, group_size = 40, 25
+    n = n_groups * group_size
+    x1 = rng.normal(size=n)
+    x2 = rng.normal(size=n)
+    group = np.repeat(np.arange(n_groups), group_size)
+    u_group = rng.normal(scale=0.3, size=n_groups)[group]
+    latent = 1.2 * x1 - 0.9 * x2 + u_group + rng.logistic(size=n)
+    y = (latent > -1.2).astype(int) + (latent > 1.2).astype(int)
+    return pd.DataFrame({"x1": x1, "x2": x2, "group": group, "y": y})
 
 
 @pytest.fixture
 def ordinal_fit_formula(df_ordinal):
     from statsmodels.genmod import cov_struct
     from statsmodels.genmod.generalized_estimating_equations import OrdinalGEE
+
     return OrdinalGEE.from_formula(
         "y ~ x1 + x2",
         groups=df_ordinal["group"],
         data=df_ordinal,
         family=sm.families.Binomial(),
         cov_struct=cov_struct.Independence(),
-    ).fit()
+    ).fit(maxiter=200)
 
 
 @pytest.fixture
 def ordinal_fit_array(df_ordinal):
     from statsmodels.genmod import cov_struct
     from statsmodels.genmod.generalized_estimating_equations import OrdinalGEE
+
     exog = sm.add_constant(df_ordinal[["x1", "x2"]])
     return OrdinalGEE(
         df_ordinal["y"].values,
@@ -56,16 +58,20 @@ def ordinal_fit_array(df_ordinal):
         groups=df_ordinal["group"].values,
         family=sm.families.Binomial(),
         cov_struct=cov_struct.Independence(),
-    ).fit()
+    ).fit(maxiter=200)
 
 
 # Well-converged reference model using statsmodels test data
 @pytest.fixture
 def ordinal_test_data_fit():
     import os
+
     csv_path = os.path.join(
         os.path.dirname(sm.__file__),
-        "genmod", "tests", "results", "gee_ordinal_1.csv",
+        "genmod",
+        "tests",
+        "results",
+        "gee_ordinal_1.csv",
     )
     Z = np.genfromtxt(csv_path, delimiter=",")
     groups = Z[:, 0]
@@ -76,11 +82,18 @@ def ordinal_test_data_fit():
     df["group"] = groups.astype(int)
     from statsmodels.genmod import cov_struct
     from statsmodels.genmod.generalized_estimating_equations import OrdinalGEE
+
+    # Independence (not GlobalOddsRatio): the adapter's predict/covariance
+    # depend only on the mean and cov_params, not the working association
+    # structure, and GlobalOddsRatio's odds-ratio estimation failed to
+    # converge on some CI runners. Independence converges robustly here.
     fit = OrdinalGEE(
-        endog, exog, groups,
+        endog,
+        exog,
+        groups,
         family=sm.families.Binomial(),
-        cov_struct=cov_struct.GlobalOddsRatio("ordinal"),
-    ).fit()
+        cov_struct=cov_struct.Independence(),
+    ).fit(maxiter=200)
     return fit, df
 
 
@@ -88,14 +101,17 @@ def ordinal_test_data_fit():
 # Construction / auto-detect
 # ---------------------------------------------------------------------------
 
+
 def test_auto_detect_formula(ordinal_fit_formula):
     from pymargins._adapters import auto_detect_adapter
+
     adapter = auto_detect_adapter(ordinal_fit_formula)
     assert isinstance(adapter, StatsmodelsOrdinalGEEAdapter)
 
 
 def test_auto_detect_array_requires_training_data(ordinal_fit_array):
     from pymargins._adapters import auto_detect_adapter
+
     with pytest.raises(ValueError, match="training_data"):
         auto_detect_adapter(ordinal_fit_array)
 
@@ -103,6 +119,7 @@ def test_auto_detect_array_requires_training_data(ordinal_fit_array):
 # ---------------------------------------------------------------------------
 # Coefficients
 # ---------------------------------------------------------------------------
+
 
 def test_coefficients_formula(ordinal_fit_formula):
     adapter = StatsmodelsOrdinalGEEAdapter(ordinal_fit_formula)
@@ -123,6 +140,7 @@ def test_coefficients_array(ordinal_fit_array, df_ordinal):
 # Training data
 # ---------------------------------------------------------------------------
 
+
 def test_training_data_formula(ordinal_fit_formula, df_ordinal):
     adapter = StatsmodelsOrdinalGEEAdapter(ordinal_fit_formula)
     assert adapter.training_data is not None
@@ -139,10 +157,14 @@ def test_training_data_array(ordinal_fit_array, df_ordinal):
 # Covariance
 # ---------------------------------------------------------------------------
 
+
 def test_covariance_default(ordinal_fit_formula):
     adapter = StatsmodelsOrdinalGEEAdapter(ordinal_fit_formula)
     cov = adapter.covariance()
-    assert cov.shape == (len(ordinal_fit_formula.params), len(ordinal_fit_formula.params))
+    assert cov.shape == (
+        len(ordinal_fit_formula.params),
+        len(ordinal_fit_formula.params),
+    )
     # Only compare if JAX-converted values are finite (float32 may overflow)
     if np.isfinite(np.asarray(cov)).all():
         np.testing.assert_allclose(cov, ordinal_fit_formula.cov_params())
@@ -186,6 +208,7 @@ def test_covariance_invalid(ordinal_fit_formula):
 # ---------------------------------------------------------------------------
 # Prediction
 # ---------------------------------------------------------------------------
+
 
 def test_predict_matches_fittedvalues_formula(ordinal_fit_formula):
     adapter = StatsmodelsOrdinalGEEAdapter(ordinal_fit_formula)
@@ -245,6 +268,7 @@ def test_predict_well_converged(ordinal_test_data_fit):
 # Design matrix
 # ---------------------------------------------------------------------------
 
+
 def test_design_matrix_from_df_formula(ordinal_fit_formula, df_ordinal):
     adapter = StatsmodelsOrdinalGEEAdapter(ordinal_fit_formula)
     X = adapter.design_matrix_from_df(df_ordinal)
@@ -263,6 +287,7 @@ def test_design_matrix_from_df_array(ordinal_fit_array, df_ordinal):
 # Variable metadata / column index
 # ---------------------------------------------------------------------------
 
+
 def test_variable_metadata(ordinal_fit_formula):
     adapter = StatsmodelsOrdinalGEEAdapter(ordinal_fit_formula)
     meta = adapter.variable_metadata()
@@ -279,6 +304,7 @@ def test_column_index_of_variable(ordinal_fit_formula):
 # ---------------------------------------------------------------------------
 # Refit
 # ---------------------------------------------------------------------------
+
 
 def test_refit_formula(ordinal_fit_formula, df_ordinal):
     adapter = StatsmodelsOrdinalGEEAdapter(ordinal_fit_formula)
@@ -297,14 +323,17 @@ def test_refit_array(ordinal_fit_array, df_ordinal):
 # Attach validation
 # ---------------------------------------------------------------------------
 
+
 def test_attach_validates_vcov(ordinal_fit_formula):
     adapter = StatsmodelsOrdinalGEEAdapter(ordinal_fit_formula)
 
     class FakeSession:
         vcov_spec = "robust"
+
     adapter.attach(FakeSession())
 
     class FakeSession2:
         vcov_spec = "invalid"
+
     with pytest.raises(ValueError):
         adapter.attach(FakeSession2())

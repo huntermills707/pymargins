@@ -6,7 +6,9 @@ Inherits predict() from LinearPredictionAdapter (simple Xβ).
 """
 
 from __future__ import annotations
-from typing import Optional, Any
+
+from typing import Any
+
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
@@ -14,10 +16,10 @@ import statsmodels.api as sm
 
 from .._adapter import LinearPredictionAdapter, VariableInfo
 from ._common import (
-    extract_training_data,
-    design_matrix_from_df,
-    column_index_of_variable,
     build_variable_metadata,
+    column_index_of_variable,
+    design_matrix_from_df,
+    extract_training_data,
     validate_vcov_spec,
 )
 
@@ -41,13 +43,19 @@ class StatsmodelsOLSAdapter(LinearPredictionAdapter):
         (interactions, polynomials, splines) correctly for ``dydx()``.
     """
 
-    def __init__(self, results, training_data: Optional[pd.DataFrame] = None, formula: Optional[str] = None):
+    def __init__(
+        self,
+        results,
+        training_data: pd.DataFrame | None = None,
+        formula: str | None = None,
+    ):
         self.results = results
         self._training_data = extract_training_data(results, training_data)
         self._exog_names = list(results.model.exog_names)
         self._formula_spec = None
         if formula is not None:
             from .._formula import FormulaSpec
+
             self._formula_spec = FormulaSpec(formula, self._training_data)
 
     @property
@@ -86,7 +94,7 @@ class StatsmodelsOLSAdapter(LinearPredictionAdapter):
         resid = np.asarray(self.results.resid)
         return exog * (resid / self.results.scale)[:, None]
 
-    def covariance(self, vcov_spec: Optional[Any] = None) -> jnp.ndarray:
+    def covariance(self, vcov_spec: Any | None = None) -> jnp.ndarray:
         """Return Σ̂, dispatching to the requested flavor.
 
         OLS results expose cov_HC0 / cov_HC1 / cov_HC2 / cov_HC3 as
@@ -105,9 +113,7 @@ class StatsmodelsOLSAdapter(LinearPredictionAdapter):
                 attr = f"cov_{vcov_spec.upper()}"
                 if hasattr(self.results, attr):
                     return jnp.asarray(getattr(self.results, attr))
-                raise ValueError(
-                    f"{vcov_spec} not available on this fit."
-                )
+                raise ValueError(f"{vcov_spec} not available on this fit.")
             raise ValueError(f"Unsupported vcov string: {vcov_spec!r}")
 
         if isinstance(vcov_spec, dict):
@@ -115,11 +121,10 @@ class StatsmodelsOLSAdapter(LinearPredictionAdapter):
             if kind == "cluster":
                 groups = vcov_spec.get("groups")
                 if groups is None:
-                    raise ValueError(
-                        "cluster vcov requires 'groups' in the spec dict."
-                    )
+                    raise ValueError("cluster vcov requires 'groups' in the spec dict.")
                 return self._refit_and_extract_cov(
-                    cov_type="cluster", cov_kwds={"groups": groups},
+                    cov_type="cluster",
+                    cov_kwds={"groups": groups},
                 )
             raise ValueError(f"Unsupported vcov dict type: {kind!r}")
 
@@ -130,11 +135,15 @@ class StatsmodelsOLSAdapter(LinearPredictionAdapter):
     # -----------------------------------------------------------------------
 
     def design_matrix_from_df(self, df: pd.DataFrame) -> jnp.ndarray:
-        return design_matrix_from_df(self.results, self._exog_names, df, formula_spec=self._formula_spec)
+        return design_matrix_from_df(
+            self.results, self._exog_names, df, formula_spec=self._formula_spec
+        )
 
     def column_index_of_variable(self, variable_name: str) -> int:
         return column_index_of_variable(
-            self._exog_names, self.variable_metadata(), variable_name,
+            self._exog_names,
+            self.variable_metadata(),
+            variable_name,
         )
 
     def variable_metadata(self) -> dict[str, VariableInfo]:
@@ -152,7 +161,9 @@ class StatsmodelsOLSAdapter(LinearPredictionAdapter):
         if formula is not None:
             if cov_kwds and "groups" in cov_kwds:
                 groups = cov_kwds["groups"]
-                if hasattr(groups, "__len__") and len(groups) != len(self._training_data):
+                if hasattr(groups, "__len__") and len(groups) != len(
+                    self._training_data
+                ):
                     raise ValueError(
                         f"groups length ({len(groups)}) must match training_data "
                         f"length ({len(self._training_data)})."
@@ -160,20 +171,28 @@ class StatsmodelsOLSAdapter(LinearPredictionAdapter):
             model_cls_name = type(self.results.model).__name__
             if model_cls_name == "WLS":
                 from statsmodels.formula.api import wls as smf_wls
+
                 weights = getattr(self.results.model, "weights", None)
                 new_results = smf_wls(
-                    formula, data=self._training_data, weights=weights,
+                    formula,
+                    data=self._training_data,
+                    weights=weights,
                 ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {})
             elif model_cls_name == "GLS":
                 from statsmodels.formula.api import gls as smf_gls
+
                 sigma = getattr(self.results.model, "sigma", None)
                 new_results = smf_gls(
-                    formula, data=self._training_data, sigma=sigma,
+                    formula,
+                    data=self._training_data,
+                    sigma=sigma,
                 ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {})
             else:
                 from statsmodels.formula.api import ols as smf_ols
+
                 new_results = smf_ols(
-                    formula, data=self._training_data,
+                    formula,
+                    data=self._training_data,
                 ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {})
             return jnp.asarray(new_results.cov_params())
 
@@ -183,34 +202,44 @@ class StatsmodelsOLSAdapter(LinearPredictionAdapter):
         if model_cls_name == "WLS":
             weights = getattr(self.results.model, "weights", None)
             new_results = sm.WLS(endog, exog, weights=weights).fit(
-                cov_type=cov_type, cov_kwds=cov_kwds or {},
+                cov_type=cov_type,
+                cov_kwds=cov_kwds or {},
             )
         elif model_cls_name == "GLS":
             sigma = getattr(self.results.model, "sigma", None)
             new_results = sm.GLS(endog, exog, sigma=sigma).fit(
-                cov_type=cov_type, cov_kwds=cov_kwds or {},
+                cov_type=cov_type,
+                cov_kwds=cov_kwds or {},
             )
         else:
             new_results = sm.OLS(endog, exog).fit(
-                cov_type=cov_type, cov_kwds=cov_kwds or {},
+                cov_type=cov_type,
+                cov_kwds=cov_kwds or {},
             )
         return jnp.asarray(new_results.cov_params())
 
-    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "StatsmodelsOLSAdapter":
+    def refit(
+        self, resampled_data: pd.DataFrame, *, index=None
+    ) -> StatsmodelsOLSAdapter:
         """Refit the model on resampled data."""
         formula = getattr(self.results.model, "formula", None)
         if formula is not None:
             model_cls_name = type(self.results.model).__name__
             if model_cls_name == "WLS":
                 from statsmodels.formula.api import wls as smf_wls
+
                 weights = getattr(self.results.model, "weights", None)
-                new_results = smf_wls(formula, data=resampled_data, weights=weights).fit()
+                new_results = smf_wls(
+                    formula, data=resampled_data, weights=weights
+                ).fit()
             elif model_cls_name == "GLS":
                 from statsmodels.formula.api import gls as smf_gls
+
                 sigma = getattr(self.results.model, "sigma", None)
                 new_results = smf_gls(formula, data=resampled_data, sigma=sigma).fit()
             else:
                 from statsmodels.formula.api import ols as smf_ols
+
                 new_results = smf_ols(formula, data=resampled_data).fit()
             return StatsmodelsOLSAdapter(new_results, training_data=resampled_data)
 

@@ -9,19 +9,16 @@ tolerance via dydx(), predict(), and contrasts().
 import numpy as np
 import pandas as pd
 import pytest
-import jax.numpy as jnp
-
+from linearmodels.iv import IV2SLS, AbsorbingLS
 from linearmodels.panel import PanelOLS, PooledOLS, RandomEffects
-from linearmodels.iv import IV2SLS
-from linearmodels.iv import AbsorbingLS
 
 from pymargins import Margins
 from pymargins.scenarios import pairwise
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def panel_df():
@@ -34,13 +31,15 @@ def panel_df():
     x1 = np.random.randn(n * t)
     x2 = np.random.randn(n * t)
     y = 1.0 + 2.0 * x1 - 1.5 * x2 + 0.5 * entities + np.random.randn(n * t) * 0.5
-    df = pd.DataFrame({
-        "entity": entities,
-        "time": times,
-        "y": y,
-        "x1": x1,
-        "x2": x2,
-    }).set_index(["entity", "time"])
+    df = pd.DataFrame(
+        {
+            "entity": entities,
+            "time": times,
+            "y": y,
+            "x1": x1,
+            "x2": x2,
+        }
+    ).set_index(["entity", "time"])
     return df
 
 
@@ -67,19 +66,22 @@ def absorb_df():
     x1 = np.random.randn(n)
     x2 = np.random.randn(n)
     y = 1.0 + 2.0 * x1 - 1.5 * x2 + 0.5 * entities + np.random.randn(n) * 0.5
-    df = pd.DataFrame({
-        "y": y,
-        "x1": x1,
-        "x2": x2,
-        "entity": entities,
-        "time": times,
-    })
+    df = pd.DataFrame(
+        {
+            "y": y,
+            "x1": x1,
+            "x2": x2,
+            "entity": entities,
+            "time": times,
+        }
+    )
     return df
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _fd_slope(beta, X, eps, col_idx):
     """Finite-difference slope ground truth in float32."""
@@ -95,6 +97,7 @@ def _fd_slope(beta, X, eps, col_idx):
 # ---------------------------------------------------------------------------
 # PooledOLS
 # ---------------------------------------------------------------------------
+
 
 def test_pooledols_dydx_matches_coefficient_within_fd_tolerance(panel_df):
     mod = PooledOLS.from_formula("y ~ x1 + x2", data=panel_df)
@@ -117,7 +120,9 @@ def test_pooledols_predict_at_mean_matches_native(panel_df):
     pred = m.predict()
     # PooledOLS predict() expects exog with MultiIndex
     native_pred = res.predict(exog=panel_df[["x1", "x2"]])
-    assert np.isclose(float(pred.estimate), float(native_pred.mean().iloc[0]), rtol=1e-4)
+    assert np.isclose(
+        float(pred.estimate), float(native_pred.mean().iloc[0]), rtol=1e-4
+    )
 
 
 def test_pooledols_pairwise_contrast_matches_manual(panel_df):
@@ -140,6 +145,7 @@ def test_pooledols_pairwise_contrast_matches_manual(panel_df):
 # PanelOLS (with FE)
 # ---------------------------------------------------------------------------
 
+
 def test_panelols_dydx_matches_coefficient_within_fd_tolerance(panel_df):
     mod = PanelOLS.from_formula("y ~ x1 + x2 + EntityEffects", data=panel_df)
     res = mod.fit()
@@ -159,7 +165,9 @@ def test_panelols_predict_at_mean_matches_native(panel_df):
 
     pred = m.predict()
     native_pred = res.predict(exog=panel_df[["x1", "x2"]])
-    assert np.isclose(float(pred.estimate), float(native_pred.mean().iloc[0]), rtol=1e-4)
+    assert np.isclose(
+        float(pred.estimate), float(native_pred.mean().iloc[0]), rtol=1e-4
+    )
 
 
 def test_panelols_pairwise_contrast_matches_manual(panel_df):
@@ -181,6 +189,7 @@ def test_panelols_pairwise_contrast_matches_manual(panel_df):
 # RandomEffects
 # ---------------------------------------------------------------------------
 
+
 def test_random_effects_dydx_matches_coefficient_within_fd_tolerance(panel_df):
     mod = RandomEffects.from_formula("y ~ x1 + x2", data=panel_df)
     res = mod.fit()
@@ -197,10 +206,12 @@ def test_random_effects_dydx_matches_coefficient_within_fd_tolerance(panel_df):
 # IV2SLS
 # ---------------------------------------------------------------------------
 
+
 def test_iv2sls_dydx_matches_coefficient_within_fd_tolerance(iv_df):
     mod = IV2SLS.from_formula("y ~ 1 + [x ~ z + w]", data=iv_df)
     res = mod.fit()
     from pymargins._adapters.linearmodels_iv import LinearmodelsIVAdapter
+
     adapter = LinearmodelsIVAdapter(res, training_data=iv_df)
     m = Margins(model=None, adapter=adapter)
 
@@ -212,18 +223,22 @@ def test_iv2sls_predict_at_mean_matches_native(iv_df):
     mod = IV2SLS.from_formula("y ~ 1 + [x ~ z + w]", data=iv_df)
     res = mod.fit()
     from pymargins._adapters.linearmodels_iv import LinearmodelsIVAdapter
+
     adapter = LinearmodelsIVAdapter(res, training_data=iv_df)
     m = Margins(model=None, adapter=adapter)
 
     pred = m.predict()
     native_pred = res.predict(data=iv_df)
-    assert np.isclose(float(pred.estimate), float(native_pred.mean().iloc[0]), rtol=1e-4)
+    assert np.isclose(
+        float(pred.estimate), float(native_pred.mean().iloc[0]), rtol=1e-4
+    )
 
 
 def test_iv2sls_pairwise_contrast_matches_manual(iv_df):
     mod = IV2SLS.from_formula("y ~ 1 + [x ~ z + w]", data=iv_df)
     res = mod.fit()
     from pymargins._adapters.linearmodels_iv import LinearmodelsIVAdapter
+
     adapter = LinearmodelsIVAdapter(res, training_data=iv_df)
     m = Margins(model=None, adapter=adapter)
 
@@ -241,6 +256,7 @@ def test_iv2sls_pairwise_contrast_matches_manual(iv_df):
 # AbsorbingLS
 # ---------------------------------------------------------------------------
 
+
 def test_absorbingls_dydx_matches_coefficient_within_fd_tolerance(absorb_df):
     mod = AbsorbingLS(
         absorb_df[["y"]],
@@ -249,6 +265,7 @@ def test_absorbingls_dydx_matches_coefficient_within_fd_tolerance(absorb_df):
     )
     res = mod.fit()
     from pymargins._adapters.linearmodels_absorbing import LinearmodelsAbsorbingAdapter
+
     adapter = LinearmodelsAbsorbingAdapter(res)
     m = Margins(model=None, adapter=adapter)
 
@@ -267,6 +284,7 @@ def test_absorbingls_pairwise_contrast_matches_manual(absorb_df):
     )
     res = mod.fit()
     from pymargins._adapters.linearmodels_absorbing import LinearmodelsAbsorbingAdapter
+
     adapter = LinearmodelsAbsorbingAdapter(res)
     m = Margins(model=None, adapter=adapter)
 
@@ -284,12 +302,23 @@ def test_absorbingls_pairwise_contrast_matches_manual(absorb_df):
 # Cross-model sanity: all linear adapters agree on AME ≈ coefficient
 # ---------------------------------------------------------------------------
 
-def test_all_linear_adapters_ame_equals_coefficient_within_tolerance(panel_df, iv_df, absorb_df):
+
+def test_all_linear_adapters_ame_equals_coefficient_within_tolerance(
+    panel_df, iv_df, absorb_df
+):
     """For any linear model, the AME of x1 should approximate its coefficient."""
     models = [
         ("PooledOLS", PooledOLS.from_formula("y ~ x1 + x2", data=panel_df).fit(), None),
-        ("PanelOLS", PanelOLS.from_formula("y ~ x1 + x2 + EntityEffects", data=panel_df).fit(), None),
-        ("RandomEffects", RandomEffects.from_formula("y ~ x1 + x2", data=panel_df).fit(), None),
+        (
+            "PanelOLS",
+            PanelOLS.from_formula("y ~ x1 + x2 + EntityEffects", data=panel_df).fit(),
+            None,
+        ),
+        (
+            "RandomEffects",
+            RandomEffects.from_formula("y ~ x1 + x2", data=panel_df).fit(),
+            None,
+        ),
     ]
 
     for name, res, training_data in models:
@@ -297,9 +326,12 @@ def test_all_linear_adapters_ame_equals_coefficient_within_tolerance(panel_df, i
             m = Margins(res)
         else:
             from pymargins._adapters.linearmodels_iv import LinearmodelsIVAdapter
+
             adapter = LinearmodelsIVAdapter(res, training_data=training_data)
             m = Margins(model=None, adapter=adapter)
 
         slope = m.dydx("x1")
         coef = float(res.params["x1"])
-        assert np.isclose(float(slope.estimate), coef, rtol=2e-2), f"{name} AME mismatch: {float(slope.estimate):.6f} vs {coef:.6f}"
+        assert np.isclose(float(slope.estimate), coef, rtol=2e-2), (
+            f"{name} AME mismatch: {float(slope.estimate):.6f} vs {coef:.6f}"
+        )

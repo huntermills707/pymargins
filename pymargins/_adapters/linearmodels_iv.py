@@ -12,17 +12,17 @@ scale for marginal effects in IV settings.
 """
 
 from __future__ import annotations
-from typing import Optional, Any
+
+from typing import Any
+
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
-from linearmodels.iv import IV2SLS, IVGMM, IVLIML
-
 from .._adapter import LinearPredictionAdapter, VariableInfo
 from ._common import (
-    column_index_of_variable,
     build_variable_metadata,
+    column_index_of_variable,
     validate_vcov_spec,
 )
 
@@ -45,7 +45,12 @@ class LinearmodelsIVAdapter(LinearPredictionAdapter):
         (interactions, polynomials, splines) correctly for ``dydx()``.
     """
 
-    def __init__(self, results, training_data: Optional[pd.DataFrame] = None, formula: Optional[str] = None):
+    def __init__(
+        self,
+        results,
+        training_data: pd.DataFrame | None = None,
+        formula: str | None = None,
+    ):
         self.results = results
         if training_data is None:
             training_data = self._try_reconstruct_training_data(results)
@@ -62,10 +67,11 @@ class LinearmodelsIVAdapter(LinearPredictionAdapter):
         self._formula_spec = None
         if formula is not None:
             from .._formula import FormulaSpec
+
             self._formula_spec = FormulaSpec(formula, self._training_data)
 
     @staticmethod
-    def _try_reconstruct_training_data(results) -> Optional[pd.DataFrame]:
+    def _try_reconstruct_training_data(results) -> pd.DataFrame | None:
         """Attempt to reconstruct training data from linearmodels IVData objects.
 
         This works for OLSResults (IV2SLS without endogenous variables) where
@@ -121,7 +127,7 @@ class LinearmodelsIVAdapter(LinearPredictionAdapter):
     def coefficients(self) -> jnp.ndarray:
         return jnp.asarray(self.results.params.values)
 
-    def covariance(self, vcov_spec: Optional[Any] = None) -> jnp.ndarray:
+    def covariance(self, vcov_spec: Any | None = None) -> jnp.ndarray:
         if vcov_spec is None:
             return jnp.asarray(self.results.cov.values)
 
@@ -142,11 +148,10 @@ class LinearmodelsIVAdapter(LinearPredictionAdapter):
             if kind == "cluster":
                 groups = vcov_spec.get("groups")
                 if groups is None:
-                    raise ValueError(
-                        "cluster vcov requires 'groups' in the spec dict."
-                    )
+                    raise ValueError("cluster vcov requires 'groups' in the spec dict.")
                 return self._refit_and_extract_cov(
-                    cov_type="clustered", clusters=groups,
+                    cov_type="clustered",
+                    clusters=groups,
                 )
             raise ValueError(
                 f"Unsupported vcov dict type for linearmodels IV: {kind!r}"
@@ -163,7 +168,8 @@ class LinearmodelsIVAdapter(LinearPredictionAdapter):
             return self._formula_spec.get_model_matrix(df)
         aligned = df.reindex(columns=self._exog_names)
         missing_cols = [
-            col for col in self._exog_names
+            col
+            for col in self._exog_names
             if col not in df.columns and col not in ("const", "Intercept")
         ]
         if missing_cols:
@@ -181,7 +187,9 @@ class LinearmodelsIVAdapter(LinearPredictionAdapter):
 
     def column_index_of_variable(self, variable_name: str) -> int:
         return column_index_of_variable(
-            self._exog_names, self.variable_metadata(), variable_name,
+            self._exog_names,
+            self.variable_metadata(),
+            variable_name,
         )
 
     def variable_metadata(self) -> dict[str, VariableInfo]:
@@ -200,7 +208,8 @@ class LinearmodelsIVAdapter(LinearPredictionAdapter):
             if clusters is not None:
                 kwargs["clusters"] = clusters
             new_results = self._model_cls.from_formula(
-                self._formula, data=self._training_data,
+                self._formula,
+                data=self._training_data,
             ).fit(**kwargs)
             return jnp.asarray(new_results.cov.values)
 
@@ -208,11 +217,14 @@ class LinearmodelsIVAdapter(LinearPredictionAdapter):
             "Array-fit refit with custom cov_type is not yet supported for linearmodels IV adapters."
         )
 
-    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "LinearmodelsIVAdapter":
+    def refit(
+        self, resampled_data: pd.DataFrame, *, index=None
+    ) -> LinearmodelsIVAdapter:
         """Refit the model on resampled data."""
         if self._formula is not None:
             new_results = self._model_cls.from_formula(
-                self._formula, data=resampled_data,
+                self._formula,
+                data=resampled_data,
             ).fit()
             return LinearmodelsIVAdapter(new_results, training_data=resampled_data)
 

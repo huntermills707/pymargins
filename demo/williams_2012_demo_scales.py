@@ -14,6 +14,7 @@ Reference implementations:
 """
 
 import jax
+
 jax.config.update("jax_enable_x64", True)
 
 import numpy as np
@@ -30,7 +31,9 @@ def make_data(n=5000, seed=42):
     female = rng.binomial(1, 0.52, size=n)
     black = rng.binomial(1, 0.11, size=n)
     age = rng.integers(20, 75, size=n)
-    agegrp = pd.cut(age, bins=[19, 29, 39, 49, 59, 69, 100], labels=[1, 2, 3, 4, 5, 6]).astype(int)
+    agegrp = pd.cut(
+        age, bins=[19, 29, 39, 49, 59, 69, 100], labels=[1, 2, 3, 4, 5, 6]
+    ).astype(int)
     bmi = 22 + 0.15 * age + 1.5 * female + rng.normal(0, 4, size=n)
     bmi = np.clip(bmi, 15, 50)
     lp = (
@@ -46,16 +49,25 @@ def make_data(n=5000, seed=42):
         + 2.6 * (agegrp == 6).astype(float)
     )
     diabetes = rng.binomial(1, 1 / (1 + np.exp(-lp)))
-    bp = 110 + 0.4 * age + 2.5 * black + 1.2 * female + 0.5 * bmi + rng.normal(0, 8, size=n)
-    return pd.DataFrame({
-        "diabetes": diabetes,
-        "bp": bp,
-        "black": black,
-        "female": female,
-        "age": age,
-        "agegrp": agegrp,
-        "bmi": bmi,
-    })
+    bp = (
+        110
+        + 0.4 * age
+        + 2.5 * black
+        + 1.2 * female
+        + 0.5 * bmi
+        + rng.normal(0, 8, size=n)
+    )
+    return pd.DataFrame(
+        {
+            "diabetes": diabetes,
+            "bp": bp,
+            "black": black,
+            "female": female,
+            "age": age,
+            "agegrp": agegrp,
+            "bmi": bmi,
+        }
+    )
 
 
 def _print_section(title):
@@ -108,7 +120,9 @@ if __name__ == "__main__":
     print("   Inference: p1 / p0 directly   |   Delta-method SE on ratio scale")
     print()
 
-    m_ratio = Margins.linear_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
+    m_ratio = Margins.linear_scale(
+        fit_logit, at="overall", kappa_threshold=float("inf")
+    )
     ratio_black = m_ratio.evaluate(
         scenarios=[
             {"atexog": {"black": 1}, "label": "black=1"},
@@ -137,12 +151,22 @@ if __name__ == "__main__":
     print()
 
     lift_black_est = float(rr_black.estimate) - 1.0
-    lift_black_ci = (float(rr_black.conf_int_lower) - 1.0, float(rr_black.conf_int_upper) - 1.0)
-    print(f"black:  lift = {lift_black_est:.4f}   CI = ({lift_black_ci[0]:.4f}, {lift_black_ci[1]:.4f})")
+    lift_black_ci = (
+        float(rr_black.conf_int_lower) - 1.0,
+        float(rr_black.conf_int_upper) - 1.0,
+    )
+    print(
+        f"black:  lift = {lift_black_est:.4f}   CI = ({lift_black_ci[0]:.4f}, {lift_black_ci[1]:.4f})"
+    )
 
     lift_female_est = float(rr_female.estimate) - 1.0
-    lift_female_ci = (float(rr_female.conf_int_lower) - 1.0, float(rr_female.conf_int_upper) - 1.0)
-    print(f"female: lift = {lift_female_est:.4f}   CI = ({lift_female_ci[0]:.4f}, {lift_female_ci[1]:.4f})")
+    lift_female_ci = (
+        float(rr_female.conf_int_lower) - 1.0,
+        float(rr_female.conf_int_upper) - 1.0,
+    )
+    print(
+        f"female: lift = {lift_female_est:.4f}   CI = ({lift_female_ci[0]:.4f}, {lift_female_ci[1]:.4f})"
+    )
     print()
 
     # =====================================================================
@@ -151,8 +175,12 @@ if __name__ == "__main__":
     _print_section("REFERENCE TABLE — All Scales")
     print(f"{'Scale':<20} {'black':>12} {'female':>12}")
     print("-" * 46)
-    print(f"{'RR (log_scale)':<20} {float(rr_black.estimate):>12.4f} {float(rr_female.estimate):>12.4f}")
-    print(f"{'Direct ratio':<20} {float(ratio_black.estimate):>12.4f} {float(ratio_female.estimate):>12.4f}")
+    print(
+        f"{'RR (log_scale)':<20} {float(rr_black.estimate):>12.4f} {float(rr_female.estimate):>12.4f}"
+    )
+    print(
+        f"{'Direct ratio':<20} {float(ratio_black.estimate):>12.4f} {float(ratio_female.estimate):>12.4f}"
+    )
     print(f"{'True lift (RR-1)':<20} {lift_black_est:>12.4f} {lift_female_est:>12.4f}")
     print()
     print("Demo complete.")

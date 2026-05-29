@@ -11,17 +11,17 @@ import pytest
 jax.config.update("jax_enable_x64", True)
 
 from pymargins._kappa import (
+    classify_kappa,
+    delta_simulation_disagreement,
     kappa,
     kappa_vector,
-    classify_kappa,
     session_kappa,
-    delta_simulation_disagreement,
 )
-
 
 # ---------------------------------------------------------------------------
 # 1. kappa for linear estimands (should be ~0)
 # ---------------------------------------------------------------------------
+
 
 def test_kappa_linear_estimand_is_near_zero():
     """For h(beta) = c @ beta, the Hessian is zero, so κ should be ~0."""
@@ -41,6 +41,7 @@ def test_kappa_linear_estimand_is_near_zero():
 # ---------------------------------------------------------------------------
 # 2. kappa for nonlinear estimands (should be > 0)
 # ---------------------------------------------------------------------------
+
 
 def test_kappa_logit_prediction_is_positive():
     """Logit prediction has nonzero curvature; κ should be positive."""
@@ -78,6 +79,7 @@ def test_kappa_quadratic_estimand():
 # 3. classify_kappa thresholds
 # ---------------------------------------------------------------------------
 
+
 def test_classify_kappa_reliable():
     assert classify_kappa(0.05) == "delta_reliable"
     assert classify_kappa(0.0) == "delta_reliable"
@@ -95,14 +97,24 @@ def test_classify_kappa_unreliable():
 
 
 def test_classify_kappa_custom_thresholds():
-    assert classify_kappa(0.05, reliable_threshold=0.1, borderline_threshold=0.3) == "delta_reliable"
-    assert classify_kappa(0.2, reliable_threshold=0.1, borderline_threshold=0.3) == "delta_borderline"
-    assert classify_kappa(0.5, reliable_threshold=0.1, borderline_threshold=0.3) == "delta_unreliable"
+    assert (
+        classify_kappa(0.05, reliable_threshold=0.1, borderline_threshold=0.3)
+        == "delta_reliable"
+    )
+    assert (
+        classify_kappa(0.2, reliable_threshold=0.1, borderline_threshold=0.3)
+        == "delta_borderline"
+    )
+    assert (
+        classify_kappa(0.5, reliable_threshold=0.1, borderline_threshold=0.3)
+        == "delta_unreliable"
+    )
 
 
 # ---------------------------------------------------------------------------
 # 4. kappa_vector
 # ---------------------------------------------------------------------------
+
 
 def test_kappa_vector_per_component():
     """For a vector estimand, kappa_vector returns one value per component."""
@@ -114,8 +126,9 @@ def test_kappa_vector_per_component():
     x2 = jnp.asarray(rng.standard_normal(p))
 
     def h(b):
-        return jnp.array([jax.scipy.special.expit(x1 @ b),
-                          jax.scipy.special.expit(x2 @ b)])
+        return jnp.array(
+            [jax.scipy.special.expit(x1 @ b), jax.scipy.special.expit(x2 @ b)]
+        )
 
     kappas = kappa_vector(h, beta, Sigma, backend="autodiff")
     assert kappas.shape == (2,)
@@ -134,8 +147,12 @@ def test_kappa_vector_linear_component():
     x = jnp.asarray(rng.standard_normal(p))
 
     def h(b):
-        return jnp.array([x @ b,  # linear -> κ ≈ 0
-                          jax.scipy.special.expit(x @ b)])  # nonlinear -> κ > 0
+        return jnp.array(
+            [
+                x @ b,  # linear -> κ ≈ 0
+                jax.scipy.special.expit(x @ b),
+            ]
+        )  # nonlinear -> κ > 0
 
     kappas = kappa_vector(h, beta, Sigma, backend="autodiff")
     assert kappas.shape == (2,)
@@ -146,6 +163,7 @@ def test_kappa_vector_linear_component():
 # ---------------------------------------------------------------------------
 # 5. session_kappa
 # ---------------------------------------------------------------------------
+
 
 def test_session_kappa_basic():
     """session_kappa should produce a sensible summary dict."""
@@ -188,7 +206,10 @@ def test_session_kappa_verdict_borderline():
         return lambda b: jax.scipy.special.expit(x @ b)
 
     diag = session_kappa(
-        h_factory, beta, Sigma, design,
+        h_factory,
+        beta,
+        Sigma,
+        design,
         backend="autodiff",
         reliable_threshold=0.01,
         borderline_threshold=0.05,
@@ -200,7 +221,6 @@ def test_session_kappa_verdict_borderline():
 
 def test_session_kappa_verdict_unreliable():
     """Force an unreliable verdict with extreme curvature."""
-    rng = np.random.default_rng(42)
     p = 2
     beta = jnp.array([2.0, -2.0])
     Sigma = jnp.eye(p) * 1.0  # large variance
@@ -209,10 +229,13 @@ def test_session_kappa_verdict_unreliable():
 
     def h_factory(x):
         # Quadratic estimand has constant Hessian -> higher κ with larger Sigma
-        return lambda b: (b ** 2).sum()
+        return lambda b: (b**2).sum()
 
     diag = session_kappa(
-        h_factory, beta, Sigma, design,
+        h_factory,
+        beta,
+        Sigma,
+        design,
         backend="autodiff",
         reliable_threshold=0.01,
         borderline_threshold=0.05,
@@ -224,6 +247,7 @@ def test_session_kappa_verdict_unreliable():
 # ---------------------------------------------------------------------------
 # 6. delta_simulation_disagreement
 # ---------------------------------------------------------------------------
+
 
 def test_delta_sim_disagreement_linear_is_small():
     """For a linear estimand, delta and simulation should agree well."""
@@ -237,16 +261,25 @@ def test_delta_sim_disagreement_linear_is_small():
         return x @ b
 
     from pymargins._gradients import gradient
+
     grad = gradient(h, beta, backend="autodiff")
     estimate = h(beta)
 
     disagreement = delta_simulation_disagreement(
-        estimate, grad, Sigma, h, beta,
-        level=0.95, n_sim=4000, rng_seed=42,
+        estimate,
+        grad,
+        Sigma,
+        h,
+        beta,
+        level=0.95,
+        n_sim=4000,
+        rng_seed=42,
     )
 
     # For linear h, delta is exact; disagreement should be very small
-    assert disagreement < 0.05, f"Expected small disagreement for linear estimand, got {disagreement}"
+    assert disagreement < 0.05, (
+        f"Expected small disagreement for linear estimand, got {disagreement}"
+    )
 
 
 def test_delta_sim_disagreement_logit_is_moderate():
@@ -261,12 +294,19 @@ def test_delta_sim_disagreement_logit_is_moderate():
         return jax.scipy.special.expit(x @ b)
 
     from pymargins._gradients import gradient
+
     grad = gradient(h, beta, backend="autodiff")
     estimate = h(beta)
 
     disagreement = delta_simulation_disagreement(
-        estimate, grad, Sigma, h, beta,
-        level=0.95, n_sim=4000, rng_seed=42,
+        estimate,
+        grad,
+        Sigma,
+        h,
+        beta,
+        level=0.95,
+        n_sim=4000,
+        rng_seed=42,
     )
 
     # Should be finite and not huge
@@ -286,12 +326,19 @@ def test_delta_sim_disagreement_with_phi():
         return x @ b  # inference scale = log
 
     from pymargins._gradients import gradient
+
     grad = gradient(h, beta, backend="autodiff")
     estimate = h(beta)
 
     disagreement = delta_simulation_disagreement(
-        estimate, grad, Sigma, h, beta,
-        level=0.95, n_sim=4000, rng_seed=42,
+        estimate,
+        grad,
+        Sigma,
+        h,
+        beta,
+        level=0.95,
+        n_sim=4000,
+        rng_seed=42,
         phi=jnp.exp,
     )
 
@@ -311,12 +358,19 @@ def test_delta_sim_disagreement_zero_estimate_returns_inf():
         return x @ b
 
     from pymargins._gradients import gradient
+
     grad = gradient(h, beta, backend="autodiff")
     estimate = h(beta)
 
     disagreement = delta_simulation_disagreement(
-        estimate, grad, Sigma, h, beta,
-        level=0.95, n_sim=1000, rng_seed=42,
+        estimate,
+        grad,
+        Sigma,
+        h,
+        beta,
+        level=0.95,
+        n_sim=1000,
+        rng_seed=42,
     )
     assert disagreement == float("inf")
 
@@ -343,6 +397,7 @@ def test_kappa_frobenius_norm():
 # ---------------------------------------------------------------------------
 # 7. Edge cases
 # ---------------------------------------------------------------------------
+
 
 def test_kappa_zero_gradient_returns_inf():
     """At a critical point where grad=0, κ should return inf."""
@@ -374,7 +429,6 @@ def test_kappa_non_psd_covariance():
     assert k < 1e-6, f"Expected κ ≈ 0 for linear estimand, got {k}"
 
 
-
 def test_kappa_vector_scalar_estimand():
     """kappa_vector on a scalar estimand should return a 1-element array."""
     rng = np.random.default_rng(42)
@@ -394,6 +448,7 @@ def test_kappa_vector_scalar_estimand():
 def test_kappa_core_rejects_vector_estimand():
     """_kappa_core should raise when given a vector estimand."""
     from pymargins._kappa import _kappa_core
+
     rng = np.random.default_rng(42)
     p = 3
     beta = jnp.asarray(rng.standard_normal(p))

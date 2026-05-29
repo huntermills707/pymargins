@@ -12,17 +12,18 @@ This is pure JAX — exact autodiff, delta-method SEs valid.
 """
 
 from __future__ import annotations
-from typing import Optional, Any
+
+from typing import Any
+
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
 from .._adapter import ModelAdapter, VariableInfo
 from ._common import (
-    extract_training_data,
-    design_matrix_from_df,
-    column_index_of_variable,
     build_variable_metadata,
+    column_index_of_variable,
+    extract_training_data,
     validate_vcov_spec,
 )
 
@@ -48,8 +49,8 @@ class LifelinesLogLogisticAFTAdapter(ModelAdapter):
     def __init__(
         self,
         results,
-        training_data: Optional[pd.DataFrame] = None,
-        prediction_time: Optional[float] = None,
+        training_data: pd.DataFrame | None = None,
+        prediction_time: float | None = None,
     ):
         self.results = results
         self._training_data = extract_training_data(results, training_data)
@@ -112,16 +113,14 @@ class LifelinesLogLogisticAFTAdapter(ModelAdapter):
         beta_vals = self.results.params_.loc["beta_"].values
         return jnp.asarray(np.concatenate([alpha_vals, beta_vals]))
 
-    def covariance(self, vcov_spec: Optional[Any] = None) -> jnp.ndarray:
+    def covariance(self, vcov_spec: Any | None = None) -> jnp.ndarray:
         if vcov_spec is None:
             vm = self.results.variance_matrix_
             # Reorder to match flattened coefficients:
             # [alpha_x1, alpha_x2, ..., alpha_intercept, beta_intercept]
             alpha_names = self._alpha_names
             beta_names = self._beta_names
-            idx_order = [
-                ("alpha_", name) for name in alpha_names
-            ] + [
+            idx_order = [("alpha_", name) for name in alpha_names] + [
                 ("beta_", name) for name in beta_names
             ]
             cov = vm.loc[idx_order, idx_order].values
@@ -143,7 +142,7 @@ class LifelinesLogLogisticAFTAdapter(ModelAdapter):
         self,
         beta: jnp.ndarray,
         X: jnp.ndarray,
-        offset: Optional[jnp.ndarray] = None,
+        offset: jnp.ndarray | None = None,
     ) -> jnp.ndarray:
         p = X.shape[1]
         beta_alpha = beta[:p]
@@ -161,7 +160,11 @@ class LifelinesLogLogisticAFTAdapter(ModelAdapter):
 
     def design_matrix_from_df(self, df: pd.DataFrame) -> jnp.ndarray:
         # Build design matrix from alpha_ covariates
-        missing_cols = [col for col in self._alpha_names if col not in df.columns and col not in ("const", "Intercept")]
+        missing_cols = [
+            col
+            for col in self._alpha_names
+            if col not in df.columns and col not in ("const", "Intercept")
+        ]
         if missing_cols:
             raise ValueError(
                 f"Missing columns required by the model's exog_names: {missing_cols}. "
@@ -177,7 +180,9 @@ class LifelinesLogLogisticAFTAdapter(ModelAdapter):
 
     def column_index_of_variable(self, variable_name: str) -> int:
         return column_index_of_variable(
-            self._alpha_names, self.variable_metadata(), variable_name,
+            self._alpha_names,
+            self.variable_metadata(),
+            variable_name,
         )
 
     def variable_metadata(self) -> dict[str, VariableInfo]:
@@ -189,7 +194,9 @@ class LifelinesLogLogisticAFTAdapter(ModelAdapter):
     # Bootstrap support
     # -----------------------------------------------------------------------
 
-    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "LifelinesLogLogisticAFTAdapter":
+    def refit(
+        self, resampled_data: pd.DataFrame, *, index=None
+    ) -> LifelinesLogLogisticAFTAdapter:
         from lifelines import LogLogisticAFTFitter
 
         # Reset index to handle bootstrap resampling with replacement

@@ -9,10 +9,10 @@ import pytest
 jax.config.update("jax_enable_x64", True)
 
 from pymargins._estimands import (
+    make_evaluate_estimand,
+    make_linear_combination_estimand,
     make_prediction_estimand,
     make_slope_estimand,
-    make_linear_combination_estimand,
-    make_evaluate_estimand,
 )
 
 
@@ -40,11 +40,14 @@ class DummyAdapter:
 # make_prediction_estimand
 # ---------------------------------------------------------------------------
 
+
 def test_prediction_estimand_zero_weights_raises():
     """Zero-sum weights must raise ValueError."""
     adapter = DummyAdapter()
     X = jnp.array([[1.0, 2.0], [3.0, 4.0]])
-    h = make_prediction_estimand(adapter, X, aggregate="overall", weights=jnp.array([0.0, 0.0]))
+    h = make_prediction_estimand(
+        adapter, X, aggregate="overall", weights=jnp.array([0.0, 0.0])
+    )
     beta = jnp.array([0.5, -0.3])
     with pytest.raises(ValueError, match="weights must not sum to zero"):
         h(beta)
@@ -54,7 +57,9 @@ def test_prediction_estimand_negative_weights_raises():
     """Negative weights must raise ValueError."""
     adapter = DummyAdapter()
     X = jnp.array([[1.0, 2.0], [3.0, 4.0]])
-    h = make_prediction_estimand(adapter, X, aggregate="overall", weights=jnp.array([1.0, -1.0]))
+    h = make_prediction_estimand(
+        adapter, X, aggregate="overall", weights=jnp.array([1.0, -1.0])
+    )
     beta = jnp.array([0.5, -0.3])
     with pytest.raises(ValueError, match="weights must be non-negative"):
         h(beta)
@@ -75,6 +80,7 @@ def test_prediction_estimand_multi_output_mean():
 # make_slope_estimand
 # ---------------------------------------------------------------------------
 
+
 def test_slope_estimand_fd_step_validation():
     """Non-positive fd_step must raise ValueError."""
     adapter = DummyAdapter()
@@ -89,7 +95,9 @@ def test_slope_estimand_zero_weights_raises():
     """Zero-sum weights in slope estimand must raise ValueError."""
     adapter = DummyAdapter()
     df = pd.DataFrame({"x": [1.0, 2.0], "y": [3.0, 4.0]})
-    h = make_slope_estimand(adapter, df, "x", aggregate="overall", weights=jnp.array([0.0, 0.0]))
+    h = make_slope_estimand(
+        adapter, df, "x", aggregate="overall", weights=jnp.array([0.0, 0.0])
+    )
     beta = jnp.array([0.5, -0.3])
     with pytest.raises(ValueError, match="weights must not sum to zero"):
         h(beta)
@@ -99,7 +107,9 @@ def test_slope_estimand_negative_weights_raises():
     """Negative weights in slope estimand must raise ValueError."""
     adapter = DummyAdapter()
     df = pd.DataFrame({"x": [1.0, 2.0], "y": [3.0, 4.0]})
-    h = make_slope_estimand(adapter, df, "x", aggregate="overall", weights=jnp.array([1.0, -1.0]))
+    h = make_slope_estimand(
+        adapter, df, "x", aggregate="overall", weights=jnp.array([1.0, -1.0])
+    )
     beta = jnp.array([0.5, -0.3])
     with pytest.raises(ValueError, match="weights must be non-negative"):
         h(beta)
@@ -120,6 +130,7 @@ def test_slope_estimand_multi_output():
 # ---------------------------------------------------------------------------
 # make_linear_combination_estimand
 # ---------------------------------------------------------------------------
+
 
 def test_linear_combination_multi_output_mean():
     """Per-scenario aggregation should keep output dimensions for multi-output."""
@@ -158,7 +169,9 @@ def test_linear_combination_zero_scenario_weights_raises():
     X2 = jnp.array([[0.0, 1.0]])
     weights = jnp.array([1.0, -1.0])
     h = make_linear_combination_estimand(
-        adapter, [X1, X2], weights,
+        adapter,
+        [X1, X2],
+        weights,
         scenario_aggregate="weighted",
         scenario_weights=[jnp.array([0.0, 0.0]), jnp.array([1.0, 1.0])],
     )
@@ -171,13 +184,17 @@ def test_linear_combination_zero_scenario_weights_raises():
 # make_evaluate_estimand
 # ---------------------------------------------------------------------------
 
+
 def test_evaluate_estimand_multi_output_mean():
     """Per-scenario aggregation in evaluate should keep output dimensions."""
     adapter = DummyAdapter(multi_output=True)
     X1 = jnp.array([[1.0, 0.0], [0.0, 1.0]])
     X2 = jnp.array([[1.0, 1.0]])
     h = make_evaluate_estimand(
-        adapter, [X1, X2], lambda preds: preds[0] - preds[1], scenario_aggregate="overall"
+        adapter,
+        [X1, X2],
+        lambda preds: preds[0] - preds[1],
+        scenario_aggregate="overall",
     )
     beta = jnp.array([1.0, 2.0])
     out = h(beta)

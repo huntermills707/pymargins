@@ -15,11 +15,13 @@ from pymargins import Margins
 def df_logit():
     rng = np.random.default_rng(42)
     n = 400
-    df = pd.DataFrame({
-        "age": rng.normal(50, 10, size=n),
-        "treatment": rng.binomial(1, 0.5, size=n),
-        "sex": rng.choice(["M", "F"], size=n),
-    })
+    df = pd.DataFrame(
+        {
+            "age": rng.normal(50, 10, size=n),
+            "treatment": rng.binomial(1, 0.5, size=n),
+            "sex": rng.choice(["M", "F"], size=n),
+        }
+    )
     lp = -2.0 + 0.05 * df["age"] + 0.8 * df["treatment"] + 0.3 * (df["sex"] == "M")
     df["outcome"] = rng.binomial(1, 1 / (1 + np.exp(-lp)))
     return df
@@ -119,9 +121,7 @@ def test_simultaneous_ci_scalar_result(fit_logit):
 
 def test_simulation_composition_addition_match_delta(fit_logit):
     """Composed simulation CI should overlap with composed delta CI."""
-    m_sim = Margins.linear_scale(
-        fit_logit, method="simulation", n_sim=500, rng_seed=42
-    )
+    m_sim = Margins.linear_scale(fit_logit, method="simulation", n_sim=500, rng_seed=42)
     m_delta = Margins.linear_scale(fit_logit, method="delta")
 
     pred_sim_treat = m_sim.predict(atexog={"treatment": 1})
@@ -163,33 +163,45 @@ def test_composition_mixed_method_raises():
     sess = _make_mock_session()
     cov = np.diag([0.01])
     r_delta = MarginsResult(
-        estimate=1.0, std_error=0.1,
-        conf_int_lower=0.8, conf_int_upper=1.2,
-        method="delta", level=0.95, n_obs=100,
-        gradient=np.array([1.0]), cov_params=cov,
-        estimand_metadata={"labels": ["A"]}, session=sess,
+        estimate=1.0,
+        std_error=0.1,
+        conf_int_lower=0.8,
+        conf_int_upper=1.2,
+        method="delta",
+        level=0.95,
+        n_obs=100,
+        gradient=np.array([1.0]),
+        cov_params=cov,
+        estimand_metadata={"labels": ["A"]},
+        session=sess,
     )
     r_sim = MarginsResult(
-        estimate=0.5, std_error=0.1,
-        conf_int_lower=0.3, conf_int_upper=0.7,
-        method="simulation", level=0.95, n_obs=100,
+        estimate=0.5,
+        std_error=0.1,
+        conf_int_lower=0.3,
+        conf_int_upper=0.7,
+        method="simulation",
+        level=0.95,
+        n_obs=100,
         draws=np.random.default_rng(42).normal(size=(100,)),
         draws_inf=np.random.default_rng(42).normal(size=(100,)),
         cov_params=cov,
-        estimand_metadata={"labels": ["B"]}, session=sess,
+        estimand_metadata={"labels": ["B"]},
+        session=sess,
     )
     with pytest.raises(ValueError, match="mixing methods is not supported"):
-        _combine_results(r_delta, r_sim,
-                         lambda a, b: a + b,
-                         lambda g1, g2: g1 + g2,
-                         lambda la, lb: f"{la}+{lb}")
+        _combine_results(
+            r_delta,
+            r_sim,
+            lambda a, b: a + b,
+            lambda g1, g2: g1 + g2,
+            lambda la, lb: f"{la}+{lb}",
+        )
 
 
 def test_composition_bootstrap_produces_finite_ci(fit_logit):
     """Bootstrap composition now works via session resample bank."""
-    m = Margins.linear_scale(
-        fit_logit, method="bootstrap", n_boot=50, rng_seed=42
-    )
+    m = Margins.linear_scale(fit_logit, method="bootstrap", n_boot=50, rng_seed=42)
     pred_treat = m.predict(atexog={"treatment": 1})
     pred_ctrl = m.predict(atexog={"treatment": 0})
     diff = pred_treat - pred_ctrl
@@ -206,28 +218,43 @@ def test_composition_bootstrap_mismatched_bank_raises():
     sess = _make_mock_session()
     draws = np.random.default_rng(42).normal(size=(50,))
     r_a = MarginsResult(
-        estimate=1.0, std_error=0.1,
-        conf_int_lower=0.8, conf_int_upper=1.2,
-        method="bootstrap", level=0.95, n_obs=100,
-        draws=draws, draws_inf=draws,
+        estimate=1.0,
+        std_error=0.1,
+        conf_int_lower=0.8,
+        conf_int_upper=1.2,
+        method="bootstrap",
+        level=0.95,
+        n_obs=100,
+        draws=draws,
+        draws_inf=draws,
         cov_params=np.diag([0.01]),
-        estimand_metadata={"labels": ["A"]}, session=sess,
+        estimand_metadata={"labels": ["A"]},
+        session=sess,
         resample_bank_id="bank_a",
     )
     r_b = MarginsResult(
-        estimate=0.5, std_error=0.1,
-        conf_int_lower=0.3, conf_int_upper=0.7,
-        method="bootstrap", level=0.95, n_obs=100,
-        draws=draws, draws_inf=draws,
+        estimate=0.5,
+        std_error=0.1,
+        conf_int_lower=0.3,
+        conf_int_upper=0.7,
+        method="bootstrap",
+        level=0.95,
+        n_obs=100,
+        draws=draws,
+        draws_inf=draws,
         cov_params=np.diag([0.01]),
-        estimand_metadata={"labels": ["B"]}, session=sess,
+        estimand_metadata={"labels": ["B"]},
+        session=sess,
         resample_bank_id="bank_b",
     )
     with pytest.raises(ValueError, match="resample bank"):
-        _combine_results(r_a, r_b,
-                         lambda a, b: a + b,
-                         lambda g1, g2: g1 + g2,
-                         lambda la, lb: f"{la}+{lb}")
+        _combine_results(
+            r_a,
+            r_b,
+            lambda a, b: a + b,
+            lambda g1, g2: g1 + g2,
+            lambda la, lb: f"{la}+{lb}",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -286,9 +313,7 @@ def test_vector_delta_composition_shape_and_se():
     assert combined.std_error.shape == (n_comp,)
     assert combined.conf_int_lower.shape == (n_comp,)
     assert combined.conf_int_upper.shape == (n_comp,)
-    np.testing.assert_array_almost_equal(
-        combined.estimate, estimate_a + estimate_b
-    )
+    np.testing.assert_array_almost_equal(combined.estimate, estimate_a + estimate_b)
 
 
 def test_vector_delta_composition_se_correctness():
@@ -648,9 +673,7 @@ def test_compose_results_simulation_ratio(fit_logit):
     """Ratio of two simulation predictions via compose_results."""
     from pymargins._result import compose_results
 
-    m = Margins.linear_scale(
-        fit_logit, method="simulation", n_sim=500, rng_seed=42
-    )
+    m = Margins.linear_scale(fit_logit, method="simulation", n_sim=500, rng_seed=42)
     pred_treat = m.predict(atexog={"treatment": 1})
     pred_ctrl = m.predict(atexog={"treatment": 0})
     ratio = compose_results(
@@ -668,9 +691,7 @@ def test_compose_results_bootstrap_ratio(fit_logit):
     """Ratio of two bootstrap predictions via compose_results."""
     from pymargins._result import compose_results
 
-    m = Margins.linear_scale(
-        fit_logit, method="bootstrap", n_boot=50, rng_seed=42
-    )
+    m = Margins.linear_scale(fit_logit, method="bootstrap", n_boot=50, rng_seed=42)
     pred_treat = m.predict(atexog={"treatment": 1})
     pred_ctrl = m.predict(atexog={"treatment": 0})
     ratio = compose_results(
@@ -717,11 +738,13 @@ def test_multi_outcome_unsliced_to_frame_tiles_scenarios(df_logit):
 
     rng = np.random.default_rng(42)
     n = 200
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-        "treatment": rng.binomial(1, 0.5, n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+            "treatment": rng.binomial(1, 0.5, n),
+        }
+    )
     eta0 = 0.5 + 0.3 * df["x1"] - 0.2 * df["x2"]
     eta1 = 0.2 - 0.1 * df["x1"] + 0.4 * df["treatment"]
     logits = np.column_stack([np.zeros(n), eta0, eta1])
@@ -748,11 +771,13 @@ def test_multi_outcome_sliced_to_frame_works(df_logit):
 
     rng = np.random.default_rng(42)
     n = 200
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-        "treatment": rng.binomial(1, 0.5, n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+            "treatment": rng.binomial(1, 0.5, n),
+        }
+    )
     eta0 = 0.5 + 0.3 * df["x1"] - 0.2 * df["x2"]
     eta1 = 0.2 - 0.1 * df["x1"] + 0.4 * df["treatment"]
     logits = np.column_stack([np.zeros(n), eta0, eta1])
@@ -776,9 +801,7 @@ def test_multi_outcome_sliced_to_frame_works(df_logit):
 
 def test_g1_simulation_brute_force_matched_draws(fit_logit):
     """Composed simulation SE must match hand-composed matched-draw reference."""
-    m = Margins.linear_scale(
-        fit_logit, method="simulation", n_sim=5000, rng_seed=42
-    )
+    m = Margins.linear_scale(fit_logit, method="simulation", n_sim=5000, rng_seed=42)
     pred_treat = m.predict(atexog={"treatment": 1})
     pred_ctrl = m.predict(atexog={"treatment": 0})
     diff_composed = pred_treat - pred_ctrl
@@ -810,9 +833,7 @@ def test_g1_simulation_brute_force_matched_draws(fit_logit):
 
 def test_g1_bootstrap_brute_force_matched_draws(fit_logit):
     """Composed bootstrap SE must match hand-composed matched-draw reference."""
-    m = Margins.linear_scale(
-        fit_logit, method="bootstrap", n_boot=100, rng_seed=42
-    )
+    m = Margins.linear_scale(fit_logit, method="bootstrap", n_boot=100, rng_seed=42)
     pred_treat = m.predict(atexog={"treatment": 1})
     pred_ctrl = m.predict(atexog={"treatment": 0})
     diff_composed = pred_treat - pred_ctrl
@@ -833,9 +854,7 @@ def test_g6_simultaneous_ci_coverage_mc():
     n_sim = 200
     n_comp = 3
     true_means = np.array([0.0, 0.5, -0.3])
-    cov = np.array([[1.0, 0.3, 0.1],
-                    [0.3, 1.0, 0.2],
-                    [0.1, 0.2, 1.0]])
+    cov = np.array([[1.0, 0.3, 0.1], [0.3, 1.0, 0.2], [0.1, 0.2, 1.0]])
     level = 0.95
 
     covered = 0
@@ -846,6 +865,7 @@ def test_g6_simultaneous_ci_coverage_mc():
 
         # Build a synthetic MarginsResult with the joint covariance
         from pymargins._result import MarginsResult
+
         r = MarginsResult(
             estimate=est,
             std_error=se,
@@ -877,6 +897,7 @@ def test_g5_empirical_vs_wald_convergence():
     draws = rng.multivariate_normal(est, np.eye(n_comp) * 0.04, size=n_draws)
 
     from pymargins._result import MarginsResult
+
     r = MarginsResult(
         estimate=est,
         std_error=np.ones(n_comp) * 0.2,
@@ -907,14 +928,17 @@ def test_g5_empirical_vs_wald_divergence_under_skew():
     rng = np.random.default_rng(42)
     n_draws = 5000
     # Skewed: log-normal draws
-    draws = np.column_stack([
-        rng.lognormal(mean=0.0, sigma=0.5, size=n_draws),
-        rng.lognormal(mean=0.0, sigma=0.5, size=n_draws),
-    ])
+    draws = np.column_stack(
+        [
+            rng.lognormal(mean=0.0, sigma=0.5, size=n_draws),
+            rng.lognormal(mean=0.0, sigma=0.5, size=n_draws),
+        ]
+    )
     est = draws.mean(axis=0)
     se = draws.std(axis=0, ddof=1)
 
     from pymargins._result import MarginsResult
+
     r = MarginsResult(
         estimate=est,
         std_error=se,
@@ -925,7 +949,7 @@ def test_g5_empirical_vs_wald_divergence_under_skew():
         n_obs=100,
         draws=draws,
         draws_inf=draws,
-        cov_params=np.diag(se ** 2),
+        cov_params=np.diag(se**2),
         estimand_metadata={"labels": ["a", "b"]},
     )
 
@@ -945,11 +969,13 @@ def test_g7b_outcome_then_test_correct():
 
     rng = np.random.default_rng(42)
     n = 200
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-        "treatment": rng.binomial(1, 0.5, n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+            "treatment": rng.binomial(1, 0.5, n),
+        }
+    )
     eta0 = 0.5 + 0.3 * df["x1"] - 0.2 * df["x2"]
     eta1 = 0.2 - 0.1 * df["x1"] + 0.4 * df["treatment"]
     logits = np.column_stack([np.zeros(n), eta0, eta1])
@@ -981,20 +1007,30 @@ def test_compose_results_delta_vector_output():
     sess = _make_mock_session()
     cov = np.diag([0.01, 0.02])
     r_a = MarginsResult(
-        estimate=1.0, std_error=0.1,
-        conf_int_lower=0.8, conf_int_upper=1.2,
-        method="delta", level=0.95, n_obs=100,
+        estimate=1.0,
+        std_error=0.1,
+        conf_int_lower=0.8,
+        conf_int_upper=1.2,
+        method="delta",
+        level=0.95,
+        n_obs=100,
         gradient=np.array([1.0, 0.0]),
         cov_params=cov,
-        estimand_metadata={"labels": ["A"]}, session=sess,
+        estimand_metadata={"labels": ["A"]},
+        session=sess,
     )
     r_b = MarginsResult(
-        estimate=0.5, std_error=0.1,
-        conf_int_lower=0.3, conf_int_upper=0.7,
-        method="delta", level=0.95, n_obs=100,
+        estimate=0.5,
+        std_error=0.1,
+        conf_int_lower=0.3,
+        conf_int_upper=0.7,
+        method="delta",
+        level=0.95,
+        n_obs=100,
         gradient=np.array([0.0, 1.0]),
         cov_params=cov,
-        estimand_metadata={"labels": ["B"]}, session=sess,
+        estimand_metadata={"labels": ["B"]},
+        session=sess,
     )
     # fn returns [a, b] — a 2-element vector
     composed = compose_results(
@@ -1016,20 +1052,32 @@ def test_compose_results_simulation_vector_output():
     rng = np.random.default_rng(42)
     draws = rng.normal(size=(100,))
     r_a = MarginsResult(
-        estimate=1.0, std_error=0.1,
-        conf_int_lower=0.8, conf_int_upper=1.2,
-        method="simulation", level=0.95, n_obs=100,
-        draws=draws, draws_inf=draws,
+        estimate=1.0,
+        std_error=0.1,
+        conf_int_lower=0.8,
+        conf_int_upper=1.2,
+        method="simulation",
+        level=0.95,
+        n_obs=100,
+        draws=draws,
+        draws_inf=draws,
         cov_params=np.diag([0.01]),
-        estimand_metadata={"labels": ["A"]}, session=sess,
+        estimand_metadata={"labels": ["A"]},
+        session=sess,
     )
     r_b = MarginsResult(
-        estimate=0.5, std_error=0.1,
-        conf_int_lower=0.3, conf_int_upper=0.7,
-        method="simulation", level=0.95, n_obs=100,
-        draws=draws, draws_inf=draws,
+        estimate=0.5,
+        std_error=0.1,
+        conf_int_lower=0.3,
+        conf_int_upper=0.7,
+        method="simulation",
+        level=0.95,
+        n_obs=100,
+        draws=draws,
+        draws_inf=draws,
         cov_params=np.diag([0.01]),
-        estimand_metadata={"labels": ["B"]}, session=sess,
+        estimand_metadata={"labels": ["B"]},
+        session=sess,
     )
     composed = compose_results(
         [r_a, r_b],
@@ -1048,15 +1096,22 @@ def test_compose_results_four_result_kappa_reduction():
     cov = np.diag([0.01])
     results = []
     for i in range(4):
-        results.append(MarginsResult(
-            estimate=float(i), std_error=0.1,
-            conf_int_lower=float(i) - 0.2, conf_int_upper=float(i) + 0.2,
-            method="delta", level=0.95, n_obs=100,
-            kappa=0.1 * (i + 1),
-            gradient=np.array([1.0]),
-            cov_params=cov,
-            estimand_metadata={"labels": [f"r{i}"]}, session=sess,
-        ))
+        results.append(
+            MarginsResult(
+                estimate=float(i),
+                std_error=0.1,
+                conf_int_lower=float(i) - 0.2,
+                conf_int_upper=float(i) + 0.2,
+                method="delta",
+                level=0.95,
+                n_obs=100,
+                kappa=0.1 * (i + 1),
+                gradient=np.array([1.0]),
+                cov_params=cov,
+                estimand_metadata={"labels": [f"r{i}"]},
+                session=sess,
+            )
+        )
 
     composed = compose_results(results, fn=lambda theta: jnp.sum(theta))
     assert composed.kappa == pytest.approx(0.4)
@@ -1071,6 +1126,7 @@ def test_large_n_comp_simultaneous_ci():
     cov = np.eye(n_comp) * 0.04
 
     from pymargins._result import MarginsResult
+
     r = MarginsResult(
         estimate=est,
         std_error=se,
@@ -1095,15 +1151,15 @@ def test_large_n_comp_simultaneous_ci():
 def test_singular_covariance_simultaneous_ci():
     """Delta simultaneous CIs should handle near-singular covariance."""
     import warnings
+
     n_comp = 3
     est = np.array([1.0, 2.0, 3.0])
     # Near-singular: third component is almost a linear combination
-    cov = np.array([[1.0, 0.5, 0.99],
-                    [0.5, 1.0, 0.99],
-                    [0.99, 0.99, 1.0]])
+    cov = np.array([[1.0, 0.5, 0.99], [0.5, 1.0, 0.99], [0.99, 0.99, 1.0]])
     cov = (cov + cov.T) / 2.0 * 0.01
 
     from pymargins._result import MarginsResult
+
     r = MarginsResult(
         estimate=est,
         std_error=np.sqrt(np.diag(cov)),
@@ -1131,22 +1187,34 @@ def test_bootstrap_composition_warns_on_bca():
     sess = _make_mock_session()
     draws = np.random.default_rng(42).normal(size=(50,))
     r_a = MarginsResult(
-        estimate=1.0, std_error=0.1,
-        conf_int_lower=0.8, conf_int_upper=1.2,
-        method="bootstrap", level=0.95, n_obs=100,
-        draws=draws, draws_inf=draws,
+        estimate=1.0,
+        std_error=0.1,
+        conf_int_lower=0.8,
+        conf_int_upper=1.2,
+        method="bootstrap",
+        level=0.95,
+        n_obs=100,
+        draws=draws,
+        draws_inf=draws,
         cov_params=np.diag([0.01]),
-        estimand_metadata={"labels": ["A"]}, session=sess,
+        estimand_metadata={"labels": ["A"]},
+        session=sess,
         resample_bank_id="bank1",
         ci_method="bca",
     )
     r_b = MarginsResult(
-        estimate=0.5, std_error=0.1,
-        conf_int_lower=0.3, conf_int_upper=0.7,
-        method="bootstrap", level=0.95, n_obs=100,
-        draws=draws, draws_inf=draws,
+        estimate=0.5,
+        std_error=0.1,
+        conf_int_lower=0.3,
+        conf_int_upper=0.7,
+        method="bootstrap",
+        level=0.95,
+        n_obs=100,
+        draws=draws,
+        draws_inf=draws,
         cov_params=np.diag([0.01]),
-        estimand_metadata={"labels": ["B"]}, session=sess,
+        estimand_metadata={"labels": ["B"]},
+        session=sess,
         resample_bank_id="bank1",
         ci_method="percentile",
     )
@@ -1160,11 +1228,13 @@ def test_outcome_then_conf_int_on_simulation_multi_outcome():
 
     rng = np.random.default_rng(42)
     n = 200
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-        "treatment": rng.binomial(1, 0.5, n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+            "treatment": rng.binomial(1, 0.5, n),
+        }
+    )
     eta0 = 0.5 + 0.3 * df["x1"] - 0.2 * df["x2"]
     eta1 = 0.2 - 0.1 * df["x1"] + 0.4 * df["treatment"]
     logits = np.column_stack([np.zeros(n), eta0, eta1])
@@ -1189,11 +1259,13 @@ def test_outcome_then_test_on_bootstrap_multi_outcome():
 
     rng = np.random.default_rng(42)
     n = 200
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-        "treatment": rng.binomial(1, 0.5, n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+            "treatment": rng.binomial(1, 0.5, n),
+        }
+    )
     eta0 = 0.5 + 0.3 * df["x1"] - 0.2 * df["x2"]
     eta1 = 0.2 - 0.1 * df["x1"] + 0.4 * df["treatment"]
     logits = np.column_stack([np.zeros(n), eta0, eta1])

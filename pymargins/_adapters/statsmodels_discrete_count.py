@@ -13,7 +13,9 @@ are present in the coefficient vector but not used in the mean prediction.
 """
 
 from __future__ import annotations
-from typing import Optional, Any
+
+from typing import Any
+
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
@@ -21,10 +23,10 @@ import statsmodels.api as sm
 
 from .._adapter import ModelAdapter, VariableInfo
 from ._common import (
-    extract_training_data,
-    design_matrix_from_df,
-    column_index_of_variable,
     build_variable_metadata,
+    column_index_of_variable,
+    design_matrix_from_df,
+    extract_training_data,
     validate_vcov_spec,
 )
 
@@ -43,7 +45,7 @@ class StatsmodelsDiscreteCountAdapter(ModelAdapter):
         The data the model was fit on.
     """
 
-    def __init__(self, results, training_data: Optional[pd.DataFrame] = None):
+    def __init__(self, results, training_data: pd.DataFrame | None = None):
         self.results = results
         self._training_data = extract_training_data(results, training_data)
         # Statsmodels appends extra param names (e.g. 'alpha') to exog_names.
@@ -88,7 +90,7 @@ class StatsmodelsDiscreteCountAdapter(ModelAdapter):
         """
         return np.asarray(self.results.model.score_obs(self.results.params))
 
-    def covariance(self, vcov_spec: Optional[Any] = None) -> jnp.ndarray:
+    def covariance(self, vcov_spec: Any | None = None) -> jnp.ndarray:
         if vcov_spec is None:
             return jnp.asarray(self.results.cov_params())
 
@@ -110,7 +112,8 @@ class StatsmodelsDiscreteCountAdapter(ModelAdapter):
                 if groups is None:
                     raise ValueError("cluster vcov requires 'groups' in the spec dict.")
                 return self._refit_and_extract_cov(
-                    cov_type="cluster", cov_kwds={"groups": groups},
+                    cov_type="cluster",
+                    cov_kwds={"groups": groups},
                 )
             raise ValueError(f"Unsupported vcov dict type: {kind!r}")
 
@@ -124,7 +127,7 @@ class StatsmodelsDiscreteCountAdapter(ModelAdapter):
         self,
         beta: jnp.ndarray,
         X: jnp.ndarray,
-        offset: Optional[jnp.ndarray] = None,
+        offset: jnp.ndarray | None = None,
     ) -> jnp.ndarray:
         X_arr = jnp.asarray(X)
         p = X_arr.shape[1]
@@ -143,7 +146,9 @@ class StatsmodelsDiscreteCountAdapter(ModelAdapter):
 
     def column_index_of_variable(self, variable_name: str) -> int:
         return column_index_of_variable(
-            self._exog_names, self.variable_metadata(), variable_name,
+            self._exog_names,
+            self.variable_metadata(),
+            variable_name,
         )
 
     def variable_metadata(self) -> dict[str, VariableInfo]:
@@ -160,7 +165,9 @@ class StatsmodelsDiscreteCountAdapter(ModelAdapter):
         if formula is not None:
             if cov_kwds and "groups" in cov_kwds:
                 groups = cov_kwds["groups"]
-                if hasattr(groups, "__len__") and len(groups) != len(self._training_data):
+                if hasattr(groups, "__len__") and len(groups) != len(
+                    self._training_data
+                ):
                     raise ValueError(
                         f"groups length ({len(groups)}) must match training_data "
                         f"length ({len(self._training_data)})."
@@ -168,23 +175,31 @@ class StatsmodelsDiscreteCountAdapter(ModelAdapter):
             model_cls_name = type(self.results.model).__name__
             if model_cls_name == "Poisson":
                 from statsmodels.formula.api import poisson as smf_poisson
+
                 new_results = smf_poisson(
-                    formula, data=self._training_data,
+                    formula,
+                    data=self._training_data,
                 ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False)
             elif model_cls_name == "NegativeBinomial":
                 from statsmodels.formula.api import negativebinomial as smf_nb
+
                 new_results = smf_nb(
-                    formula, data=self._training_data,
+                    formula,
+                    data=self._training_data,
                 ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False)
             elif model_cls_name == "NegativeBinomialP":
                 from statsmodels.discrete.discrete_model import NegativeBinomialP
+
                 new_results = NegativeBinomialP.from_formula(
-                    formula, data=self._training_data,
+                    formula,
+                    data=self._training_data,
                 ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False)
             elif model_cls_name == "GeneralizedPoisson":
                 from statsmodels.discrete.discrete_model import GeneralizedPoisson
+
                 new_results = GeneralizedPoisson.from_formula(
-                    formula, data=self._training_data,
+                    formula,
+                    data=self._training_data,
                 ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False)
             else:
                 raise ValueError(f"Unknown model class: {model_cls_name}")
@@ -196,25 +211,35 @@ class StatsmodelsDiscreteCountAdapter(ModelAdapter):
         kwargs = self._collect_original_fit_kwargs()
         if model_cls_name == "Poisson":
             new_results = sm.Poisson(endog, exog, **kwargs).fit(
-                cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False,
+                cov_type=cov_type,
+                cov_kwds=cov_kwds or {},
+                disp=False,
             )
         elif model_cls_name == "NegativeBinomial":
             new_results = sm.NegativeBinomial(endog, exog, **kwargs).fit(
-                cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False,
+                cov_type=cov_type,
+                cov_kwds=cov_kwds or {},
+                disp=False,
             )
         elif model_cls_name == "NegativeBinomialP":
             new_results = sm.NegativeBinomialP(endog, exog, **kwargs).fit(
-                cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False,
+                cov_type=cov_type,
+                cov_kwds=cov_kwds or {},
+                disp=False,
             )
         elif model_cls_name == "GeneralizedPoisson":
             new_results = sm.GeneralizedPoisson(endog, exog, **kwargs).fit(
-                cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False,
+                cov_type=cov_type,
+                cov_kwds=cov_kwds or {},
+                disp=False,
             )
         else:
             raise ValueError(f"Unknown model class: {model_cls_name}")
         return jnp.asarray(new_results.cov_params())
 
-    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "StatsmodelsDiscreteCountAdapter":
+    def refit(
+        self, resampled_data: pd.DataFrame, *, index=None
+    ) -> StatsmodelsDiscreteCountAdapter:
         formula = getattr(self.results.model, "formula", None)
         fit_kwargs = self._collect_original_fit_kwargs()
         if index is not None:
@@ -225,23 +250,35 @@ class StatsmodelsDiscreteCountAdapter(ModelAdapter):
             model_cls_name = type(self.results.model).__name__
             if model_cls_name == "Poisson":
                 from statsmodels.formula.api import poisson as smf_poisson
-                new_results = smf_poisson(formula, data=resampled_data).fit(disp=False, **fit_kwargs)
+
+                new_results = smf_poisson(formula, data=resampled_data).fit(
+                    disp=False, **fit_kwargs
+                )
             elif model_cls_name == "NegativeBinomial":
                 from statsmodels.formula.api import negativebinomial as smf_nb
-                new_results = smf_nb(formula, data=resampled_data).fit(disp=False, **fit_kwargs)
+
+                new_results = smf_nb(formula, data=resampled_data).fit(
+                    disp=False, **fit_kwargs
+                )
             elif model_cls_name == "NegativeBinomialP":
                 from statsmodels.discrete.discrete_model import NegativeBinomialP
+
                 new_results = NegativeBinomialP.from_formula(
-                    formula, data=resampled_data,
+                    formula,
+                    data=resampled_data,
                 ).fit(disp=False, **fit_kwargs)
             elif model_cls_name == "GeneralizedPoisson":
                 from statsmodels.discrete.discrete_model import GeneralizedPoisson
+
                 new_results = GeneralizedPoisson.from_formula(
-                    formula, data=resampled_data,
+                    formula,
+                    data=resampled_data,
                 ).fit(disp=False, **fit_kwargs)
             else:
                 raise ValueError(f"Unknown model class: {model_cls_name}")
-            return StatsmodelsDiscreteCountAdapter(new_results, training_data=resampled_data)
+            return StatsmodelsDiscreteCountAdapter(
+                new_results, training_data=resampled_data
+            )
 
         endog_name = getattr(self.results.model, "endog_names", None)
         if endog_name is None:
@@ -272,14 +309,22 @@ class StatsmodelsDiscreteCountAdapter(ModelAdapter):
         if model_cls_name == "Poisson":
             new_results = sm.Poisson(endog, exog_df, **fit_kwargs).fit(disp=False)
         elif model_cls_name == "NegativeBinomial":
-            new_results = sm.NegativeBinomial(endog, exog_df, **fit_kwargs).fit(disp=False)
+            new_results = sm.NegativeBinomial(endog, exog_df, **fit_kwargs).fit(
+                disp=False
+            )
         elif model_cls_name == "NegativeBinomialP":
-            new_results = sm.NegativeBinomialP(endog, exog_df, **fit_kwargs).fit(disp=False)
+            new_results = sm.NegativeBinomialP(endog, exog_df, **fit_kwargs).fit(
+                disp=False
+            )
         elif model_cls_name == "GeneralizedPoisson":
-            new_results = sm.GeneralizedPoisson(endog, exog_df, **fit_kwargs).fit(disp=False)
+            new_results = sm.GeneralizedPoisson(endog, exog_df, **fit_kwargs).fit(
+                disp=False
+            )
         else:
             raise ValueError(f"Unknown model class: {model_cls_name}")
-        return StatsmodelsDiscreteCountAdapter(new_results, training_data=resampled_data)
+        return StatsmodelsDiscreteCountAdapter(
+            new_results, training_data=resampled_data
+        )
 
     def _collect_original_fit_kwargs(self) -> dict:
         """Capture model-specific kwargs from the original fit for refit."""

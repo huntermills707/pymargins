@@ -1,14 +1,14 @@
 from __future__ import annotations
-from typing import Optional
+
 import warnings
+
 import jax
 import jax.numpy as jnp
 import numpy as np
+
+from .._delta import delta_confint, delta_se
 from .._gradients import gradient
-from .._delta import delta_se, delta_confint
-from .._kappa import kappa, kappa_vector, delta_simulation_disagreement
-from .._estimands import is_jax_differentiable
-from ._config import InferenceConfig
+from .._kappa import delta_simulation_disagreement, kappa, kappa_vector
 from ._simulation import _run_simulation
 
 
@@ -22,26 +22,30 @@ def _run_delta(h, adapter, config, estimand_metadata):
 
     # Curvature diagnostic
     k = None
-    fallback_triggered = False
-    fallback_reason = None
     if config.diagnostics:
         if jnp.ndim(estimate) == 0:
-            k = kappa(h, beta, Sigma,
-                      backend=config.gradient_backend, fd_step=config.fd_step)
+            k = kappa(
+                h, beta, Sigma, backend=config.gradient_backend, fd_step=config.fd_step
+            )
         else:
-            k = kappa_vector(h, beta, Sigma,
-                             backend=config.gradient_backend, fd_step=config.fd_step)
+            k = kappa_vector(
+                h, beta, Sigma, backend=config.gradient_backend, fd_step=config.fd_step
+            )
 
         max_k = float(k) if jnp.ndim(k) == 0 else float(jnp.nanmax(jnp.asarray(k)))
         if max_k > config.kappa_threshold:
             # Auto-fallback to simulation
             warnings.warn(
                 f"Delta-method curvature κ={max_k:.3f} exceeds threshold "
-                f"({config.kappa_threshold}); falling back to simulation.",
-                UserWarning, stacklevel=3,
+                f"({config.kappa_threshold}, stacklevel=2); falling back to simulation.",
+                UserWarning,
+                stacklevel=3,
             )
             sim_result = _run_simulation(
-                h, adapter, config, estimand_metadata,
+                h,
+                adapter,
+                config,
+                estimand_metadata,
                 fallback_reason=f"kappa={max_k:.3f}>threshold={config.kappa_threshold}",
                 skip_kappa=True,
             )
@@ -50,8 +54,11 @@ def _run_delta(h, adapter, config, estimand_metadata):
 
     # Construct CI on inference scale, then back-transform via phi
     lower, upper = delta_confint(
-        estimate, grad, Sigma,
-        level=config.level, phi=config.phi,
+        estimate,
+        grad,
+        Sigma,
+        level=config.level,
+        phi=config.phi,
     )
     se = delta_se(grad, Sigma)
 
@@ -61,14 +68,22 @@ def _run_delta(h, adapter, config, estimand_metadata):
     if config.diagnostics:
         try:
             delta_sim_disagreement = delta_simulation_disagreement(
-                estimate, grad, Sigma, h, beta,
+                estimate,
+                grad,
+                Sigma,
+                h,
+                beta,
                 level=config.level,
                 n_sim=min(config.n_sim, 1000),  # Smaller sample for diagnostic
                 rng_seed=config.rng_seed,
                 phi=config.phi,
             )
         except (ValueError, TypeError, jax.errors.JAXTypeError) as exc:
-            warnings.warn(f"delta-simulation diagnostic failed: {exc}", RuntimeWarning)
+            warnings.warn(
+                f"delta-simulation diagnostic failed: {exc}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
     estimate_report = config.phi(estimate) if config.phi is not None else estimate
 

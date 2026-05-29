@@ -3,7 +3,6 @@
 import numpy as np
 import pandas as pd
 import pytest
-
 from linearmodels.iv import IV2SLS
 
 from pymargins import Margins
@@ -34,7 +33,9 @@ def test_margins_predict_olsresults(ols_data):
 
     pred = m.predict()
     native_pred = res.fitted_values
-    assert np.isclose(float(pred.estimate), float(native_pred.mean().iloc[0]), rtol=1e-4)
+    assert np.isclose(
+        float(pred.estimate), float(native_pred.mean().iloc[0]), rtol=1e-4
+    )
 
 
 def test_margins_dydx_olsresults(ols_data):

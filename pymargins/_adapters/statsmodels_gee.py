@@ -13,7 +13,9 @@ multi-outcome predict machinery.
 """
 
 from __future__ import annotations
-from typing import Optional, Any
+
+from typing import Any
+
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
@@ -22,11 +24,10 @@ import statsmodels.api as sm
 from .._adapter import GLMAdapter, VariableInfo
 from .._gradients import make_glm_jvp_wrapper
 from ._common import (
-    extract_training_data,
-    design_matrix_from_df,
-    column_index_of_variable,
     build_variable_metadata,
-    validate_vcov_spec,
+    column_index_of_variable,
+    design_matrix_from_df,
+    extract_training_data,
 )
 
 
@@ -49,7 +50,7 @@ class StatsmodelsGEEAdapter(GLMAdapter):
         for direct-array fits — provide explicitly in that case.
     """
 
-    def __init__(self, results, training_data: Optional[pd.DataFrame] = None):
+    def __init__(self, results, training_data: pd.DataFrame | None = None):
         self.results = results
         self.family = results.family
         self._predict_jax = make_glm_jvp_wrapper(self.family)
@@ -66,7 +67,15 @@ class StatsmodelsGEEAdapter(GLMAdapter):
         """Validate session configuration at attach time."""
         vcov = getattr(session, "vcov_spec", None)
         if isinstance(vcov, str):
-            if vcov.lower() not in ("naive", "robust", "robust_bc", "hc0", "hc1", "hc2", "hc3"):
+            if vcov.lower() not in (
+                "naive",
+                "robust",
+                "robust_bc",
+                "hc0",
+                "hc1",
+                "hc2",
+                "hc3",
+            ):
                 raise ValueError(
                     f"StatsmodelsGEEAdapter does not support vcov={vcov!r}. "
                     f"Supported strings: 'naive', 'robust', 'robust_bc'."
@@ -92,7 +101,7 @@ class StatsmodelsGEEAdapter(GLMAdapter):
     def coefficients(self) -> jnp.ndarray:
         return jnp.asarray(self.results.params)
 
-    def covariance(self, vcov_spec: Optional[Any] = None) -> jnp.ndarray:
+    def covariance(self, vcov_spec: Any | None = None) -> jnp.ndarray:
         """Return Σ̂, dispatching to the requested flavor.
 
         statsmodels GEE stores the sandwich covariance in ``cov_params()`` by
@@ -116,9 +125,7 @@ class StatsmodelsGEEAdapter(GLMAdapter):
             if spec_lower == "robust_bc":
                 cov = self.results.cov_robust_bc
                 if cov is None:
-                    raise ValueError(
-                        "cov_robust_bc is not available on this fit."
-                    )
+                    raise ValueError("cov_robust_bc is not available on this fit.")
                 return jnp.asarray(cov)
             if spec_lower in ("hc0", "hc1", "hc2", "hc3"):
                 # GEE doesn't use HCx nomenclature; route to robust
@@ -132,9 +139,7 @@ class StatsmodelsGEEAdapter(GLMAdapter):
                 # the model's groups.  We return the default robust sandwich.
                 groups = vcov_spec.get("groups")
                 if groups is None:
-                    raise ValueError(
-                        "cluster vcov requires 'groups' in the spec dict."
-                    )
+                    raise ValueError("cluster vcov requires 'groups' in the spec dict.")
                 return jnp.asarray(self.results.cov_robust)
             raise ValueError(f"Unsupported vcov dict type: {kind!r}")
 
@@ -148,7 +153,7 @@ class StatsmodelsGEEAdapter(GLMAdapter):
         self,
         beta: jnp.ndarray,
         X: jnp.ndarray,
-        offset: Optional[jnp.ndarray] = None,
+        offset: jnp.ndarray | None = None,
     ) -> jnp.ndarray:
         return self._predict_jax(beta, X, offset)
 
@@ -161,7 +166,9 @@ class StatsmodelsGEEAdapter(GLMAdapter):
 
     def column_index_of_variable(self, variable_name: str) -> int:
         return column_index_of_variable(
-            self._exog_names, self.variable_metadata(), variable_name,
+            self._exog_names,
+            self.variable_metadata(),
+            variable_name,
         )
 
     def variable_metadata(self) -> dict[str, VariableInfo]:
@@ -194,8 +201,11 @@ class StatsmodelsGEEAdapter(GLMAdapter):
         endog = self.results.model.endog
         exog = self.results.model.exog
         new_results = sm.GEE(
-            endog, exog, groups=self._groups,
-            family=self.family, cov_struct=self._cov_struct,
+            endog,
+            exog,
+            groups=self._groups,
+            family=self.family,
+            cov_struct=self._cov_struct,
             **model_kwargs,
         ).fit(cov_type=cov_type)
         return jnp.asarray(new_results.cov_params())
@@ -213,7 +223,9 @@ class StatsmodelsGEEAdapter(GLMAdapter):
             kwargs["weights"] = weights
         return kwargs
 
-    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "StatsmodelsGEEAdapter":
+    def refit(
+        self, resampled_data: pd.DataFrame, *, index=None
+    ) -> StatsmodelsGEEAdapter:
         """Refit the model on resampled data.
 
         Reconstructs the formula/family/cov_struct from the original results
@@ -279,8 +291,11 @@ class StatsmodelsGEEAdapter(GLMAdapter):
             groups = np.asarray(groups)[index]
 
         new_results = sm.GEE(
-            endog, exog_df, groups=groups,
-            family=self.family, cov_struct=self._cov_struct,
+            endog,
+            exog_df,
+            groups=groups,
+            family=self.family,
+            cov_struct=self._cov_struct,
             **model_kwargs,
         ).fit()
         return StatsmodelsGEEAdapter(new_results, training_data=resampled_data)

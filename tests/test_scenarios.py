@@ -1,22 +1,21 @@
 """Tests for pymargins.scenarios helper module."""
 
 import pytest
-import numpy as np
 
 from pymargins.scenarios import (
-    pairwise,
-    reference,
+    all_pairwise,
     at_levels,
-    grid,
     did,
     diff,
-    all_pairwise,
+    grid,
+    pairwise,
+    reference,
 )
-
 
 # ---------------------------------------------------------------------------
 # pairwise
 # ---------------------------------------------------------------------------
+
 
 def test_pairwise_basic():
     scenarios, contrasts = pairwise("treatment", [1, 0])
@@ -54,6 +53,7 @@ def test_pairwise_too_few_values():
 # ---------------------------------------------------------------------------
 # reference
 # ---------------------------------------------------------------------------
+
 
 def test_reference_basic():
     scenarios, contrasts = reference("region", ["north", "south", "east"])
@@ -97,6 +97,7 @@ def test_reference_invalid_ref():
 # at_levels
 # ---------------------------------------------------------------------------
 
+
 def test_at_levels_basic():
     scenarios = at_levels("region", levels=["north", "south", "east"])
     assert len(scenarios) == 3
@@ -118,6 +119,7 @@ def test_at_levels_empty():
 # ---------------------------------------------------------------------------
 # grid
 # ---------------------------------------------------------------------------
+
 
 def test_grid_basic():
     scenarios = grid(age=[30, 50], treatment=[0, 1])
@@ -146,6 +148,7 @@ def test_grid_empty():
 # did
 # ---------------------------------------------------------------------------
 
+
 def test_did_basic():
     scenarios, contrasts = did("treat", "post")
     assert len(scenarios) == 4
@@ -158,9 +161,12 @@ def test_did_basic():
 
 def test_did_custom_levels():
     scenarios, contrasts = did(
-        "treat", "post",
-        treated_level="yes", control_level="no",
-        post_level="after", pre_level="before",
+        "treat",
+        "post",
+        treated_level="yes",
+        control_level="no",
+        post_level="after",
+        pre_level="before",
     )
     assert scenarios[0]["atexog"] == {"treat": "yes", "post": "after"}
     assert scenarios[3]["atexog"] == {"treat": "no", "post": "before"}
@@ -174,6 +180,7 @@ def test_did_with_fixed():
 # ---------------------------------------------------------------------------
 # diff
 # ---------------------------------------------------------------------------
+
 
 def test_diff_basic():
     assert diff(2) == [+1, -1]
@@ -189,6 +196,7 @@ def test_diff_too_small():
 # ---------------------------------------------------------------------------
 # all_pairwise
 # ---------------------------------------------------------------------------
+
 
 def test_all_pairwise_basic():
     scenarios, contrasts = all_pairwise(

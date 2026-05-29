@@ -6,7 +6,6 @@ import tempfile
 from pathlib import Path
 
 import jax
-import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import pytest
@@ -15,22 +14,24 @@ import statsmodels.formula.api as smf
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins import Margins, adjust, AdjustedResults
+from pymargins import AdjustedResults, Margins, adjust
 from pymargins._result import MarginsResult
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def df():
     rng = np.random.default_rng(42)
     n = 200
-    df = pd.DataFrame({
-        "x1": rng.normal(0, 1, size=n),
-        "x2": rng.normal(0, 1, size=n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.normal(0, 1, size=n),
+            "x2": rng.normal(0, 1, size=n),
+        }
+    )
     df["y"] = 1.0 + 0.5 * df["x1"] - 0.3 * df["x2"] + rng.normal(0, 0.5, size=n)
     return df
 
@@ -49,6 +50,7 @@ def fit_logit(df):
 # ---------------------------------------------------------------------------
 # 1. from_posterior
 # ---------------------------------------------------------------------------
+
 
 def test_from_posterior_basic(fit_ols):
     rng = np.random.default_rng(0)
@@ -77,6 +79,7 @@ def test_from_posterior_point_estimate_override(fit_ols):
 # 2. MarginsResult.contrast
 # ---------------------------------------------------------------------------
 
+
 def test_contrast_on_vector_result(fit_ols):
     m = Margins.linear_scale(fit_ols, at="mean")
     r = m.predict(atexog={"x1": [0.0, 1.0]})
@@ -84,9 +87,7 @@ def test_contrast_on_vector_result(fit_ols):
     C = np.array([[1.0, -1.0]])
     diff = r.contrast(C, labels=["diff"])
     assert diff.estimate.shape == (1,)
-    np.testing.assert_allclose(
-        diff.estimate, r.estimate[0] - r.estimate[1], rtol=1e-5
-    )
+    np.testing.assert_allclose(diff.estimate, r.estimate[0] - r.estimate[1], rtol=1e-5)
     assert diff.gradient is not None
 
 
@@ -100,6 +101,7 @@ def test_contrast_requires_delta(fit_ols):
 # ---------------------------------------------------------------------------
 # 3. MarginsResult.influence
 # ---------------------------------------------------------------------------
+
 
 def test_influence_bca_bootstrap(fit_ols):
     m = Margins.linear_scale(
@@ -146,7 +148,11 @@ def test_influence_delta_matches_jackknife(df_small):
     m_delta = Margins.linear_scale(fit, at="mean", method="delta")
     infl_delta = m_delta.dydx("x1").influence()
     m_boot = Margins.linear_scale(
-        fit, at="mean", method="bootstrap", n_boot=20, rng_seed=0,
+        fit,
+        at="mean",
+        method="bootstrap",
+        n_boot=20,
+        rng_seed=0,
         bootstrap_config={"ci_method": "bca"},
     )
     infl_jack = m_boot.dydx("x1").influence()
@@ -165,7 +171,7 @@ def test_influence_reconstructs_robust_variance(df_small):
     # Sum of squared influence = HC0 sandwich variance of the estimand.
     m_hc0 = Margins.linear_scale(fit, at="mean", method="delta", vcov="HC0")
     r_hc0 = m_hc0.dydx("x1")
-    np.testing.assert_allclose(np.sum(infl ** 2), r_hc0.std_error ** 2, rtol=1e-4)
+    np.testing.assert_allclose(np.sum(infl**2), r_hc0.std_error**2, rtol=1e-4)
 
 
 def test_influence_vector_estimand_shape(df_small):
@@ -179,6 +185,7 @@ def test_influence_vector_estimand_shape(df_small):
 # ---------------------------------------------------------------------------
 # 4. adjust
 # ---------------------------------------------------------------------------
+
 
 def test_adjust_single_result(fit_ols):
     m = Margins.linear_scale(fit_ols, at="mean")
@@ -215,6 +222,7 @@ def test_adjust_to_frame(fit_ols):
 # 5. Elasticity sugar
 # ---------------------------------------------------------------------------
 
+
 def test_eyex_basic(fit_ols):
     m = Margins.linear_scale(fit_ols, at="mean")
     e = m.eyex("x1")
@@ -248,6 +256,7 @@ def test_elasticity_matches_manual_composition(fit_ols):
 # 6. to_disk / from_disk
 # ---------------------------------------------------------------------------
 
+
 def test_to_disk_from_disk_roundtrip(fit_ols):
     m = Margins.linear_scale(fit_ols, at="mean")
     r = m.predict(atexog={"x1": 0.0})
@@ -267,6 +276,7 @@ def test_from_disk_version_warning(fit_ols):
         path = Path(tmpdir) / "result.pkl"
         r.to_disk(path)
         import pickle
+
         with open(path, "rb") as f:
             blob = pickle.load(f)
         blob["version"] = "0.0.0+old"
@@ -281,6 +291,7 @@ def test_from_disk_version_warning(fit_ols):
 # 7. rmst
 # ---------------------------------------------------------------------------
 
+
 def test_rmst_requires_time_aware_adapter(fit_ols):
     m = Margins.linear_scale(fit_ols, at="mean")
     with pytest.raises(ValueError, match="time-aware"):
@@ -290,6 +301,7 @@ def test_rmst_requires_time_aware_adapter(fit_ols):
 # ---------------------------------------------------------------------------
 # 8. WTP
 # ---------------------------------------------------------------------------
+
 
 def test_wtp_basic(fit_ols):
     m = Margins.linear_scale(fit_ols, at="mean")
@@ -313,8 +325,10 @@ def test_wtp_honours_atexog(fit_ols):
 # 9. diff_matrix
 # ---------------------------------------------------------------------------
 
+
 def test_diff_matrix_reference():
     from pymargins import diff_matrix
+
     C = diff_matrix(3, kind="reference")
     assert C.shape == (2, 3)
     expected = np.array([[-1.0, 1.0, 0.0], [-1.0, 0.0, 1.0]])
@@ -323,18 +337,22 @@ def test_diff_matrix_reference():
 
 def test_diff_matrix_pairwise():
     from pymargins import diff_matrix
+
     C = diff_matrix(3, kind="pairwise")
     assert C.shape == (3, 3)
-    expected = np.array([
-        [-1.0, 1.0, 0.0],
-        [-1.0, 0.0, 1.0],
-        [0.0, -1.0, 1.0],
-    ])
+    expected = np.array(
+        [
+            [-1.0, 1.0, 0.0],
+            [-1.0, 0.0, 1.0],
+            [0.0, -1.0, 1.0],
+        ]
+    )
     np.testing.assert_array_equal(C, expected)
 
 
 def test_diff_matrix_invalid_kind():
     from pymargins import diff_matrix
+
     with pytest.raises(ValueError, match="kind must be"):
         diff_matrix(3, kind="invalid")
 
@@ -342,6 +360,7 @@ def test_diff_matrix_invalid_kind():
 # ---------------------------------------------------------------------------
 # 10. pairwise_contrasts
 # ---------------------------------------------------------------------------
+
 
 def test_pairwise_contrasts_basic(fit_ols):
     m = Margins.linear_scale(fit_ols, at="mean")

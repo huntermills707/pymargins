@@ -4,7 +4,6 @@ See IMPLEMENTATION_GUIDE.md §0.3.
 """
 
 import jax
-import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import pytest
@@ -13,36 +12,47 @@ import statsmodels.formula.api as smf
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins._adapters.statsmodels_mixedlm import StatsmodelsMixedLMAdapter
-from pymargins._adapter import auto_detect_adapter
 from pymargins import Margins
-
+from pymargins._adapter import auto_detect_adapter
+from pymargins._adapters.statsmodels_mixedlm import StatsmodelsMixedLMAdapter
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def df_mixed():
     """Synthetic data with clusters for mixed models."""
     rng = np.random.default_rng(42)
     n = 200
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-        "treatment": rng.binomial(1, 0.5, n),
-        "region": rng.choice(["north", "south", "east", "west"], size=n),
-        "group": np.repeat(np.arange(20), 10),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+            "treatment": rng.binomial(1, 0.5, n),
+            "region": rng.choice(["north", "south", "east", "west"], size=n),
+            "group": np.repeat(np.arange(20), 10),
+        }
+    )
     # Random intercept per group
     group_effect = rng.standard_normal(20)[df["group"].values]
-    df["y"] = 1.0 + 0.5 * df["x1"] - 0.3 * df["x2"] + 0.8 * df["treatment"] + group_effect + rng.standard_normal(n) * 0.5
+    df["y"] = (
+        1.0
+        + 0.5 * df["x1"]
+        - 0.3 * df["x2"]
+        + 0.8 * df["treatment"]
+        + group_effect
+        + rng.standard_normal(n) * 0.5
+    )
     return df
 
 
 @pytest.fixture
 def fit_mixed_formula(df_mixed):
-    return smf.mixedlm("y ~ x1 + x2 + treatment + C(region)", groups="group", data=df_mixed).fit()
+    return smf.mixedlm(
+        "y ~ x1 + x2 + treatment + C(region)", groups="group", data=df_mixed
+    ).fit()
 
 
 @pytest.fixture
@@ -57,6 +67,7 @@ def fit_mixed_array(df_mixed):
 # ---------------------------------------------------------------------------
 # 1. Construction and auto-detection
 # ---------------------------------------------------------------------------
+
 
 def test_auto_detect_mixedlm(fit_mixed_formula):
     adapter = auto_detect_adapter(fit_mixed_formula)
@@ -90,6 +101,7 @@ def test_adapter_training_data_array_requires_explicit(fit_mixed_array, df_mixed
 # 2. Covariance / vcov flavors
 # ---------------------------------------------------------------------------
 
+
 def test_covariance_default(fit_mixed_formula):
     adapter = StatsmodelsMixedLMAdapter(fit_mixed_formula)
     Sigma = adapter.covariance()
@@ -107,7 +119,7 @@ def test_covariance_matches_bse_fe(fit_mixed_formula):
     Sigma = adapter.covariance()
     np.testing.assert_allclose(
         np.diag(np.asarray(Sigma)),
-        fit_mixed_formula.bse_fe.values ** 2,
+        fit_mixed_formula.bse_fe.values**2,
         rtol=1e-10,
     )
 
@@ -137,6 +149,7 @@ def test_covariance_rejects_cluster_dict(fit_mixed_formula, df_mixed):
 # 3. Prediction
 # ---------------------------------------------------------------------------
 
+
 def test_predict_matches_statsmodels_pa(fit_mixed_formula):
     adapter = StatsmodelsMixedLMAdapter(fit_mixed_formula)
     beta = adapter.coefficients()
@@ -159,6 +172,7 @@ def test_predict_is_linear(fit_mixed_formula):
 # 4. Design matrix construction
 # ---------------------------------------------------------------------------
 
+
 def test_design_matrix_from_df_formula(fit_mixed_formula, df_mixed):
     adapter = StatsmodelsMixedLMAdapter(fit_mixed_formula)
     X = adapter.design_matrix_from_df(df_mixed.iloc[:5])
@@ -180,6 +194,7 @@ def test_design_matrix_from_df_array(fit_mixed_array, df_mixed):
 # 5. Variable metadata
 # ---------------------------------------------------------------------------
 
+
 def test_variable_metadata(fit_mixed_formula):
     adapter = StatsmodelsMixedLMAdapter(fit_mixed_formula)
     meta = adapter.variable_metadata()
@@ -195,6 +210,7 @@ def test_variable_metadata(fit_mixed_formula):
 # ---------------------------------------------------------------------------
 # 6. Column index lookup
 # ---------------------------------------------------------------------------
+
 
 def test_column_index_continuous(fit_mixed_formula):
     adapter = StatsmodelsMixedLMAdapter(fit_mixed_formula)
@@ -212,6 +228,7 @@ def test_column_index_categorical_raises(fit_mixed_formula):
 # ---------------------------------------------------------------------------
 # 7. Bootstrap / refit
 # ---------------------------------------------------------------------------
+
 
 def test_refit_formula(fit_mixed_formula, df_mixed):
     adapter = StatsmodelsMixedLMAdapter(fit_mixed_formula)
@@ -239,21 +256,29 @@ def test_refit_array(fit_mixed_array, df_mixed):
 # Attach-time validation
 # ---------------------------------------------------------------------------
 
+
 def test_attach_rejects_unsupported_vcov_string(fit_mixed_formula):
     adapter = StatsmodelsMixedLMAdapter(fit_mixed_formula)
-    with pytest.raises(ValueError, match="StatsmodelsMixedLMAdapter does not support vcov='HAC'"):
+    with pytest.raises(
+        ValueError, match="StatsmodelsMixedLMAdapter does not support vcov='HAC'"
+    ):
         Margins(fit_mixed_formula, adapter=adapter, vcov="HAC")
 
 
 def test_attach_rejects_unsupported_vcov_dict(fit_mixed_formula):
     adapter = StatsmodelsMixedLMAdapter(fit_mixed_formula)
-    with pytest.raises(ValueError, match="StatsmodelsMixedLMAdapter does not support vcov dict with type='hac'"):
+    with pytest.raises(
+        ValueError,
+        match="StatsmodelsMixedLMAdapter does not support vcov dict with type='hac'",
+    ):
         Margins(fit_mixed_formula, adapter=adapter, vcov={"type": "hac"})
 
 
 def test_attach_rejects_cluster_without_groups(fit_mixed_formula):
     adapter = StatsmodelsMixedLMAdapter(fit_mixed_formula)
-    with pytest.raises(ValueError, match="does not support vcov dict with type='cluster'"):
+    with pytest.raises(
+        ValueError, match="does not support vcov dict with type='cluster'"
+    ):
         Margins(fit_mixed_formula, adapter=adapter, vcov={"type": "cluster"})
 
 

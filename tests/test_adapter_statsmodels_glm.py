@@ -13,26 +13,28 @@ import statsmodels.formula.api as smf
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins._adapters.statsmodels_glm import StatsmodelsGLMAdapter
-from pymargins._adapter import auto_detect_adapter
 from pymargins import Margins
-
+from pymargins._adapter import auto_detect_adapter
+from pymargins._adapters.statsmodels_glm import StatsmodelsGLMAdapter
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def df_binary():
     """Synthetic data with a binary outcome."""
     rng = np.random.default_rng(42)
     n = 200
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-        "treatment": rng.binomial(1, 0.5, n),
-        "region": rng.choice(["north", "south", "east", "west"], size=n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+            "treatment": rng.binomial(1, 0.5, n),
+            "region": rng.choice(["north", "south", "east", "west"], size=n),
+        }
+    )
     eta = 0.5 + 0.3 * df["x1"] - 0.2 * df["x2"] + 0.8 * df["treatment"]
     df["y"] = (rng.uniform(size=n) < (1 / (1 + np.exp(-eta)))).astype(float)
     return df
@@ -43,10 +45,12 @@ def df_count():
     """Synthetic data with a count outcome."""
     rng = np.random.default_rng(43)
     n = 200
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+        }
+    )
     eta = 0.5 + 0.3 * df["x1"] - 0.2 * df["x2"]
     df["y"] = rng.poisson(np.exp(eta))
     return df
@@ -85,6 +89,7 @@ def fit_poisson_formula(df_count):
 # 1. Construction and auto-detection
 # ---------------------------------------------------------------------------
 
+
 def test_auto_detect_logit(fit_logit_formula):
     adapter = auto_detect_adapter(fit_logit_formula)
     assert isinstance(adapter, StatsmodelsGLMAdapter)
@@ -118,6 +123,7 @@ def test_adapter_training_data_array_requires_explicit(fit_logit_array, df_binar
 # ---------------------------------------------------------------------------
 # 2. Covariance / vcov flavors
 # ---------------------------------------------------------------------------
+
 
 def test_covariance_default(fit_logit_formula):
     adapter = StatsmodelsGLMAdapter(fit_logit_formula)
@@ -199,6 +205,7 @@ def test_covariance_cluster_array_fit(fit_logit_array, df_binary):
 # 3. Prediction
 # ---------------------------------------------------------------------------
 
+
 def test_predict_matches_statsmodels(fit_logit_formula):
     adapter = StatsmodelsGLMAdapter(fit_logit_formula)
     beta = adapter.coefficients()
@@ -220,6 +227,7 @@ def test_predict_new_data_unseen_levels(fit_logit_formula, df_binary):
 # ---------------------------------------------------------------------------
 # 4. Design matrix construction
 # ---------------------------------------------------------------------------
+
 
 def test_design_matrix_from_df_formula(fit_logit_formula, df_binary):
     adapter = StatsmodelsGLMAdapter(fit_logit_formula)
@@ -253,6 +261,7 @@ def test_design_matrix_from_df_array_auto_injects_intercept(fit_logit_array, df_
 # 5. Variable metadata
 # ---------------------------------------------------------------------------
 
+
 def test_variable_metadata(fit_logit_formula):
     adapter = StatsmodelsGLMAdapter(fit_logit_formula)
     meta = adapter.variable_metadata()
@@ -277,6 +286,7 @@ def test_variable_metadata_is_cached(fit_logit_formula):
 # 6. Column index lookup
 # ---------------------------------------------------------------------------
 
+
 def test_column_index_continuous(fit_logit_formula):
     adapter = StatsmodelsGLMAdapter(fit_logit_formula)
     idx = adapter.column_index_of_variable("x1")
@@ -294,6 +304,7 @@ def test_column_index_categorical_raises(fit_logit_formula):
 # ---------------------------------------------------------------------------
 # 7. Bootstrap / refit
 # ---------------------------------------------------------------------------
+
 
 def test_refit_formula(fit_logit_formula, df_binary):
     adapter = StatsmodelsGLMAdapter(fit_logit_formula)
@@ -323,15 +334,21 @@ def test_refit_array(fit_logit_array, df_binary):
 # Attach-time validation (IMPLEMENTATION_GUIDE.md §2.3)
 # ---------------------------------------------------------------------------
 
+
 def test_attach_rejects_unsupported_vcov_string(fit_logit_formula):
     adapter = StatsmodelsGLMAdapter(fit_logit_formula)
-    with pytest.raises(ValueError, match="StatsmodelsGLMAdapter does not support vcov='HAC'"):
+    with pytest.raises(
+        ValueError, match="StatsmodelsGLMAdapter does not support vcov='HAC'"
+    ):
         Margins(fit_logit_formula, adapter=adapter, vcov="HAC")
 
 
 def test_attach_rejects_unsupported_vcov_dict(fit_logit_formula):
     adapter = StatsmodelsGLMAdapter(fit_logit_formula)
-    with pytest.raises(ValueError, match="StatsmodelsGLMAdapter does not support vcov dict with type='hac'"):
+    with pytest.raises(
+        ValueError,
+        match="StatsmodelsGLMAdapter does not support vcov dict with type='hac'",
+    ):
         Margins(fit_logit_formula, adapter=adapter, vcov={"type": "hac"})
 
 
@@ -361,13 +378,16 @@ def test_attach_accepts_supported_vcov(fit_logit_formula):
 def test_attach_validates_phi_phi_inv(fit_logit_formula):
     """GLMAdapter.attach (via super) validates phi and phi_inv are inverses."""
     adapter = StatsmodelsGLMAdapter(fit_logit_formula)
-    with pytest.raises(ValueError, match="phi and phi_inv do not appear to be inverses"):
+    with pytest.raises(
+        ValueError, match="phi and phi_inv do not appear to be inverses"
+    ):
         Margins(fit_logit_formula, adapter=adapter, phi=jnp.exp, phi_inv=jnp.exp)
 
 
 # ---------------------------------------------------------------------------
 # Refit preserves model-specific args
 # ---------------------------------------------------------------------------
+
 
 def test_refit_preserves_offset_and_exposure(df_count):
     """Refit should preserve offset, exposure, freq_weights, var_weights."""

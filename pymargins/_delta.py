@@ -25,12 +25,14 @@ This module does the math given those inputs. Diagnostics live in _kappa.
 """
 
 from __future__ import annotations
-from typing import Callable, Optional, Literal
+
+import warnings
+from collections.abc import Callable
+from typing import Literal
+
 import jax.numpy as jnp
 import numpy as np
 from scipy import stats
-import warnings
-
 
 # ---------------------------------------------------------------------------
 # Type aliases
@@ -42,6 +44,7 @@ Alternative = Literal["two-sided", "greater", "less"]
 # ---------------------------------------------------------------------------
 # Variance and SE
 # ---------------------------------------------------------------------------
+
 
 def delta_variance(
     grad: jnp.ndarray,
@@ -78,9 +81,7 @@ def delta_variance(
         grad_2d = grad.reshape(-1, grad.shape[-1])
         return grad_2d @ cov_params @ grad_2d.T
     else:
-        raise ValueError(
-            f"gradient must be 1D, 2D, or 3D; got ndim={grad.ndim}"
-        )
+        raise ValueError(f"gradient must be 1D, 2D, or 3D; got ndim={grad.ndim}")
 
 
 def _safe_sqrt_diag(var: jnp.ndarray) -> jnp.ndarray:
@@ -138,13 +139,14 @@ def delta_se(
 # Confidence intervals
 # ---------------------------------------------------------------------------
 
+
 def delta_confint(
     estimate: jnp.ndarray,
     grad: jnp.ndarray,
     cov_params: jnp.ndarray,
     *,
     level: float = 0.95,
-    phi: Optional[Callable] = None,
+    phi: Callable | None = None,
 ) -> tuple[jnp.ndarray, jnp.ndarray]:
     """Confidence interval(s) via the delta method.
 
@@ -205,7 +207,7 @@ def delta_confint_from_se(
     se: jnp.ndarray,
     *,
     level: float = 0.95,
-    phi: Optional[Callable] = None,
+    phi: Callable | None = None,
 ) -> tuple[jnp.ndarray, jnp.ndarray]:
     """Build a CI directly from a precomputed SE.
 
@@ -244,6 +246,7 @@ def delta_confint_from_se(
 # ---------------------------------------------------------------------------
 # Wald tests
 # ---------------------------------------------------------------------------
+
 
 def delta_wald_test(
     estimate: jnp.ndarray,
@@ -301,7 +304,11 @@ def delta_wald_test(
     eps = jnp.finfo(se.dtype).eps ** 0.5
     z = jnp.where(
         se < eps,
-        jnp.where(jnp.isclose(estimate, null_value, atol=eps), 0.0, jnp.sign(estimate - null_value) * jnp.inf),
+        jnp.where(
+            jnp.isclose(estimate, null_value, atol=eps),
+            0.0,
+            jnp.sign(estimate - null_value) * jnp.inf,
+        ),
         (estimate - null_value) / se,
     )
 
@@ -322,7 +329,7 @@ def joint_wald_test(
     estimate: jnp.ndarray,
     grad: jnp.ndarray,
     cov_params: jnp.ndarray,
-    null_value: Optional[jnp.ndarray] = None,
+    null_value: jnp.ndarray | None = None,
 ) -> tuple[float, float, int]:
     """Joint Wald test of H₀: g(β) = null_value (full vector equality).
 
@@ -368,14 +375,12 @@ def joint_wald_test(
         solved = jnp.linalg.solve(Sigma_g, diff)
         chi2 = float(diff @ solved)
     except (jnp.linalg.LinAlgError, ValueError):
-        chi2 = float('nan')
-    regularized = False
+        chi2 = float("nan")
     if not np.isfinite(chi2):
         ridge = 1e-12 * float(jnp.trace(Sigma_g)) / Sigma_g.shape[0]
         ridge = max(ridge, float(jnp.finfo(Sigma_g.dtype).eps))
         Sigma_g_reg = Sigma_g + ridge * jnp.eye(Sigma_g.shape[0])
         chi2 = float(diff @ jnp.linalg.solve(Sigma_g_reg, diff))
-        regularized = True
         warnings.warn(
             f"joint_wald_test: Σ_g was singular; added ridge={ridge:.3e} "
             "to compute the test statistic. Result is regularized.",
@@ -392,6 +397,7 @@ def joint_wald_test(
 # ---------------------------------------------------------------------------
 # Joint inference for composed results
 # ---------------------------------------------------------------------------
+
 
 def combined_gradient(
     grads: list[jnp.ndarray],

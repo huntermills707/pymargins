@@ -21,17 +21,18 @@ construct this adapter explicitly and pass via adapter=.
 """
 
 from __future__ import annotations
-from typing import Optional, Any
+
+from typing import Any
+
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
 from .._adapter import ModelAdapter, VariableInfo
 from ._common import (
-    extract_training_data,
-    design_matrix_from_df,
-    column_index_of_variable,
     build_variable_metadata,
+    column_index_of_variable,
+    extract_training_data,
     validate_vcov_spec,
 )
 
@@ -49,7 +50,7 @@ class LifelinesCRCSplineHRAdapter(ModelAdapter):
         The data the model was fit on.
     """
 
-    def __init__(self, results, training_data: Optional[pd.DataFrame] = None):
+    def __init__(self, results, training_data: pd.DataFrame | None = None):
         self.results = results
         self._training_data = extract_training_data(results, training_data)
 
@@ -92,7 +93,7 @@ class LifelinesCRCSplineHRAdapter(ModelAdapter):
     def coefficients(self) -> jnp.ndarray:
         return jnp.asarray(self.results.params_.loc["beta_"].values)
 
-    def covariance(self, vcov_spec: Optional[Any] = None) -> jnp.ndarray:
+    def covariance(self, vcov_spec: Any | None = None) -> jnp.ndarray:
         if vcov_spec is None:
             vm = self.results.variance_matrix_
             # Extract the beta_ submatrix only
@@ -117,7 +118,7 @@ class LifelinesCRCSplineHRAdapter(ModelAdapter):
         self,
         beta: jnp.ndarray,
         X: jnp.ndarray,
-        offset: Optional[jnp.ndarray] = None,
+        offset: jnp.ndarray | None = None,
     ) -> jnp.ndarray:
         eta = jnp.asarray(X) @ beta
         if offset is not None:
@@ -129,7 +130,11 @@ class LifelinesCRCSplineHRAdapter(ModelAdapter):
     # -----------------------------------------------------------------------
 
     def design_matrix_from_df(self, df: pd.DataFrame) -> jnp.ndarray:
-        missing_cols = [col for col in self._beta_names if col not in df.columns and col not in ("const", "Intercept")]
+        missing_cols = [
+            col
+            for col in self._beta_names
+            if col not in df.columns and col not in ("const", "Intercept")
+        ]
         if missing_cols:
             raise ValueError(
                 f"Missing columns required by the model's exog_names: {missing_cols}. "
@@ -144,7 +149,9 @@ class LifelinesCRCSplineHRAdapter(ModelAdapter):
 
     def column_index_of_variable(self, variable_name: str) -> int:
         return column_index_of_variable(
-            self._beta_names, self.variable_metadata(), variable_name,
+            self._beta_names,
+            self.variable_metadata(),
+            variable_name,
         )
 
     def variable_metadata(self) -> dict[str, VariableInfo]:
@@ -156,7 +163,9 @@ class LifelinesCRCSplineHRAdapter(ModelAdapter):
     # Bootstrap support
     # -----------------------------------------------------------------------
 
-    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "LifelinesCRCSplineHRAdapter":
+    def refit(
+        self, resampled_data: pd.DataFrame, *, index=None
+    ) -> LifelinesCRCSplineHRAdapter:
         from lifelines import CRCSplineFitter
 
         df = resampled_data.reset_index(drop=True)

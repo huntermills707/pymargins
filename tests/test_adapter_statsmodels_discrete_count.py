@@ -1,5 +1,4 @@
-"""Tests for StatsmodelsDiscreteCountAdapter.
-"""
+"""Tests for StatsmodelsDiscreteCountAdapter."""
 
 import jax
 import jax.numpy as jnp
@@ -11,25 +10,29 @@ import statsmodels.formula.api as smf
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins._adapters.statsmodels_discrete_count import StatsmodelsDiscreteCountAdapter
-from pymargins._adapter import auto_detect_adapter
 from pymargins import Margins
-
+from pymargins._adapter import auto_detect_adapter
+from pymargins._adapters.statsmodels_discrete_count import (
+    StatsmodelsDiscreteCountAdapter,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def df_count():
     """Synthetic data for count models."""
     rng = np.random.default_rng(44)
     n = 300
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-        "treatment": rng.binomial(1, 0.5, n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+            "treatment": rng.binomial(1, 0.5, n),
+        }
+    )
     eta = 0.5 + 0.3 * df["x1"] - 0.2 * df["x2"] + 0.6 * df["treatment"]
     df["y"] = rng.poisson(np.exp(eta))
     return df
@@ -72,6 +75,7 @@ def gp_fit_array(df_count):
 # Auto-detection
 # ---------------------------------------------------------------------------
 
+
 def test_auto_detect_poisson_formula(poisson_fit_formula):
     adapter = auto_detect_adapter(poisson_fit_formula)
     assert isinstance(adapter, StatsmodelsDiscreteCountAdapter)
@@ -85,6 +89,7 @@ def test_auto_detect_poisson_array_requires_training_data(poisson_fit_array):
 # ---------------------------------------------------------------------------
 # Prediction accuracy
 # ---------------------------------------------------------------------------
+
 
 def test_predict_matches_statsmodels_poisson(poisson_fit_formula):
     adapter = StatsmodelsDiscreteCountAdapter(poisson_fit_formula)
@@ -137,6 +142,7 @@ def test_predict_jax_differentiable(poisson_fit_formula):
 # Coefficients and covariance
 # ---------------------------------------------------------------------------
 
+
 def test_coefficients_shape_poisson(poisson_fit_formula):
     adapter = StatsmodelsDiscreteCountAdapter(poisson_fit_formula)
     p = len(poisson_fit_formula.model.exog_names)
@@ -152,12 +158,16 @@ def test_coefficients_shape_nb(nb_fit_array, df_count):
 def test_covariance_default(poisson_fit_formula):
     adapter = StatsmodelsDiscreteCountAdapter(poisson_fit_formula)
     cov = adapter.covariance()
-    assert cov.shape == (adapter.coefficients().shape[0], adapter.coefficients().shape[0])
+    assert cov.shape == (
+        adapter.coefficients().shape[0],
+        adapter.coefficients().shape[0],
+    )
 
 
 # ---------------------------------------------------------------------------
 # Design matrix and metadata
 # ---------------------------------------------------------------------------
+
 
 def test_design_matrix_formula(poisson_fit_formula):
     adapter = StatsmodelsDiscreteCountAdapter(poisson_fit_formula)
@@ -178,6 +188,7 @@ def test_variable_metadata(poisson_fit_formula):
 # End-to-end via Margins session
 # ---------------------------------------------------------------------------
 
+
 def test_margins_predict_aap_poisson(poisson_fit_formula):
     adapter = StatsmodelsDiscreteCountAdapter(poisson_fit_formula)
     m = Margins.linear_scale(poisson_fit_formula, adapter=adapter)
@@ -197,6 +208,7 @@ def test_margins_dydx_poisson(poisson_fit_formula):
 # ---------------------------------------------------------------------------
 # Refit
 # ---------------------------------------------------------------------------
+
 
 def test_refit_formula_poisson(poisson_fit_formula):
     adapter = StatsmodelsDiscreteCountAdapter(poisson_fit_formula)
@@ -224,9 +236,11 @@ def test_refit_array_poisson(poisson_fit_array, df_count):
 # Attach validation
 # ---------------------------------------------------------------------------
 
+
 def test_attach_rejects_bad_vcov(poisson_fit_formula):
     adapter = StatsmodelsDiscreteCountAdapter(poisson_fit_formula)
     from unittest.mock import MagicMock
+
     session = MagicMock()
     session.vcov_spec = "HAC"
     with pytest.raises(ValueError, match="HAC"):

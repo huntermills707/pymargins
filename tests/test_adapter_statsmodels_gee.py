@@ -4,7 +4,6 @@ See IMPLEMENTATION_GUIDE.md §0.3.
 """
 
 import jax
-import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import pytest
@@ -13,27 +12,29 @@ import statsmodels.formula.api as smf
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins._adapters.statsmodels_gee import StatsmodelsGEEAdapter
-from pymargins._adapter import auto_detect_adapter
 from pymargins import Margins
-
+from pymargins._adapter import auto_detect_adapter
+from pymargins._adapters.statsmodels_gee import StatsmodelsGEEAdapter
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def df_binary():
     """Synthetic data with a binary outcome and clusters."""
     rng = np.random.default_rng(42)
     n = 200
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-        "treatment": rng.binomial(1, 0.5, n),
-        "region": rng.choice(["north", "south", "east", "west"], size=n),
-        "group": np.repeat(np.arange(20), 10),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+            "treatment": rng.binomial(1, 0.5, n),
+            "region": rng.choice(["north", "south", "east", "west"], size=n),
+            "group": np.repeat(np.arange(20), 10),
+        }
+    )
     eta = 0.5 + 0.3 * df["x1"] - 0.2 * df["x2"] + 0.8 * df["treatment"]
     df["y"] = (rng.uniform(size=n) < (1 / (1 + np.exp(-eta)))).astype(float)
     return df
@@ -44,11 +45,13 @@ def df_count():
     """Synthetic data with a count outcome and clusters."""
     rng = np.random.default_rng(43)
     n = 200
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-        "group": np.repeat(np.arange(20), 10),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+            "group": np.repeat(np.arange(20), 10),
+        }
+    )
     eta = 0.5 + 0.3 * df["x1"] - 0.2 * df["x2"]
     df["y"] = rng.poisson(np.exp(eta))
     return df
@@ -73,7 +76,9 @@ def fit_gee_logit_array(df_binary):
     y = df_binary["y"].values
     groups = df_binary["group"].values
     fit = sm.GEE(
-        y, X, groups=groups,
+        y,
+        X,
+        groups=groups,
         family=sm.families.Binomial(),
         cov_struct=sm.cov_struct.Independence(),
     ).fit()
@@ -95,6 +100,7 @@ def fit_gee_poisson_formula(df_count):
 # ---------------------------------------------------------------------------
 # 1. Construction and auto-detection
 # ---------------------------------------------------------------------------
+
 
 def test_auto_detect_gee_logit(fit_gee_logit_formula):
     adapter = auto_detect_adapter(fit_gee_logit_formula)
@@ -127,6 +133,7 @@ def test_adapter_training_data_array_requires_explicit(fit_gee_logit_array, df_b
 # ---------------------------------------------------------------------------
 # 2. Covariance / vcov flavors
 # ---------------------------------------------------------------------------
+
 
 def test_covariance_default(fit_gee_logit_formula):
     adapter = StatsmodelsGEEAdapter(fit_gee_logit_formula)
@@ -197,7 +204,9 @@ def test_covariance_cluster_returns_robust(fit_gee_logit_formula, df_binary):
     Sigma = adapter.covariance({"type": "cluster", "groups": groups})
     assert Sigma.ndim == 2
     assert Sigma.shape[0] == len(fit_gee_logit_formula.params)
-    np.testing.assert_allclose(np.asarray(Sigma), fit_gee_logit_formula.cov_robust, rtol=1e-10)
+    np.testing.assert_allclose(
+        np.asarray(Sigma), fit_gee_logit_formula.cov_robust, rtol=1e-10
+    )
 
 
 def test_covariance_cluster_groups_missing(fit_gee_logit_formula):
@@ -209,6 +218,7 @@ def test_covariance_cluster_groups_missing(fit_gee_logit_formula):
 # ---------------------------------------------------------------------------
 # 3. Prediction
 # ---------------------------------------------------------------------------
+
 
 def test_predict_matches_statsmodels(fit_gee_logit_formula):
     adapter = StatsmodelsGEEAdapter(fit_gee_logit_formula)
@@ -232,6 +242,7 @@ def test_predict_poisson_matches_statsmodels(fit_gee_poisson_formula):
 # 4. Design matrix construction
 # ---------------------------------------------------------------------------
 
+
 def test_design_matrix_from_df_formula(fit_gee_logit_formula, df_binary):
     adapter = StatsmodelsGEEAdapter(fit_gee_logit_formula)
     X = adapter.design_matrix_from_df(df_binary.iloc[:5])
@@ -253,6 +264,7 @@ def test_design_matrix_from_df_array(fit_gee_logit_array, df_binary):
 # 5. Variable metadata
 # ---------------------------------------------------------------------------
 
+
 def test_variable_metadata(fit_gee_logit_formula):
     adapter = StatsmodelsGEEAdapter(fit_gee_logit_formula)
     meta = adapter.variable_metadata()
@@ -268,6 +280,7 @@ def test_variable_metadata(fit_gee_logit_formula):
 # ---------------------------------------------------------------------------
 # 6. Column index lookup
 # ---------------------------------------------------------------------------
+
 
 def test_column_index_continuous(fit_gee_logit_formula):
     adapter = StatsmodelsGEEAdapter(fit_gee_logit_formula)
@@ -285,6 +298,7 @@ def test_column_index_categorical_raises(fit_gee_logit_formula):
 # ---------------------------------------------------------------------------
 # 7. Bootstrap / refit
 # ---------------------------------------------------------------------------
+
 
 def test_refit_formula(fit_gee_logit_formula, df_binary):
     adapter = StatsmodelsGEEAdapter(fit_gee_logit_formula)
@@ -319,15 +333,21 @@ def test_refit_preserves_cov_struct(fit_gee_logit_formula, df_binary):
 # Attach-time validation
 # ---------------------------------------------------------------------------
 
+
 def test_attach_rejects_unsupported_vcov_string(fit_gee_logit_formula):
     adapter = StatsmodelsGEEAdapter(fit_gee_logit_formula)
-    with pytest.raises(ValueError, match="StatsmodelsGEEAdapter does not support vcov='HAC'"):
+    with pytest.raises(
+        ValueError, match="StatsmodelsGEEAdapter does not support vcov='HAC'"
+    ):
         Margins(fit_gee_logit_formula, adapter=adapter, vcov="HAC")
 
 
 def test_attach_rejects_unsupported_vcov_dict(fit_gee_logit_formula):
     adapter = StatsmodelsGEEAdapter(fit_gee_logit_formula)
-    with pytest.raises(ValueError, match="StatsmodelsGEEAdapter does not support vcov dict with type='hac'"):
+    with pytest.raises(
+        ValueError,
+        match="StatsmodelsGEEAdapter does not support vcov dict with type='hac'",
+    ):
         Margins(fit_gee_logit_formula, adapter=adapter, vcov={"type": "hac"})
 
 

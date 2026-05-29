@@ -18,17 +18,18 @@ is supported.
 """
 
 from __future__ import annotations
-from typing import Optional, Any
+
+from typing import Any
+
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
-from .._adapter import WrappedFDAdapter, VariableInfo
+from .._adapter import VariableInfo, WrappedFDAdapter
 from ._common import (
-    extract_training_data,
-    design_matrix_from_df,
-    column_index_of_variable,
     build_variable_metadata,
+    column_index_of_variable,
+    extract_training_data,
     validate_vcov_spec,
 )
 
@@ -55,8 +56,8 @@ class LifelinesCoxTimeVaryingSurvivalAdapter(WrappedFDAdapter):
     def __init__(
         self,
         results,
-        training_data: Optional[pd.DataFrame] = None,
-        prediction_time: Optional[float] = None,
+        training_data: pd.DataFrame | None = None,
+        prediction_time: float | None = None,
     ):
         self.results = results
         self._training_data = extract_training_data(results, training_data)
@@ -116,7 +117,7 @@ class LifelinesCoxTimeVaryingSurvivalAdapter(WrappedFDAdapter):
     def coefficients(self) -> jnp.ndarray:
         return jnp.asarray(self.results.params_.values)
 
-    def covariance(self, vcov_spec: Optional[Any] = None) -> jnp.ndarray:
+    def covariance(self, vcov_spec: Any | None = None) -> jnp.ndarray:
         if vcov_spec is None:
             return jnp.asarray(self.results.variance_matrix_.values)
 
@@ -139,7 +140,7 @@ class LifelinesCoxTimeVaryingSurvivalAdapter(WrappedFDAdapter):
             X_np = X_np - self._x_mean
         ph = np.exp(X_np @ beta_np)
         S0_t = self._baseline_survival_at(self._prediction_time)
-        return S0_t ** ph
+        return S0_t**ph
 
     def _baseline_survival_at(self, t: float) -> float:
         """Look up baseline survival at time t.
@@ -150,7 +151,9 @@ class LifelinesCoxTimeVaryingSurvivalAdapter(WrappedFDAdapter):
         """
         S0_df = self.results.baseline_survival_
         if S0_df is None or S0_df.empty:
-            raise ValueError("Baseline survival function not available on the fitted model.")
+            raise ValueError(
+                "Baseline survival function not available on the fitted model."
+            )
         col = S0_df.columns[0]
         times = S0_df.index.values
         surv = S0_df[col].values
@@ -168,7 +171,11 @@ class LifelinesCoxTimeVaryingSurvivalAdapter(WrappedFDAdapter):
     # -----------------------------------------------------------------------
 
     def design_matrix_from_df(self, df: pd.DataFrame) -> jnp.ndarray:
-        missing_cols = [col for col in self._exog_names if col not in df.columns and col not in ("const", "Intercept")]
+        missing_cols = [
+            col
+            for col in self._exog_names
+            if col not in df.columns and col not in ("const", "Intercept")
+        ]
         if missing_cols:
             raise ValueError(
                 f"Missing columns required by the model's exog_names: {missing_cols}. "
@@ -179,7 +186,9 @@ class LifelinesCoxTimeVaryingSurvivalAdapter(WrappedFDAdapter):
 
     def column_index_of_variable(self, variable_name: str) -> int:
         return column_index_of_variable(
-            self._exog_names, self.variable_metadata(), variable_name,
+            self._exog_names,
+            self.variable_metadata(),
+            variable_name,
         )
 
     def variable_metadata(self) -> dict[str, VariableInfo]:
@@ -191,7 +200,9 @@ class LifelinesCoxTimeVaryingSurvivalAdapter(WrappedFDAdapter):
     # Bootstrap support
     # -----------------------------------------------------------------------
 
-    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "LifelinesCoxTimeVaryingSurvivalAdapter":
+    def refit(
+        self, resampled_data: pd.DataFrame, *, index=None
+    ) -> LifelinesCoxTimeVaryingSurvivalAdapter:
         from lifelines import CoxTimeVaryingFitter
 
         df = resampled_data.reset_index(drop=True)

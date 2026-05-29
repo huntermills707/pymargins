@@ -1,9 +1,13 @@
 from __future__ import annotations
-from typing import Callable, Optional, Any
+
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
+
 import jax.numpy as jnp
-from .._gradients import GradientBackend
+
 from .._adapter import InferenceMethod
+from .._gradients import GradientBackend
 
 
 @dataclass
@@ -75,41 +79,42 @@ class InferenceConfig:
           - "ci_method": "percentile" (default), "basic", "bca", "studentized"
           - "acceleration": float or array, BCa acceleration parameter (a)
     """
+
     method: InferenceMethod = "delta"
     level: float = 0.95
-    phi: Optional[Callable] = None
-    phi_inv: Optional[Callable] = None
+    phi: Callable | None = None
+    phi_inv: Callable | None = None
     kappa_threshold: float = 0.3
     gradient_backend: GradientBackend = "autodiff"
     fd_step: float = 1e-6
     n_sim: int = 4000
     n_boot: int = 1000
     n_jobs: int = 1
-    rng_seed: Optional[int] = None
+    rng_seed: int | None = None
     diagnostics: bool = True
-    cov_params: Optional[jnp.ndarray] = None
-    cluster: Optional[Any] = None
-    block_size: Optional[int] = None
-    matching: Optional[Any] = None
+    cov_params: jnp.ndarray | None = None
+    cluster: Any | None = None
+    block_size: int | None = None
+    matching: Any | None = None
     """MatchingClient for bootstrap rematching. Ignored by delta and K–R."""
 
-    bootstrap_config: Optional[dict] = None
-    all_idx: Optional[list] = None
+    bootstrap_config: dict | None = None
+    all_idx: list | None = None
     """Pre-generated resample indices for bootstrap. When provided, the
     bootstrap engine reuses these instead of generating fresh indices.
     Used by session-level resample banks to guarantee matched replicates
     across composable bootstrap calls."""
 
-    all_states: Optional[list] = None
+    all_states: list | None = None
     """Pre-harvested bootstrap states (refitted adapters). When provided,
     the bootstrap engine skips refitting and replays h over the cached
     states. Used by session-level bootstrap state banks."""
 
-    all_states_failures: Optional[list] = None
+    all_states_failures: list | None = None
     """Failed replicates corresponding to ``all_states``. Paired with
     ``all_states`` so failure accounting is consistent across calls."""
 
-    sim_draws: Optional[Any] = None
+    sim_draws: Any | None = None
     """Pre-generated simulation β* draws. When provided, the simulation
     engine reuses these instead of drawing fresh values. Used by
     session-level simulation draw banks."""

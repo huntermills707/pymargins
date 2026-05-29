@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Internal
+
+- CI: GitHub Actions pipeline for lint (ruff check + format), a test matrix
+  across Python 3.10–3.14 (trimmed to 3.10/3.12/3.14 on PRs), a bare-install
+  job verifying optional backends stay lazily imported, a minimum-dependency-
+  version job (`uv --resolution lowest-direct`), per-backend isolation runs,
+  and a cache-backed docs build.
+- CI: release workflow publishing to PyPI on `v*` tags via Trusted Publishing
+  (OIDC, no stored token).
+- Dependabot: weekly updates for GitHub Actions and pip dependencies.
+- Repo-wide ruff lint/format pass and ruff configuration in `pyproject.toml`.
+
 ## [0.1.1] — 2026-05-26
 
 ### Added

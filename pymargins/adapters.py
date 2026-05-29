@@ -31,16 +31,6 @@ from __future__ import annotations
 # Base classes and the registration hook are re-exported for convenience so
 # that pymargins.adapters is a one-stop import for adapter work. These are
 # cheap (no optional deps) and so are imported eagerly.
-from ._adapter import (
-    ModelAdapter,
-    GLMAdapter,
-    LinearPredictionAdapter,
-    WrappedFDAdapter,
-    BootstrapOnlyAdapter,
-    VariableInfo,
-    InferenceMethod,
-)
-from ._adapters import register_adapter
 
 # Concrete adapter class name -> submodule under pymargins._adapters.
 # Each submodule pulls in its optional third-party dependency, so resolution

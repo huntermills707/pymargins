@@ -48,14 +48,20 @@ how to build a design matrix from formulae or feature lists.
 """
 
 from __future__ import annotations
-from typing import Callable, Optional, Set, Literal, Any
-from dataclasses import dataclass, field
+
 import abc
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Literal
+
 import jax.numpy as jnp
+
+if TYPE_CHECKING:
+    import pandas as pd
+
+    from pymargins.margins import Margins
 import numpy as np
 
 from ._gradients import GradientBackend
-
 
 # ---------------------------------------------------------------------------
 # Type aliases and small dataclasses
@@ -88,16 +94,18 @@ class VariableInfo:
         "treatment_coded", "polynomial", "one_hot"). Affects how
         scenario specifications map to design columns.
     """
+
     name: str
     var_type: VariableType
-    levels: Optional[list] = None
-    support: Optional[tuple[float, float]] = None
-    encoding: Optional[str] = None
+    levels: list | None = None
+    support: tuple[float, float] | None = None
+    encoding: str | None = None
 
 
 # ---------------------------------------------------------------------------
 # Base adapter interface
 # ---------------------------------------------------------------------------
+
 
 class ModelAdapter(abc.ABC):
     """Abstract base class for model adapters.
@@ -144,7 +152,7 @@ class ModelAdapter(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def supported_inference_methods(self) -> Set[InferenceMethod]:
+    def supported_inference_methods(self) -> set[InferenceMethod]:
         """Which inference methods this adapter supports.
 
         Returned as a set; the inference engine checks the user's requested
@@ -169,7 +177,7 @@ class ModelAdapter(abc.ABC):
     # Session integration
     # -----------------------------------------------------------------------
 
-    def attach(self, session: "Margins") -> None:
+    def attach(self, session: Margins) -> None:
         """Attach this adapter to a Margins session. Receive the session's
         configuration (scale, vcov_spec, weights, etc.) and validate
         compatibility.
@@ -226,7 +234,7 @@ class ModelAdapter(abc.ABC):
     @abc.abstractmethod
     def covariance(
         self,
-        vcov_spec: Optional[Any] = None,
+        vcov_spec: Any | None = None,
     ) -> jnp.ndarray:
         """Return Σ̂ as a 2D JAX array.
 
@@ -259,7 +267,7 @@ class ModelAdapter(abc.ABC):
         self,
         beta: jnp.ndarray,
         X: jnp.ndarray,
-        offset: Optional[jnp.ndarray] = None,
+        offset: jnp.ndarray | None = None,
     ) -> jnp.ndarray:
         """Prediction on the response scale, JAX-compatible.
 
@@ -304,7 +312,7 @@ class ModelAdapter(abc.ABC):
     # -----------------------------------------------------------------------
 
     @abc.abstractmethod
-    def design_matrix_from_df(self, df: "pd.DataFrame") -> jnp.ndarray:
+    def design_matrix_from_df(self, df: pd.DataFrame) -> jnp.ndarray:
         """Build a design matrix from a concrete DataFrame of evaluation rows.
 
         Handles formula expansion, factor encoding, interactions, splines,
@@ -349,7 +357,7 @@ class ModelAdapter(abc.ABC):
         return 1
 
     @property
-    def outcome_labels(self) -> Optional[list[str]]:
+    def outcome_labels(self) -> list[str] | None:
         """Outcome class labels for multi-outcome models, or None."""
         return None
 
@@ -393,7 +401,7 @@ class ModelAdapter(abc.ABC):
     # Bootstrap support (optional)
     # -----------------------------------------------------------------------
 
-    def refit(self, resampled_data, *, index=None) -> "ModelAdapter":
+    def refit(self, resampled_data, *, index=None) -> ModelAdapter:
         """Refit the model on resampled data, returning a new adapter.
 
         Required for bootstrap inference. Implementations should re-run the
@@ -427,7 +435,7 @@ class ModelAdapter(abc.ABC):
             "bootstrap inference is unavailable for this adapter."
         )
 
-    def bootstrap_state(self) -> "ModelAdapter":
+    def bootstrap_state(self) -> ModelAdapter:
         """Replay state for a refitted adapter.
 
         Returning ``self`` is correct — a refitted adapter is itself a
@@ -441,6 +449,7 @@ class ModelAdapter(abc.ABC):
 # ---------------------------------------------------------------------------
 # Adapter shapes (intermediate base classes)
 # ---------------------------------------------------------------------------
+
 
 class GLMAdapter(ModelAdapter):
     """Base adapter for any model with prediction μ = g⁻¹(Xβ + offset).
@@ -457,17 +466,17 @@ class GLMAdapter(ModelAdapter):
     in the design docs.
     """
 
-    def attach(self, session: "Margins") -> None:
+    def attach(self, session: Margins) -> None:
         super().attach(session)
 
     @property
     def supports_jax_autodiff(self) -> bool:
         """GLM adapters typically use JAX-native link inverses or analytical JVP."""
         return True  # Either native JAX or analytical-derivative JVP both
-                     # appear as autodiff to downstream consumers
+        # appear as autodiff to downstream consumers
 
     @property
-    def supported_inference_methods(self) -> Set[InferenceMethod]:
+    def supported_inference_methods(self) -> set[InferenceMethod]:
         """GLM adapters support delta, simulation, and bootstrap inference."""
         return {"delta", "simulation", "bootstrap"}
 
@@ -495,7 +504,7 @@ class LinearPredictionAdapter(ModelAdapter):
         return True
 
     @property
-    def supported_inference_methods(self) -> Set[InferenceMethod]:
+    def supported_inference_methods(self) -> set[InferenceMethod]:
         """Linear adapters support delta, simulation, and bootstrap inference."""
         return {"delta", "simulation", "bootstrap"}
 
@@ -508,7 +517,7 @@ class LinearPredictionAdapter(ModelAdapter):
     def predict(
         beta: jnp.ndarray,
         X: jnp.ndarray,
-        offset: Optional[jnp.ndarray] = None,
+        offset: jnp.ndarray | None = None,
     ) -> jnp.ndarray:
         """Linear prediction: X @ beta + offset."""
         eta = X @ beta
@@ -534,7 +543,7 @@ class WrappedFDAdapter(ModelAdapter):
         return False  # The JVP uses FD; flag this for diagnostic context
 
     @property
-    def supported_inference_methods(self) -> Set[InferenceMethod]:
+    def supported_inference_methods(self) -> set[InferenceMethod]:
         """Wrapped-FD adapters support delta, simulation, and bootstrap."""
         return {"delta", "simulation", "bootstrap"}
 
@@ -553,7 +562,7 @@ class WrappedFDAdapter(ModelAdapter):
         self,
         beta: jnp.ndarray,
         X: jnp.ndarray,
-        offset: Optional[jnp.ndarray] = None,
+        offset: jnp.ndarray | None = None,
     ) -> jnp.ndarray:
         """FD-wrapped predict. Thread-safe lazy construction of JAX primitive."""
         if offset is not None:
@@ -576,9 +585,11 @@ class WrappedFDAdapter(ModelAdapter):
             with lock:
                 if not hasattr(self, "_predict_wrapped"):
                     from ._gradients import make_predict_with_fd_jvp
+
                     fd_step = getattr(self, "_fd_step", 1e-6)
                     self._predict_wrapped = make_predict_with_fd_jvp(
-                        self.native_predict, fd_step=fd_step,
+                        self.native_predict,
+                        fd_step=fd_step,
                     )
         return self._predict_wrapped(beta, X)
 
@@ -599,7 +610,7 @@ class BootstrapOnlyAdapter(ModelAdapter):
         return False
 
     @property
-    def supported_inference_methods(self) -> Set[InferenceMethod]:
+    def supported_inference_methods(self) -> set[InferenceMethod]:
         """Bootstrap-only adapters declare only bootstrap support."""
         return {"bootstrap"}
 
@@ -634,6 +645,7 @@ class BootstrapOnlyAdapter(ModelAdapter):
 # Auto-detection of adapter from a fitted model
 # ---------------------------------------------------------------------------
 
+
 def auto_detect_adapter(model, formula=None, data=None) -> ModelAdapter:
     """Inspect a fitted model and return an appropriate adapter.
 
@@ -659,6 +671,7 @@ def auto_detect_adapter(model, formula=None, data=None) -> ModelAdapter:
         If no adapter is registered for the model's class.
     """
     from ._adapters import auto_detect_adapter as _auto_detect
+
     return _auto_detect(model, formula=formula, data=data)
 
 

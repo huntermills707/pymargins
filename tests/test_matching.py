@@ -23,16 +23,19 @@ pysmatch = pytest.importorskip("pysmatch", reason="pysmatch not installed")
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def df_matching():
     """Synthetic data suitable for propensity score matching."""
     rng = np.random.default_rng(42)
     n = 300
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-        "treated": rng.binomial(1, 0.35, n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+            "treated": rng.binomial(1, 0.35, n),
+        }
+    )
     # Propensity score model
     eta_ps = -0.5 + 0.6 * df["x1"] - 0.4 * df["x2"]
     ps = 1 / (1 + np.exp(-eta_ps))
@@ -76,14 +79,19 @@ def fitted_logit_matched(df_matching, pysmatch_matcher):
 # Protocol validation
 # ---------------------------------------------------------------------------
 
+
 def test_matching_missing_matched_data_raises():
     class BadMatcher:
         cluster_ids = np.array([1, 2])
+
         def rematch(self, data):
             return data
 
-    model = smf.glm("y ~ x", data=pd.DataFrame({"y": [0, 1], "x": [0, 1]}),
-                    family=sm.families.Binomial()).fit()
+    model = smf.glm(
+        "y ~ x",
+        data=pd.DataFrame({"y": [0, 1], "x": [0, 1]}),
+        family=sm.families.Binomial(),
+    ).fit()
     with pytest.raises(ValueError, match="matched_data"):
         Margins(model, matching=BadMatcher())
 
@@ -91,21 +99,28 @@ def test_matching_missing_matched_data_raises():
 def test_matching_missing_cluster_ids_raises():
     class BadMatcher:
         matched_data = pd.DataFrame({"x": [0, 1]})
+
         def rematch(self, data):
             return data
 
-    model = smf.glm("y ~ x", data=pd.DataFrame({"y": [0, 1], "x": [0, 1]}),
-                    family=sm.families.Binomial()).fit()
+    model = smf.glm(
+        "y ~ x",
+        data=pd.DataFrame({"y": [0, 1], "x": [0, 1]}),
+        family=sm.families.Binomial(),
+    ).fit()
     with pytest.raises(ValueError, match="cluster_ids"):
         Margins(model, matching=BadMatcher())
 
 
 def test_matching_length_mismatch_raises(df_matching):
-    model = smf.glm("y ~ x1 + x2 + treated", data=df_matching,
-                    family=sm.families.Binomial()).fit()
+    model = smf.glm(
+        "y ~ x1 + x2 + treated", data=df_matching, family=sm.families.Binomial()
+    ).fit()
+
     class ShortMatcher:
         matched_data = df_matching.iloc[:50].copy()
         cluster_ids = np.arange(50)
+
         def rematch(self, data):
             return data
 
@@ -113,10 +128,13 @@ def test_matching_length_mismatch_raises(df_matching):
         Margins(model, matching=ShortMatcher())
 
 
-def test_matching_cluster_ids_wrong_length_raises(fitted_logit_matched, pysmatch_matcher):
+def test_matching_cluster_ids_wrong_length_raises(
+    fitted_logit_matched, pysmatch_matcher
+):
     class BadMatcher:
         matched_data = pysmatch_matcher.matched_data.copy()
         cluster_ids = np.arange(len(pysmatch_matcher.matched_data) + 1)
+
         def rematch(self, data):
             return data
 
@@ -124,7 +142,9 @@ def test_matching_cluster_ids_wrong_length_raises(fitted_logit_matched, pysmatch
         Margins(fitted_logit_matched, matching=BadMatcher())
 
 
-def test_matching_bootstrap_without_rematch_raises(fitted_logit_matched, pysmatch_matcher):
+def test_matching_bootstrap_without_rematch_raises(
+    fitted_logit_matched, pysmatch_matcher
+):
     class NoRematch:
         matched_data = pysmatch_matcher.matched_data.copy()
         cluster_ids = pysmatch_matcher.matched_data["match_id"].values
@@ -136,6 +156,7 @@ def test_matching_bootstrap_without_rematch_raises(fitted_logit_matched, pysmatc
 # ---------------------------------------------------------------------------
 # Base data filtering
 # ---------------------------------------------------------------------------
+
 
 def test_matching_base_data_is_matched_data(fitted_logit_matched, pysmatch_matcher):
     client = PysmatchClient(pysmatch_matcher, treatment_col="treated")
@@ -156,6 +177,7 @@ def test_matching_at_overall_uses_matched_data(fitted_logit_matched, pysmatch_ma
 # Vcov auto-derivation and warnings
 # ---------------------------------------------------------------------------
 
+
 def test_matching_auto_derives_cluster_vcov(fitted_logit_matched, pysmatch_matcher):
     client = PysmatchClient(pysmatch_matcher, treatment_col="treated")
     m = Margins(fitted_logit_matched, matching=client)
@@ -170,7 +192,9 @@ def test_matching_warns_non_cluster_vcov(fitted_logit_matched, pysmatch_matcher)
     assert m.vcov_spec == "HC3"
 
 
-def test_matching_no_warning_when_user_supplies_ndarray(fitted_logit_matched, pysmatch_matcher):
+def test_matching_no_warning_when_user_supplies_ndarray(
+    fitted_logit_matched, pysmatch_matcher
+):
     client = PysmatchClient(pysmatch_matcher, treatment_col="treated")
     Sigma = np.eye(len(fitted_logit_matched.params))
     with warnings.catch_warnings():
@@ -182,6 +206,7 @@ def test_matching_no_warning_when_user_supplies_ndarray(fitted_logit_matched, py
 # ---------------------------------------------------------------------------
 # Integration with PysmatchClient
 # ---------------------------------------------------------------------------
+
 
 def test_pysmatch_client_attributes(pysmatch_matcher):
     client = PysmatchClient(pysmatch_matcher, treatment_col="treated")
@@ -204,6 +229,7 @@ def test_pysmatch_client_rematch(pysmatch_matcher):
 # ---------------------------------------------------------------------------
 # Regression: matched predictions must differ from unmatched
 # ---------------------------------------------------------------------------
+
 
 def test_matched_predictions_differ_from_unmatched(df_matching, pysmatch_matcher):
     """Matched analysis on matched data should differ from analysis on full data."""
@@ -238,6 +264,7 @@ def test_matched_predictions_differ_from_unmatched(df_matching, pysmatch_matcher
 # End-to-end: delta inference on matched data
 # ---------------------------------------------------------------------------
 
+
 def test_end_to_end_delta_contrast(fitted_logit_matched, pysmatch_matcher):
     client = PysmatchClient(pysmatch_matcher, treatment_col="treated")
     m = Margins(fitted_logit_matched, matching=client)
@@ -257,6 +284,7 @@ def test_end_to_end_delta_contrast(fitted_logit_matched, pysmatch_matcher):
 # ---------------------------------------------------------------------------
 # End-to-end: bootstrap with rematching
 # ---------------------------------------------------------------------------
+
 
 def test_end_to_end_bootstrap_contrast(fitted_logit_matched, pysmatch_matcher):
     client = PysmatchClient(pysmatch_matcher, treatment_col="treated")
@@ -286,6 +314,7 @@ def test_end_to_end_bootstrap_contrast(fitted_logit_matched, pysmatch_matcher):
 # ---------------------------------------------------------------------------
 # Weights alignment with matched data
 # ---------------------------------------------------------------------------
+
 
 def test_matching_weights_length_validation(fitted_logit_matched, pysmatch_matcher):
     client = PysmatchClient(pysmatch_matcher, treatment_col="treated")

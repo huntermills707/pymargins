@@ -1,10 +1,9 @@
 """Tests for linearmodels AbsorbingLS adapter."""
 
+import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import pytest
-import jax.numpy as jnp
-
 from linearmodels.iv import AbsorbingLS
 
 from pymargins import Margins
@@ -17,19 +16,22 @@ def absorb_data():
     n = 200
     entities = np.random.randint(0, 20, n)
     times = np.random.randint(0, 5, n)
-    df = pd.DataFrame({
-        "y": np.random.randn(n) + 0.5 * entities + 0.3 * times,
-        "x1": np.random.randn(n),
-        "x2": np.random.randn(n),
-        "entity": entities,
-        "time": times,
-    })
+    df = pd.DataFrame(
+        {
+            "y": np.random.randn(n) + 0.5 * entities + 0.3 * times,
+            "x1": np.random.randn(n),
+            "x2": np.random.randn(n),
+            "entity": entities,
+            "time": times,
+        }
+    )
     return df
 
 
 # ---------------------------------------------------------------------------
 # Adapter construction
 # ---------------------------------------------------------------------------
+
 
 def test_adapter_from_absorbingls(absorb_data):
     mod = AbsorbingLS(
@@ -58,6 +60,7 @@ def test_adapter_training_data_explicit(absorb_data):
 # Design matrix
 # ---------------------------------------------------------------------------
 
+
 def test_design_matrix_from_df(absorb_data):
     mod = AbsorbingLS(
         absorb_data[["y"]],
@@ -74,6 +77,7 @@ def test_design_matrix_from_df(absorb_data):
 # ---------------------------------------------------------------------------
 # Prediction
 # ---------------------------------------------------------------------------
+
 
 def test_predict_matches_manual(absorb_data):
     mod = AbsorbingLS(
@@ -95,6 +99,7 @@ def test_predict_matches_manual(absorb_data):
 # Variable metadata
 # ---------------------------------------------------------------------------
 
+
 def test_variable_metadata(absorb_data):
     mod = AbsorbingLS(
         absorb_data[["y"]],
@@ -111,6 +116,7 @@ def test_variable_metadata(absorb_data):
 # ---------------------------------------------------------------------------
 # Bootstrap refit
 # ---------------------------------------------------------------------------
+
 
 def test_refit(absorb_data):
     mod = AbsorbingLS(
@@ -129,6 +135,7 @@ def test_refit(absorb_data):
 # ---------------------------------------------------------------------------
 # End-to-end via Margins
 # ---------------------------------------------------------------------------
+
 
 def test_margins_predict(absorb_data):
     mod = AbsorbingLS(
@@ -162,8 +169,10 @@ def test_margins_dydx(absorb_data):
 # Auto-detection
 # ---------------------------------------------------------------------------
 
+
 def test_auto_detect(absorb_data):
     from pymargins._adapters import _detect_adapter_class
+
     mod = AbsorbingLS(
         absorb_data[["y"]],
         absorb_data[["x1", "x2"]],

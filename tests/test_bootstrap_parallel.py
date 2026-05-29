@@ -1,5 +1,4 @@
-"""Tests for bootstrap parallelization.
-"""
+"""Tests for bootstrap parallelization."""
 
 import numpy as np
 import pandas as pd
@@ -13,11 +12,13 @@ from pymargins import Margins
 def df():
     rng = np.random.default_rng(42)
     n = 200
-    df = pd.DataFrame({
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-        "y": rng.standard_normal(n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+            "y": rng.standard_normal(n),
+        }
+    )
     df["y"] = 0.5 + 0.8 * df["x1"] - 0.4 * df["x2"] + rng.standard_normal(n)
     return df
 
@@ -30,6 +31,7 @@ def fit(df):
 # ---------------------------------------------------------------------------
 # Reproducibility: serial vs parallel gives identical results
 # ---------------------------------------------------------------------------
+
 
 def test_parallel_reproducible(fit):
     m1 = Margins(fit, method="bootstrap", n_boot=100, rng_seed=42, n_jobs=1)
@@ -53,11 +55,24 @@ def test_parallel_n_jobs_minus_one(fit):
 # Parallel with cluster bootstrap
 # ---------------------------------------------------------------------------
 
+
 def test_parallel_cluster_bootstrap(fit, df):
-    m1 = Margins(fit, method="bootstrap", n_boot=100, rng_seed=42,
-                 cluster=df.index % 10, n_jobs=1)
-    m2 = Margins(fit, method="bootstrap", n_boot=100, rng_seed=42,
-                 cluster=df.index % 10, n_jobs=2)
+    m1 = Margins(
+        fit,
+        method="bootstrap",
+        n_boot=100,
+        rng_seed=42,
+        cluster=df.index % 10,
+        n_jobs=1,
+    )
+    m2 = Margins(
+        fit,
+        method="bootstrap",
+        n_boot=100,
+        rng_seed=42,
+        cluster=df.index % 10,
+        n_jobs=2,
+    )
     res1 = m1.dydx("x1")
     res2 = m2.dydx("x1")
     np.testing.assert_allclose(res1.estimate, res2.estimate)
@@ -69,11 +84,14 @@ def test_parallel_cluster_bootstrap(fit, df):
 # Parallel with block bootstrap
 # ---------------------------------------------------------------------------
 
+
 def test_parallel_block_bootstrap(fit):
-    m1 = Margins(fit, method="bootstrap", n_boot=100, rng_seed=42,
-                 block_size=10, n_jobs=1)
-    m2 = Margins(fit, method="bootstrap", n_boot=100, rng_seed=42,
-                 block_size=10, n_jobs=2)
+    m1 = Margins(
+        fit, method="bootstrap", n_boot=100, rng_seed=42, block_size=10, n_jobs=1
+    )
+    m2 = Margins(
+        fit, method="bootstrap", n_boot=100, rng_seed=42, block_size=10, n_jobs=2
+    )
     res1 = m1.dydx("x1")
     res2 = m2.dydx("x1")
     np.testing.assert_allclose(res1.estimate, res2.estimate)
@@ -84,6 +102,7 @@ def test_parallel_block_bootstrap(fit):
 # ---------------------------------------------------------------------------
 # Parallel with predictions and contrasts
 # ---------------------------------------------------------------------------
+
 
 def test_parallel_predictions(fit):
     m = Margins(fit, method="bootstrap", n_boot=50, rng_seed=42, n_jobs=2)
@@ -111,6 +130,7 @@ def test_parallel_contrasts(fit):
 # Smoke test: n_jobs > 1 with threadpool_limits
 # ---------------------------------------------------------------------------
 
+
 def test_n_jobs_two_respects_threadpool_limits(fit):
     """Bootstrap with n_jobs=2 should complete and return finite results."""
     m = Margins(fit, method="bootstrap", n_boot=50, rng_seed=42, n_jobs=2)
@@ -125,55 +145,70 @@ def test_n_jobs_two_respects_threadpool_limits(fit):
 # ProcessPoolExecutor pickle fallback
 # ---------------------------------------------------------------------------
 
+
 def test_parallel_fallback_when_unpicklable():
     """If the adapter cannot be pickled, parallel bootstrap should fall back
     to ThreadPoolExecutor with a RuntimeWarning."""
-    import pickle
-    import warnings
     import numpy as np
     import pandas as pd
     import statsmodels.formula.api as smf
-    from pymargins._inference import _run_bootstrap, InferenceConfig
+
     from pymargins._adapter import ModelAdapter
+    from pymargins._inference import InferenceConfig, _run_bootstrap
 
     rng = np.random.default_rng(42)
     n = 50
-    df = pd.DataFrame({
-        "x": rng.normal(size=n),
-        "y": rng.normal(size=n),
-    })
+    df = pd.DataFrame(
+        {
+            "x": rng.normal(size=n),
+            "y": rng.normal(size=n),
+        }
+    )
     fit = smf.ols("y ~ x", data=df).fit()
 
     class UnpicklableAdapter(ModelAdapter):
         def __init__(self, wrapped):
             self._wrapped = wrapped
+
         @property
         def supports_jax_autodiff(self):
             return True
+
         @property
         def supported_inference_methods(self):
             return {"delta", "simulation", "bootstrap"}
+
         @property
         def gradient_backend_recommendation(self):
             return "autodiff"
+
         def coefficients(self):
             return np.asarray(self._wrapped.params)
+
         def covariance(self, vcov_spec=None):
             return np.asarray(self._wrapped.cov_params())
+
         def predict(self, beta, X, offset=None):
             import jax.numpy as jnp
+
             return jnp.asarray(X) @ jnp.asarray(beta)
+
         def design_matrix_from_df(self, df):
             return np.asarray(df[["x"]])
+
         def variable_metadata(self):
             return {"x": {"type": "continuous"}}
+
         def column_index_of_variable(self, name):
             return 0
+
         def refit(self, data, index=None):
             return self
+
         @property
         def training_data(self):
             return df
+
         def __reduce__(self):
             raise TypeError("Cannot pickle mock adapter")
 
@@ -197,7 +232,7 @@ def test_parallel_fallback_when_unpicklable():
 
     def h(beta):
         import jax.numpy as jnp
-        X = jnp.ones((1, 1))
+
         return jnp.sum(beta)
 
     def h_factory(new_adapter):
@@ -205,7 +240,10 @@ def test_parallel_fallback_when_unpicklable():
 
     with pytest.warns(RuntimeWarning, match="cannot be pickled"):
         result = _run_bootstrap(
-            h, adapter, config, {"kind": "prediction"},
+            h,
+            adapter,
+            config,
+            {"kind": "prediction"},
             h_factory=h_factory,
         )
     assert result is not None

@@ -11,24 +11,27 @@ import statsmodels.formula.api as smf
 from pymargins import Margins
 from pymargins._result import compose_results
 
-
 # ---------------------------------------------------------------------------
 # Phase 2: bootstrap refit cache
 # ---------------------------------------------------------------------------
+
 
 def test_bootstrap_two_calls_share_refits():
     """Two bootstrap calls on the same session must reuse the cached refits.
     We verify this by monkeypatching _harvest_bootstrap_states to count calls."""
     rng = np.random.default_rng(42)
     n = 100
-    df = pd.DataFrame({
-        "x1": rng.normal(size=n),
-        "x2": rng.normal(size=n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.normal(size=n),
+            "x2": rng.normal(size=n),
+        }
+    )
     df["y"] = 1.0 + 0.5 * df["x1"] - 0.3 * df["x2"] + rng.normal(scale=0.5, size=n)
     fit = smf.ols("y ~ x1 + x2", data=df).fit()
 
     from pymargins._inference import _bootstrap as _boot_mod
+
     orig_harvest = _boot_mod._harvest_bootstrap_states
     harvest_calls = [0]
 
@@ -54,9 +57,11 @@ def test_bootstrap_cache_shares_failures():
     """A flaky refit should produce the same failure count across two calls."""
     rng = np.random.default_rng(42)
     n = 100
-    df = pd.DataFrame({
-        "x": rng.normal(size=n),
-    })
+    df = pd.DataFrame(
+        {
+            "x": rng.normal(size=n),
+        }
+    )
     df["y"] = 1.0 + 0.5 * df["x"] + rng.normal(scale=0.5, size=n)
     fit = smf.ols("y ~ x", data=df).fit()
 
@@ -87,10 +92,12 @@ def test_bootstrap_cache_applies_to_contrasts_and_slopes():
     """predict, dydx, and contrasts all reuse the same cached refits."""
     rng = np.random.default_rng(42)
     n = 100
-    df = pd.DataFrame({
-        "x1": rng.normal(size=n),
-        "x2": rng.normal(size=n),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": rng.normal(size=n),
+            "x2": rng.normal(size=n),
+        }
+    )
     df["y"] = 1.0 + 0.5 * df["x1"] - 0.3 * df["x2"] + rng.normal(scale=0.5, size=n)
     fit = smf.ols("y ~ x1 + x2", data=df).fit()
 
@@ -103,7 +110,11 @@ def test_bootstrap_cache_applies_to_contrasts_and_slopes():
     )
 
     # All should report the same effective and failed counts
-    assert r_pred.n_boot_effective == r_slope.n_boot_effective == r_contrast.n_boot_effective
+    assert (
+        r_pred.n_boot_effective
+        == r_slope.n_boot_effective
+        == r_contrast.n_boot_effective
+    )
     assert r_pred.n_boot_failed == r_slope.n_boot_failed == r_contrast.n_boot_failed
 
 
@@ -111,27 +122,30 @@ def test_bootstrap_cache_applies_to_contrasts_and_slopes():
 # Phase 2b: simulation draws bank
 # ---------------------------------------------------------------------------
 
+
 def test_simulation_two_calls_share_draws():
     """Two simulation calls on the same session must reuse the cached β* draws.
     We verify this by inspecting the session cache directly."""
     rng = np.random.default_rng(42)
     n = 200
-    df = pd.DataFrame({
-        "age": rng.normal(50, 10, size=n),
-        "treatment": rng.binomial(1, 0.5, size=n),
-    })
+    df = pd.DataFrame(
+        {
+            "age": rng.normal(50, 10, size=n),
+            "treatment": rng.binomial(1, 0.5, size=n),
+        }
+    )
     eta = -2.0 + 0.05 * df["age"] + 0.8 * df["treatment"]
     prob = 1.0 / (1.0 + np.exp(-eta))
     df["y"] = (rng.uniform(size=n) < prob).astype(float)
     fit = smf.glm("y ~ age + treatment", data=df, family=sm.families.Binomial()).fit()
 
     m = Margins(fit, method="simulation", n_sim=100, rng_seed=42)
-    r1 = m.predict(atexog={"treatment": 0})
+    m.predict(atexog={"treatment": 0})
 
     assert hasattr(m, "_simulation_draws_cache"), "Cache should exist after first call"
     cached_key, cached_draws = m._simulation_draws_cache
 
-    r2 = m.predict(atexog={"treatment": 1})
+    m.predict(atexog={"treatment": 1})
     cached_key2, cached_draws2 = m._simulation_draws_cache
 
     assert cached_key == cached_key2
@@ -142,13 +156,16 @@ def test_simulation_two_calls_share_draws():
 # Phase 3: freeze session parameters post-cache
 # ---------------------------------------------------------------------------
 
+
 def test_post_cache_mutation_raises():
     """Mutating a frozen attribute after the cache is materialized raises."""
     rng = np.random.default_rng(42)
     n = 100
-    df = pd.DataFrame({
-        "x": rng.normal(size=n),
-    })
+    df = pd.DataFrame(
+        {
+            "x": rng.normal(size=n),
+        }
+    )
     df["y"] = 1.0 + 0.5 * df["x"] + rng.normal(scale=0.5, size=n)
     fit = smf.ols("y ~ x", data=df).fit()
 
@@ -163,9 +180,11 @@ def test_pre_cache_mutation_allowed():
     """Mutating a frozen attribute before the cache is materialized succeeds."""
     rng = np.random.default_rng(42)
     n = 100
-    df = pd.DataFrame({
-        "x": rng.normal(size=n),
-    })
+    df = pd.DataFrame(
+        {
+            "x": rng.normal(size=n),
+        }
+    )
     df["y"] = 1.0 + 0.5 * df["x"] + rng.normal(scale=0.5, size=n)
     fit = smf.ols("y ~ x", data=df).fit()
 
@@ -180,9 +199,11 @@ def test_adapter_drift_detected():
     """Changing adapter.coefficients() after cache materialization raises."""
     rng = np.random.default_rng(42)
     n = 100
-    df = pd.DataFrame({
-        "x": rng.normal(size=n),
-    })
+    df = pd.DataFrame(
+        {
+            "x": rng.normal(size=n),
+        }
+    )
     df["y"] = 1.0 + 0.5 * df["x"] + rng.normal(scale=0.5, size=n)
     fit = smf.ols("y ~ x", data=df).fit()
 
@@ -204,9 +225,11 @@ def test_delta_session_no_cache_no_freeze():
     mutation of bootstrap/simulation parameters."""
     rng = np.random.default_rng(42)
     n = 100
-    df = pd.DataFrame({
-        "x": rng.normal(size=n),
-    })
+    df = pd.DataFrame(
+        {
+            "x": rng.normal(size=n),
+        }
+    )
     df["y"] = 1.0 + 0.5 * df["x"] + rng.normal(scale=0.5, size=n)
     fit = smf.ols("y ~ x", data=df).fit()
 
@@ -222,14 +245,17 @@ def test_delta_session_no_cache_no_freeze():
 # Phase 1: bootstrap_state default identity
 # ---------------------------------------------------------------------------
 
+
 def test_adapter_bootstrap_state_default_is_self():
     """The default bootstrap_state() returns self."""
     rng = np.random.default_rng(42)
     n = 50
-    df = pd.DataFrame({
-        "x": rng.normal(size=n),
-        "y": rng.binomial(1, 0.5, size=n),
-    })
+    df = pd.DataFrame(
+        {
+            "x": rng.normal(size=n),
+            "y": rng.binomial(1, 0.5, size=n),
+        }
+    )
     fit = smf.glm("y ~ x", data=df, family=sm.families.Binomial()).fit()
     m = Margins(fit, method="bootstrap", n_boot=10, rng_seed=1)
     adapter = m.adapter
@@ -240,13 +266,16 @@ def test_adapter_bootstrap_state_default_is_self():
 # Joint inference / composition across cached calls
 # ---------------------------------------------------------------------------
 
+
 def test_bootstrap_composition_across_cached_calls():
     """Results from two cached bootstrap calls compose via _check_draws_match."""
     rng = np.random.default_rng(42)
     n = 100
-    df = pd.DataFrame({
-        "x": rng.normal(size=n),
-    })
+    df = pd.DataFrame(
+        {
+            "x": rng.normal(size=n),
+        }
+    )
     df["y"] = 1.0 + 0.5 * df["x"] + rng.normal(scale=0.5, size=n)
     fit = smf.ols("y ~ x", data=df).fit()
 
@@ -268,6 +297,7 @@ def test_bootstrap_composition_across_cached_calls():
 # Matching rematch through the cache
 # ---------------------------------------------------------------------------
 
+
 class _StubMatcher:
     """Minimal matcher that deterministically drops rows on rematch."""
 
@@ -284,14 +314,17 @@ def test_matching_cache_reuses_refits():
     """Matching with rematch: two calls should share the same harvested states."""
     rng = np.random.default_rng(42)
     n = 120
-    df = pd.DataFrame({
-        "x": rng.normal(size=n),
-        "t": rng.binomial(1, 0.5, size=n),
-    })
+    df = pd.DataFrame(
+        {
+            "x": rng.normal(size=n),
+            "t": rng.binomial(1, 0.5, size=n),
+        }
+    )
     df["y"] = 1.0 + 0.5 * df["x"] - 0.4 * df["t"] + rng.normal(scale=0.5, size=n)
     fit = smf.ols("y ~ x + t", data=df).fit()
 
     from pymargins._inference import _bootstrap as _boot_mod
+
     orig_harvest = _boot_mod._harvest_bootstrap_states
     harvest_calls = [0]
 
@@ -301,8 +334,15 @@ def test_matching_cache_reuses_refits():
 
     _boot_mod._harvest_bootstrap_states = counting_harvest
     try:
-        m = Margins(fit, matching=_StubMatcher(df), method="bootstrap",
-                    n_boot=50, n_jobs=1, rng_seed=7, at="overall")
+        m = Margins(
+            fit,
+            matching=_StubMatcher(df),
+            method="bootstrap",
+            n_boot=50,
+            n_jobs=1,
+            rng_seed=7,
+            at="overall",
+        )
         r1 = m.predict()
         r2 = m.dydx("x")
 
@@ -316,6 +356,7 @@ def test_matching_cache_reuses_refits():
 # Survival adapter bootstrap cache
 # ---------------------------------------------------------------------------
 
+
 def test_lifelines_cox_bootstrap_cache():
     """Lifelines CoxPH adapter should transparently use the bootstrap states cache."""
     pytest.importorskip("lifelines")
@@ -323,10 +364,12 @@ def test_lifelines_cox_bootstrap_cache():
 
     rng = np.random.default_rng(42)
     n = 200
-    df = pd.DataFrame({
-        "age": rng.normal(50, 10, size=n),
-        "treatment": rng.binomial(1, 0.5, size=n),
-    })
+    df = pd.DataFrame(
+        {
+            "age": rng.normal(50, 10, size=n),
+            "treatment": rng.binomial(1, 0.5, size=n),
+        }
+    )
     df["duration"] = rng.exponential(10, size=n)
     df["event"] = rng.binomial(1, 0.8, size=n)
 
@@ -334,6 +377,7 @@ def test_lifelines_cox_bootstrap_cache():
     cph.fit(df, duration_col="duration", event_col="event")
 
     from pymargins._inference import _bootstrap as _boot_mod
+
     orig_harvest = _boot_mod._harvest_bootstrap_states
     harvest_calls = [0]
 
@@ -359,16 +403,19 @@ def test_survival_multi_time_scenario_curve():
     multi-time counterfactual curve in a single bootstrap pass."""
     pytest.importorskip("lifelines")
     from lifelines import CoxPHFitter
+
     from pymargins._adapters.lifelines_coxph_survival import (
         LifelinesCoxPHSurvivalAdapter,
     )
 
     rng = np.random.default_rng(0)
     n = 300
-    df = pd.DataFrame({
-        "age": rng.normal(50, 10, size=n),
-        "treatment": rng.binomial(1, 0.5, size=n),
-    })
+    df = pd.DataFrame(
+        {
+            "age": rng.normal(50, 10, size=n),
+            "treatment": rng.binomial(1, 0.5, size=n),
+        }
+    )
     lp = -0.02 * (df["age"] - 50) - 0.7 * df["treatment"]
     df["duration"] = rng.exponential(np.exp(-lp) * 8.0)
     df["event"] = (df["duration"] < 20).astype(int)
@@ -376,16 +423,24 @@ def test_survival_multi_time_scenario_curve():
     cph = CoxPHFitter().fit(df, duration_col="duration", event_col="event")
 
     adapter = LifelinesCoxPHSurvivalAdapter(cph, training_data=df)
-    m = Margins(cph, adapter=adapter, at="overall",
-                method="bootstrap", n_boot=20, n_jobs=1, rng_seed=0)
+    m = Margins(
+        cph,
+        adapter=adapter,
+        at="overall",
+        method="bootstrap",
+        n_boot=20,
+        n_jobs=1,
+        rng_seed=0,
+    )
 
     times = [2.0, 8.0, 16.0]
-    scens = (
-        [{"atexog": {"treatment": 1}, "prediction_time": t,
-          "label": f"trt=1,t={t}"} for t in times]
-        + [{"atexog": {"treatment": 0}, "prediction_time": t,
-            "label": f"trt=0,t={t}"} for t in times]
-    )
+    scens = [
+        {"atexog": {"treatment": 1}, "prediction_time": t, "label": f"trt=1,t={t}"}
+        for t in times
+    ] + [
+        {"atexog": {"treatment": 0}, "prediction_time": t, "label": f"trt=0,t={t}"}
+        for t in times
+    ]
     W = np.eye(len(scens))
     curve = m.contrasts(scenarios=scens, contrasts=W)
 
@@ -395,7 +450,7 @@ def test_survival_multi_time_scenario_curve():
     assert np.all((est > 0) & (est < 1))
     # Survival decreases with time for each arm.
     for arm_start in (0, len(times)):
-        arm = est[arm_start:arm_start + len(times)]
+        arm = est[arm_start : arm_start + len(times)]
         assert np.all(np.diff(arm) <= 1e-9), f"Non-monotonic curve: {arm}"
 
 

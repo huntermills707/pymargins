@@ -68,8 +68,8 @@ docs = [
 # Development / testing
 test = [
     "pytest>=7.0",
-    "pytest-cov",
-    "hypothesis",
+    "pytest-cov>=4.0",
+    "hypothesis>=6.0",
     "polars>=1.0",
     "pyarrow>=10.0",
     "pysmatch>=2.1",
@@ -93,7 +93,14 @@ addopts = ["-ra", "--strict-markers"]
 [tool.ruff]
 line-length = 88
 target-version = "py310"
+# Generated/executed notebook cache — not source we lint.
+extend-exclude = [".jupyter_cache", "docs/.jupyter_cache"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B"]
-ignore = ["E501"]  # line length handled by formatter
+ignore = ["E501", "N803", "N806"]  # line length handled by formatter; math notation (X, S0_t, etc.) allowed
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["E402", "B017", "B018", "E721", "N802"]
+# Demo scripts call jax.config.update(jax_enable_x64) before other imports.
+"demo/**" = ["E402"]

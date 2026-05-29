@@ -1,0 +1,199 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint & format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff
+        run: pip install ruff
+      - name: ruff check
+        run: ruff check .
+      - name: ruff format --check
+        run: ruff format --check .
+
+  set-matrix:
+    name: Pick Python matrix
+    runs-on: ubuntu-latest
+    outputs:
+      pythons: ${{ steps.pick.outputs.pythons }}
+    steps:
+      - id: pick
+        # PRs test the endpoints + midpoint (fast feedback); pushes to main
+        # and manual runs test the full supported range.
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo 'pythons=["3.10","3.12","3.14"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'pythons=["3.10","3.11","3.12","3.13","3.14"]' >> "$GITHUB_OUTPUT"
+          fi
+
+  bare:
+    name: Bare install (core deps only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install with no optional backends
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Import without pulling in any backend
+        # Catches the #1 packaging bug for a library with optional extras:
+        # eagerly importing a backend the user hasn't installed.
+        run: |
+          python -c "
+          import sys, pymargins
+          for mod in ('statsmodels', 'lifelines', 'linearmodels', 'sklearn'):
+              assert mod not in sys.modules, f'pymargins eagerly imported {mod}'
+          print('bare import OK:', pymargins.__version__)
+          "
+
+  test:
+    name: Test (py${{ matrix.python-version }})
+    needs: set-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJSON(needs.set-matrix.outputs.pythons) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install package with all backends
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[test,statsmodels,linearmodels,lifelines,sklearn]"
+      - name: Run tests
+        # Coverage is reported, not yet enforced. Baseline as of 2026-05-28
+        # is ~80%. To turn on the gate later, add: --cov-fail-under=80
+        # (set it just under the then-current number and ratchet up).
+        run: pytest --cov=pymargins --cov-report=term-missing --cov-report=xml
+      - name: Coverage summary
+        if: always() && matrix.python-version == '3.12'
+        run: |
+          pct=$(python -c "import xml.etree.ElementTree as ET; print(round(float(ET.parse('coverage.xml').getroot().get('line-rate'))*100, 1))")
+          echo "### Coverage: ${pct}%" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload coverage
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+
+  min-versions:
+    name: Minimum dependency versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install lowest declared versions
+        # Resolve every dependency to the lowest version allowed by the >=
+        # floors in pyproject.toml, so the ranges we publish stay honest.
+        # uv's --resolution lowest-direct does this; plain pip cannot.
+        run: |
+          uv venv --python 3.10
+          uv pip install --resolution lowest-direct \
+            -e ".[test,statsmodels,linearmodels,lifelines,sklearn]"
+      - name: Show resolved versions
+        run: uv pip freeze
+      - name: Smoke test at floors
+        # A focused smoke subset, not the full suite. The goal is to prove the
+        # declared >= floors are usable (imports resolve, core machinery and a
+        # closed-form OLS path run) without depending on iterative-optimizer
+        # convergence: numerically-exact reference tests (GEE/survival/williams)
+        # drift on the oldest scipy/statsmodels and would fail for reasons
+        # unrelated to version compatibility.
+        # Run from the venv built above. Do NOT use `uv run`: it re-syncs the
+        # project env from [project.dependencies] only (no test extras) and
+        # picks the project's Python, discarding the lowest-direct 3.10 venv.
+        run: |
+          .venv/bin/python -m pytest \
+            tests/test_adapter_common.py \
+            tests/test_adapter_registry.py \
+            tests/test_adapters_facade.py \
+            tests/test_adapter_statsmodels_ols.py \
+            tests/test_adapter_linearmodels_ols.py \
+            tests/test_end_to_end_ols.py \
+            tests/test_formula_interface.py \
+            tests/test_estimands.py \
+            tests/test_delta.py \
+            tests/test_gradients.py \
+            tests/test_kappa.py \
+            tests/test_result_formatting.py \
+            tests/test_result_to_frame.py \
+            tests/test_scenarios.py
+
+  backend-isolation:
+    name: Isolated (${{ matrix.backend }})
+    # Thorough per-backend cross-contamination check; run on merge to main and
+    # manual runs, not on every PR push (the `bare` job covers PRs cheaply).
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - backend: statsmodels
+            pattern: tests/test_adapter_statsmodels_*.py
+          - backend: lifelines
+            pattern: tests/test_adapter_lifelines_*.py
+          - backend: linearmodels
+            pattern: tests/test_adapter_linearmodels_*.py
+          - backend: sklearn
+            pattern: tests/test_adapter_sklearn_*.py
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install with only the ${{ matrix.backend }} backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[test,${{ matrix.backend }}]"
+      - name: Import cleanly without other backends
+        run: python -c "import pymargins; print(pymargins.__version__)"
+      - name: Run this backend's adapter tests
+        run: pytest ${{ matrix.pattern }}
+
+  docs:
+    name: Docs build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install docs dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[docs]"
+      - name: Build HTML
+        # Reuse the committed docs/.jupyter_cache (as RTD does) instead of
+        # re-executing every notebook. Notebooks legitimately emit warnings,
+        # so no -W; execution *errors* still fail (nb_execution_raise_on_error).
+        env:
+          PYMARGINS_DOCS_EXEC: cache
+        run: sphinx-build --keep-going -b html docs docs/_build/html

@@ -31,6 +31,7 @@ from pymargins import Margins
 # 0. Generate synthetic NHANES-like data
 # ---------------------------------------------------------------------------
 
+
 def make_data(n=5000, seed=42):
     """Synthetic health-survey data mimicking NHANES II structure."""
     rng = np.random.default_rng(seed)
@@ -41,7 +42,9 @@ def make_data(n=5000, seed=42):
     age = rng.integers(20, 75, size=n)
 
     # Age groups (1=20-29, 2=30-39, ..., 6=70+)
-    agegrp = pd.cut(age, bins=[19, 29, 39, 49, 59, 69, 100], labels=[1, 2, 3, 4, 5, 6]).astype(int)
+    agegrp = pd.cut(
+        age, bins=[19, 29, 39, 49, 59, 69, 100], labels=[1, 2, 3, 4, 5, 6]
+    ).astype(int)
 
     # BMI (correlated with age and sex)
     bmi = 22 + 0.15 * age + 1.5 * female + rng.normal(0, 4, size=n)
@@ -63,24 +66,33 @@ def make_data(n=5000, seed=42):
     diabetes = rng.binomial(1, 1 / (1 + np.exp(-lp)))
 
     # Continuous outcome (e.g., blood pressure) for OLS demo
-    bp = 110 + 0.4 * age + 2.5 * black + 1.2 * female + 0.5 * bmi + rng.normal(0, 8, size=n)
+    bp = (
+        110
+        + 0.4 * age
+        + 2.5 * black
+        + 1.2 * female
+        + 0.5 * bmi
+        + rng.normal(0, 8, size=n)
+    )
 
-    df = pd.DataFrame({
-        "diabetes": diabetes,
-        "bp": bp,
-        "black": black,
-        "female": female,
-        "age": age,
-        "agegrp": agegrp,
-        "bmi": bmi,
-    })
+    df = pd.DataFrame(
+        {
+            "diabetes": diabetes,
+            "bp": bp,
+            "black": black,
+            "female": female,
+            "age": age,
+            "agegrp": agegrp,
+            "bmi": bmi,
+        }
+    )
     return df
 
 
 if __name__ == "__main__":
     df = make_data(n=5000, seed=42)
     print("=" * 70)
-    print("Synthetic NHANES-like data (n = {:,})".format(len(df)))
+    print(f"Synthetic NHANES-like data (n = {len(df):,})")
     print("=" * 70)
     print(df.describe())
     print()

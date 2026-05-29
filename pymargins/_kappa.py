@@ -42,13 +42,15 @@ or running a full bootstrap is more informative.
 """
 
 from __future__ import annotations
-from typing import Callable, Literal, Optional
+
+from collections.abc import Callable
+from typing import Literal
+
 import jax
 import jax.numpy as jnp
 import numpy as np
 
-from ._gradients import gradient, hessian, GradientBackend
-
+from ._gradients import GradientBackend, gradient, hessian
 
 # ---------------------------------------------------------------------------
 # Type aliases
@@ -62,11 +64,12 @@ KappaVerdict = Literal["delta_reliable", "delta_borderline", "delta_unreliable"]
 # Single-estimand κ
 # ---------------------------------------------------------------------------
 
+
 def _kappa_core(
     h: Callable[[jnp.ndarray], jnp.ndarray],
     beta: jnp.ndarray,
     cov_params: jnp.ndarray,
-    L: Optional[jnp.ndarray],
+    L: jnp.ndarray | None,
     *,
     backend: GradientBackend = "autodiff",
     fd_step: float = 1e-6,
@@ -171,7 +174,9 @@ def kappa(
     handle this via a small ridge term added to cov_params, or by routing
     to a different inference method.
     """
-    return _kappa_core(h, beta, cov_params, L=None, backend=backend, fd_step=fd_step, norm=norm)
+    return _kappa_core(
+        h, beta, cov_params, L=None, backend=backend, fd_step=fd_step, norm=norm
+    )
 
 
 def kappa_vector(
@@ -209,7 +214,10 @@ def kappa_vector(
         n_outputs = int(out.shape[0])
         kappas = []
         for i in range(n_outputs):
-            h_i = (lambda b, i=i: h(b)[i])
+
+            def h_i(b, i=i):
+                return h(b)[i]
+
             kappas.append(kappa(h_i, beta, cov_params, **kwargs))
         return jnp.asarray(kappas)
     else:
@@ -217,7 +225,10 @@ def kappa_vector(
         out_flat = jnp.reshape(out, (-1,))
         kappas = []
         for i in range(len(out_flat)):
-            h_i = (lambda b, i=i: jnp.reshape(h(b), (-1,))[i])
+
+            def h_i(b, i=i):
+                return jnp.reshape(h(b), (-1,))[i]
+
             kappas.append(kappa(h_i, beta, cov_params, **kwargs))
         return jnp.asarray(kappas).reshape(out.shape)
 
@@ -225,6 +236,7 @@ def kappa_vector(
 # ---------------------------------------------------------------------------
 # Verdict classification
 # ---------------------------------------------------------------------------
+
 
 def classify_kappa(
     kappa_value: float,
@@ -266,6 +278,7 @@ def classify_kappa(
 # ---------------------------------------------------------------------------
 # Session-level diagnostic
 # ---------------------------------------------------------------------------
+
 
 def session_kappa(
     h_factory: Callable,
@@ -342,10 +355,17 @@ def session_kappa(
     kappas = []
     for X in representative_design:
         h_X = h_factory(X)
-        kappas.append(_kappa_core(
-            h_X, beta, cov_params, L=L,
-            backend=backend, fd_step=fd_step, norm=norm,
-        ))
+        kappas.append(
+            _kappa_core(
+                h_X,
+                beta,
+                cov_params,
+                L=L,
+                backend=backend,
+                fd_step=fd_step,
+                norm=norm,
+            )
+        )
 
     kappas = jnp.asarray(kappas)
     max_k = float(kappas.max())
@@ -388,6 +408,7 @@ def session_kappa(
 # Cross-validation against simulation
 # ---------------------------------------------------------------------------
 
+
 def delta_simulation_disagreement(
     estimate: jnp.ndarray,
     grad: jnp.ndarray,
@@ -397,8 +418,8 @@ def delta_simulation_disagreement(
     *,
     level: float = 0.95,
     n_sim: int = 4000,
-    rng_seed: Optional[int] = None,
-    phi: Optional[Callable] = None,
+    rng_seed: int | None = None,
+    phi: Callable | None = None,
 ) -> float:
     """Compare delta-method CI to a Krinsky–Robb simulation CI.
 
@@ -455,7 +476,11 @@ def delta_simulation_disagreement(
 
     # Delta CI (handles both scalar and vector estimands)
     d_lower, d_upper = delta_confint(
-        estimate, grad, cov_params, level=level, phi=phi,
+        estimate,
+        grad,
+        cov_params,
+        level=level,
+        phi=phi,
     )
     d_lower = np.asarray(d_lower)
     d_upper = np.asarray(d_upper)

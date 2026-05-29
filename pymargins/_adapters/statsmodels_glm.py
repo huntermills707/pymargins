@@ -13,7 +13,9 @@ factor, and the rest of the gradient machinery is the same.
 """
 
 from __future__ import annotations
-from typing import Optional, Any
+
+from typing import Any
+
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
@@ -22,10 +24,10 @@ import statsmodels.api as sm
 from .._adapter import GLMAdapter, VariableInfo
 from .._gradients import make_glm_jvp_wrapper
 from ._common import (
-    extract_training_data,
-    design_matrix_from_df,
-    column_index_of_variable,
     build_variable_metadata,
+    column_index_of_variable,
+    design_matrix_from_df,
+    extract_training_data,
     validate_vcov_spec,
 )
 
@@ -44,7 +46,7 @@ class StatsmodelsGLMAdapter(GLMAdapter):
         for direct-array fits — provide explicitly in that case.
     """
 
-    def __init__(self, results, training_data: Optional[pd.DataFrame] = None):
+    def __init__(self, results, training_data: pd.DataFrame | None = None):
         self.results = results
         self.family = results.family
 
@@ -80,7 +82,7 @@ class StatsmodelsGLMAdapter(GLMAdapter):
         """
         return np.asarray(self.results.model.score_obs(self.results.params))
 
-    def covariance(self, vcov_spec: Optional[Any] = None) -> jnp.ndarray:
+    def covariance(self, vcov_spec: Any | None = None) -> jnp.ndarray:
         """Return Σ̂, dispatching to the requested flavor.
 
         statsmodels supports several robust SE flavors via cov_type at fit
@@ -121,11 +123,10 @@ class StatsmodelsGLMAdapter(GLMAdapter):
             if kind == "cluster":
                 groups = vcov_spec.get("groups")
                 if groups is None:
-                    raise ValueError(
-                        "cluster vcov requires 'groups' in the spec dict."
-                    )
+                    raise ValueError("cluster vcov requires 'groups' in the spec dict.")
                 return self._refit_and_extract_cov(
-                    cov_type="cluster", cov_kwds={"groups": groups},
+                    cov_type="cluster",
+                    cov_kwds={"groups": groups},
                 )
             raise ValueError(f"Unsupported vcov dict type: {kind!r}")
 
@@ -139,7 +140,7 @@ class StatsmodelsGLMAdapter(GLMAdapter):
         self,
         beta: jnp.ndarray,
         X: jnp.ndarray,
-        offset: Optional[jnp.ndarray] = None,
+        offset: jnp.ndarray | None = None,
     ) -> jnp.ndarray:
         return self._predict_jax(beta, X, offset)
 
@@ -152,7 +153,9 @@ class StatsmodelsGLMAdapter(GLMAdapter):
 
     def column_index_of_variable(self, variable_name: str) -> int:
         return column_index_of_variable(
-            self._exog_names, self.variable_metadata(), variable_name,
+            self._exog_names,
+            self.variable_metadata(),
+            variable_name,
         )
 
     def variable_metadata(self) -> dict[str, VariableInfo]:
@@ -177,7 +180,9 @@ class StatsmodelsGLMAdapter(GLMAdapter):
         if formula is not None:
             if cov_kwds and "groups" in cov_kwds:
                 groups = cov_kwds["groups"]
-                if hasattr(groups, "__len__") and len(groups) != len(self._training_data):
+                if hasattr(groups, "__len__") and len(groups) != len(
+                    self._training_data
+                ):
                     raise ValueError(
                         f"groups length ({len(groups)}) must match training_data "
                         f"length ({len(self._training_data)})."
@@ -185,7 +190,9 @@ class StatsmodelsGLMAdapter(GLMAdapter):
             # Preserve model-specific args from the original fit where possible
             fit_kwargs = self._collect_original_fit_kwargs()
             new_results = smf_glm(
-                formula, data=self._training_data, family=self.family,
+                formula,
+                data=self._training_data,
+                family=self.family,
             ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, **fit_kwargs)
             return jnp.asarray(new_results.cov_params())
 
@@ -194,7 +201,9 @@ class StatsmodelsGLMAdapter(GLMAdapter):
         exog = self.results.model.exog
         fit_kwargs = self._collect_original_fit_kwargs()
         new_results = sm.GLM(
-            endog, exog, family=self.family,
+            endog,
+            exog,
+            family=self.family,
         ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, **fit_kwargs)
         return jnp.asarray(new_results.cov_params())
 
@@ -207,7 +216,9 @@ class StatsmodelsGLMAdapter(GLMAdapter):
                 kwargs[attr] = val
         return kwargs
 
-    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "StatsmodelsGLMAdapter":
+    def refit(
+        self, resampled_data: pd.DataFrame, *, index=None
+    ) -> StatsmodelsGLMAdapter:
         """Refit the model on resampled data.
 
         Reconstructs the formula and family from the original results and
@@ -223,7 +234,9 @@ class StatsmodelsGLMAdapter(GLMAdapter):
         formula = getattr(self.results.model, "formula", None)
         if formula is not None:
             new_results = smf_glm(
-                formula, data=resampled_data, family=self.family,
+                formula,
+                data=resampled_data,
+                family=self.family,
             ).fit(**fit_kwargs)
             return StatsmodelsGLMAdapter(new_results, training_data=resampled_data)
 

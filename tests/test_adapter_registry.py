@@ -1,18 +1,19 @@
 """Tests for the third-party adapter registry (A11)."""
 
-import pytest
 import jax.numpy as jnp
+import pytest
 
-from pymargins import register_adapter, ModelAdapter
-from pymargins._adapters import _detect_adapter_class, _DETECTION_REGISTRY
-
+from pymargins import ModelAdapter, register_adapter
+from pymargins._adapters import _DETECTION_REGISTRY, _detect_adapter_class
 
 # ---------------------------------------------------------------------------
 # Dummy adapter and model for testing
 # ---------------------------------------------------------------------------
 
+
 class DummyModel:
     """Fake fitted model for testing auto-detection."""
+
     pass
 
 
@@ -72,6 +73,7 @@ class AnotherDummyAdapter(ModelAdapter):
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _clear_registry():
     """Clear the detection registry before each test and restore after."""
@@ -85,6 +87,7 @@ def _clear_registry():
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 def test_register_adapter_with_predicate():
     register_adapter(
@@ -150,8 +153,8 @@ def test_register_adapter_appears_in_suggestions():
 
 def test_register_adapter_can_override_builtin():
     """Registered adapters are checked before built-in dispatch."""
-    import statsmodels.api as sm
     import pandas as pd
+    import statsmodels.api as sm
 
     df = pd.DataFrame({"x": [1, 2, 3], "y": [1, 2, 3]})
     fitted = sm.OLS.from_formula("y ~ x", data=df).fit()
@@ -159,8 +162,10 @@ def test_register_adapter_can_override_builtin():
     # Register an adapter that claims OLS results
     register_adapter(
         DummyAdapter,
-        predicate=lambda m: type(m).__module__.startswith("statsmodels.")
-        and "RegressionResultsWrapper" in type(m).__name__,
+        predicate=lambda m: (
+            type(m).__module__.startswith("statsmodels.")
+            and "RegressionResultsWrapper" in type(m).__name__
+        ),
         hint_modules=["statsmodels."],
         hint_names=["RegressionResultsWrapper"],
     )
@@ -171,7 +176,6 @@ def test_register_adapter_can_override_builtin():
 def test_register_adapter_description_defaults_to_class_name():
     from pymargins._adapters import _REGISTERED_ADAPTERS
 
-    n_before = len(_REGISTERED_ADAPTERS)
     register_adapter(
         DummyAdapter,
         predicate=lambda m: isinstance(m, DummyModel),

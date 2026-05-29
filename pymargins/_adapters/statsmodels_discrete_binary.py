@@ -10,21 +10,22 @@ These models predict the conditional probability via a link function
 """
 
 from __future__ import annotations
-from functools import lru_cache
-from typing import Optional, Any
+
+from functools import cache
+from typing import Any
+
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
-
 from jax.scipy.special import expit, ndtr
 
 from .._adapter import ModelAdapter, VariableInfo
 from ._common import (
-    extract_training_data,
-    design_matrix_from_df,
-    column_index_of_variable,
     build_variable_metadata,
+    column_index_of_variable,
+    design_matrix_from_df,
+    extract_training_data,
     validate_vcov_spec,
 )
 
@@ -40,7 +41,7 @@ class StatsmodelsDiscreteBinaryAdapter(ModelAdapter):
         The data the model was fit on.
     """
 
-    def __init__(self, results, training_data: Optional[pd.DataFrame] = None):
+    def __init__(self, results, training_data: pd.DataFrame | None = None):
         self.results = results
         self._training_data = extract_training_data(results, training_data)
         self._exog_names = list(results.model.exog_names)
@@ -78,7 +79,7 @@ class StatsmodelsDiscreteBinaryAdapter(ModelAdapter):
         """Per-observation score ∂ℓ_i/∂β, shape (n_obs, p)."""
         return np.asarray(self.results.model.score_obs(self.results.params))
 
-    def covariance(self, vcov_spec: Optional[Any] = None) -> jnp.ndarray:
+    def covariance(self, vcov_spec: Any | None = None) -> jnp.ndarray:
         if vcov_spec is None:
             return jnp.asarray(self.results.cov_params())
 
@@ -100,7 +101,8 @@ class StatsmodelsDiscreteBinaryAdapter(ModelAdapter):
                 if groups is None:
                     raise ValueError("cluster vcov requires 'groups' in the spec dict.")
                 return self._refit_and_extract_cov(
-                    cov_type="cluster", cov_kwds={"groups": groups},
+                    cov_type="cluster",
+                    cov_kwds={"groups": groups},
                 )
             raise ValueError(f"Unsupported vcov dict type: {kind!r}")
 
@@ -124,7 +126,9 @@ class StatsmodelsDiscreteBinaryAdapter(ModelAdapter):
 
     def column_index_of_variable(self, variable_name: str) -> int:
         return column_index_of_variable(
-            self._exog_names, self.variable_metadata(), variable_name,
+            self._exog_names,
+            self.variable_metadata(),
+            variable_name,
         )
 
     def variable_metadata(self) -> dict[str, VariableInfo]:
@@ -141,7 +145,9 @@ class StatsmodelsDiscreteBinaryAdapter(ModelAdapter):
         if formula is not None:
             if cov_kwds and "groups" in cov_kwds:
                 groups = cov_kwds["groups"]
-                if hasattr(groups, "__len__") and len(groups) != len(self._training_data):
+                if hasattr(groups, "__len__") and len(groups) != len(
+                    self._training_data
+                ):
                     raise ValueError(
                         f"groups length ({len(groups)}) must match training_data "
                         f"length ({len(self._training_data)})."
@@ -149,14 +155,22 @@ class StatsmodelsDiscreteBinaryAdapter(ModelAdapter):
             fit_kwargs = self._collect_original_fit_kwargs()
             if self._model_cls_name == "Logit":
                 from statsmodels.formula.api import logit as smf_logit
+
                 new_results = smf_logit(
-                    formula, data=self._training_data,
-                ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False, **fit_kwargs)
+                    formula,
+                    data=self._training_data,
+                ).fit(
+                    cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False, **fit_kwargs
+                )
             elif self._model_cls_name == "Probit":
                 from statsmodels.formula.api import probit as smf_probit
+
                 new_results = smf_probit(
-                    formula, data=self._training_data,
-                ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False, **fit_kwargs)
+                    formula,
+                    data=self._training_data,
+                ).fit(
+                    cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False, **fit_kwargs
+                )
             else:
                 raise ValueError(f"Unknown model class: {self._model_cls_name}")
             return jnp.asarray(new_results.cov_params())
@@ -166,17 +180,23 @@ class StatsmodelsDiscreteBinaryAdapter(ModelAdapter):
         fit_kwargs = self._collect_original_fit_kwargs()
         if self._model_cls_name == "Logit":
             new_results = sm.Logit(endog, exog, **fit_kwargs).fit(
-                cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False,
+                cov_type=cov_type,
+                cov_kwds=cov_kwds or {},
+                disp=False,
             )
         elif self._model_cls_name == "Probit":
             new_results = sm.Probit(endog, exog, **fit_kwargs).fit(
-                cov_type=cov_type, cov_kwds=cov_kwds or {}, disp=False,
+                cov_type=cov_type,
+                cov_kwds=cov_kwds or {},
+                disp=False,
             )
         else:
             raise ValueError(f"Unknown model class: {self._model_cls_name}")
         return jnp.asarray(new_results.cov_params())
 
-    def refit(self, resampled_data: pd.DataFrame, *, index=None) -> "StatsmodelsDiscreteBinaryAdapter":
+    def refit(
+        self, resampled_data: pd.DataFrame, *, index=None
+    ) -> StatsmodelsDiscreteBinaryAdapter:
         formula = getattr(self.results.model, "formula", None)
         if formula is not None:
             fit_kwargs = self._collect_original_fit_kwargs()
@@ -186,17 +206,23 @@ class StatsmodelsDiscreteBinaryAdapter(ModelAdapter):
                         fit_kwargs[attr] = np.asarray(fit_kwargs[attr])[index]
             if self._model_cls_name == "Logit":
                 from statsmodels.formula.api import logit as smf_logit
+
                 new_results = smf_logit(
-                    formula, data=resampled_data,
+                    formula,
+                    data=resampled_data,
                 ).fit(disp=False, **fit_kwargs)
             elif self._model_cls_name == "Probit":
                 from statsmodels.formula.api import probit as smf_probit
+
                 new_results = smf_probit(
-                    formula, data=resampled_data,
+                    formula,
+                    data=resampled_data,
                 ).fit(disp=False, **fit_kwargs)
             else:
                 raise ValueError(f"Unknown model class: {self._model_cls_name}")
-            return StatsmodelsDiscreteBinaryAdapter(new_results, training_data=resampled_data)
+            return StatsmodelsDiscreteBinaryAdapter(
+                new_results, training_data=resampled_data
+            )
 
         endog_name = getattr(self.results.model, "endog_names", None)
         if endog_name is None:
@@ -234,7 +260,9 @@ class StatsmodelsDiscreteBinaryAdapter(ModelAdapter):
             new_results = sm.Probit(endog, exog_df, **fit_kwargs).fit(disp=False)
         else:
             raise ValueError(f"Unknown model class: {self._model_cls_name}")
-        return StatsmodelsDiscreteBinaryAdapter(new_results, training_data=resampled_data)
+        return StatsmodelsDiscreteBinaryAdapter(
+            new_results, training_data=resampled_data
+        )
 
     def _collect_original_fit_kwargs(self) -> dict:
         """Capture model-specific kwargs from the original fit for refit."""
@@ -246,14 +274,14 @@ class StatsmodelsDiscreteBinaryAdapter(ModelAdapter):
         return kwargs
 
 
-@lru_cache(maxsize=None)
+@cache
 def _discrete_binary_predict(model_cls_name: str):
     """Cached predict factory so JAX sees the same callable across refits."""
 
     def predict(
         beta: jnp.ndarray,
         X: jnp.ndarray,
-        offset: Optional[jnp.ndarray] = None,
+        offset: jnp.ndarray | None = None,
     ) -> jnp.ndarray:
         eta = jnp.asarray(X) @ beta
         if offset is not None:
