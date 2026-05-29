@@ -104,3 +104,16 @@ ignore = ["E501", "N803", "N806"]  # line length handled by formatter; math nota
 "tests/**" = ["E402", "B017", "B018", "E721", "N802"]
 # Demo scripts call jax.config.update(jax_enable_x64) before other imports.
 "demo/**" = ["E402"]
+
+[tool.mypy]
+# Type-check our own package; we ship py.typed (PEP 561), so these annotations
+# are part of the public contract and worth keeping coherent. Checks run against
+# the CI runner's interpreter (3.12); no python_version pin so the analysis
+# target matches the interpreter actually executing mypy.
+files = ["pymargins"]
+# Optional backends (jax, statsmodels, lifelines, linearmodels, sklearn,
+# pysmatch, polars) ship no type stubs; don't fail on their unresolved imports.
+ignore_missing_imports = true
+# Starting posture is lenient: surface annotation incoherence without demanding
+# full strictness on a codebase not originally built under a checker. Ratchet
+# up over time (e.g. disallow_untyped_defs, warn_return_any).

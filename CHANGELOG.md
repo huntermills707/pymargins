@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `py.typed` marker (PEP 561) so downstream type checkers (mypy, pyright)
+  pick up the package's inline type annotations.
+
+### Internal
+
+- CI: a `typecheck` job runs mypy on the package. Reported, not enforced for
+  now (mirrors the coverage step); `[tool.mypy]` config in `pyproject.toml`.
+- `.gitignore`: ignore `.mypy_cache/` and the CI `mypy.log`.
+
 ## 0.1.2 - 2026-05-29
 
 ### Internal
