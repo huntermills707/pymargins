@@ -70,22 +70,17 @@ def split_kernel_partial(h):
 
 def _aggregate(mu, aggregate, weights):
     """Aggregate per-row predictions according to the rule."""
-    if aggregate == "overall" or aggregate == "weighted":
+    if aggregate == "overall":
         if weights is None:
-            return jnp.mean(mu, axis=0) if mu.ndim > 1 else jnp.mean(mu)
-        if not jnp.all(jnp.isfinite(weights)):
-            raise ValueError("weights must be finite (no NaN or Inf)")
-        if jnp.any(weights < 0):
-            raise ValueError("weights must be non-negative")
-        if jnp.sum(weights) == 0:
-            raise ValueError("weights must not sum to zero")
-        if mu.ndim > 1:
+            return jnp.mean(mu, axis=0)
+        if mu.ndim == 2:
             return jnp.sum(weights[:, None] * mu, axis=0) / jnp.sum(weights)
         return jnp.sum(weights * mu) / jnp.sum(weights)
     elif aggregate == "none":
         return mu[0] if mu.shape[0] == 1 else mu
-    else:
-        raise ValueError(f"Unknown aggregate rule: {aggregate!r}")
+    elif aggregate == "weighted":
+        return jnp.sum(weights * mu) / jnp.sum(weights)
+    raise ValueError(f"Unknown aggregate rule: {aggregate!r}")
 
 
 # ---------------------------------------------------------------------------

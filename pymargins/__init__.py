@@ -62,6 +62,7 @@ from ._result import (
 )
 from .margins import Margins
 from .matching import PysmatchClient
+from .survey import SurveyDesign
 from .scenarios import (
     all_pairwise,
     at_levels,
@@ -107,6 +108,8 @@ __all__ = [
     "all_pairwise",
     # Matching support
     "PysmatchClient",
+    # Survey design
+    "SurveyDesign",
     # Package metadata
     "__version__",
 ]

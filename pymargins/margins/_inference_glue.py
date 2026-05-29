@@ -63,6 +63,11 @@ def _bootstrap_bank_key(session) -> str:
     # Sort keys for determinism
     parts.append(str(sorted(bc.items())))
 
+    if session.survey_design is not None:
+        parts.append(session.survey_design.hash_key())
+    else:
+        parts.append("none")
+
     return hashlib.sha256("|".join(parts).encode()).hexdigest()[:32]
 
 
@@ -96,6 +101,11 @@ def _bootstrap_resample_bank(session):
     else:
         cluster_ids = session.cluster
 
+    strata = None
+    if session.survey_design is not None:
+        cluster_ids = session.survey_design.psu
+        strata = session.survey_design.strata
+
     block_size = session.block_size
     bc = session.bootstrap_config or {}
     block_type = bc.get("block_type", "moving")
@@ -107,6 +117,7 @@ def _bootstrap_resample_bank(session):
         cluster_ids=cluster_ids,
         block_size=block_size,
         block_type=block_type,
+        strata=strata,
     )
     setattr(session, cache_attr, (bank_key, all_idx))
     return all_idx, bank_key
@@ -226,6 +237,8 @@ def _inference_config(session) -> InferenceConfig:
         cov_params=_frozen_cov(session),
         cluster=session.cluster,
         block_size=session.block_size,
+        strata=session.survey_design.strata if session.survey_design is not None else None,
+        survey_design=session.survey_design,
         matching=session.matching,
         bootstrap_config=session.bootstrap_config,
         all_idx=all_idx,

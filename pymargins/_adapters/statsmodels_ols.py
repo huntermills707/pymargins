@@ -126,9 +126,55 @@ class StatsmodelsOLSAdapter(LinearPredictionAdapter):
                     cov_type="cluster",
                     cov_kwds={"groups": groups},
                 )
+            if kind == "survey":
+                return self._survey_covariance(vcov_spec["design"])
             raise ValueError(f"Unsupported vcov dict type: {kind!r}")
 
         raise ValueError(f"Unsupported vcov_spec: {vcov_spec!r}")
+
+    def _survey_covariance(self, design) -> jnp.ndarray:
+        from .._inference._linearization import linearization_cov
+        import numpy as np
+
+        bread = np.asarray(self.results.cov_params())
+        scores = self.score_obs()  # (n, p), unweighted
+
+        w = np.asarray(design.weights)
+        psu = None if design.psu is None else np.asarray(design.psu)
+        strata = None if design.strata is None else np.asarray(design.strata)
+
+        if len(w) != scores.shape[0]:
+            raise ValueError(
+                f"survey weights length {len(w)} != n_obs {scores.shape[0]}; "
+                "fit the model on the same rows the design describes."
+            )
+
+        fpc_fraction = self._survey_fpc_fraction(design, psu, strata)
+
+        V = linearization_cov(bread, scores, w, psu, strata, fpc_fraction,
+                              nest=design.nest)
+        return jnp.asarray(V)
+
+    @staticmethod
+    def _survey_fpc_fraction(design, psu, strata):
+        import numpy as np
+        if design.fpc is None:
+            return None
+        fpc = np.asarray(design.fpc, dtype=float)
+        if design.fpc_is_fraction:
+            return fpc
+        n = len(fpc)
+        if strata is None:
+            strata = np.zeros(n, dtype=int)
+        if psu is None:
+            psu = np.arange(n)
+        out = np.zeros(n)
+        for h in np.unique(strata):
+            in_h = strata == h
+            n_h = len(np.unique(psu[in_h]))
+            N_h = float(fpc[in_h][0])
+            out[in_h] = n_h / N_h
+        return out
 
     # -----------------------------------------------------------------------
     # Design matrix construction
