@@ -68,8 +68,8 @@ docs = [
 # Development / testing
 test = [
     "pytest>=7.0",
-    "pytest-cov",
-    "hypothesis",
+    "pytest-cov>=4.0",
+    "hypothesis>=6.0",
     "polars>=1.0",
     "pyarrow>=10.0",
     "pysmatch>=2.1",
