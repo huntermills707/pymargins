@@ -26,13 +26,54 @@ jobs:
       - name: ruff format --check
         run: ruff format --check .
 
+  set-matrix:
+    name: Pick Python matrix
+    runs-on: ubuntu-latest
+    outputs:
+      pythons: ${{ steps.pick.outputs.pythons }}
+    steps:
+      - id: pick
+        # PRs test the endpoints + midpoint (fast feedback); pushes to main
+        # and manual runs test the full supported range.
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo 'pythons=["3.10","3.12","3.14"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'pythons=["3.10","3.11","3.12","3.13","3.14"]' >> "$GITHUB_OUTPUT"
+          fi
+
+  bare:
+    name: Bare install (core deps only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install with no optional backends
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Import without pulling in any backend
+        # Catches the #1 packaging bug for a library with optional extras:
+        # eagerly importing a backend the user hasn't installed.
+        run: |
+          python -c "
+          import sys, pymargins
+          for mod in ('statsmodels', 'lifelines', 'linearmodels', 'sklearn'):
+              assert mod not in sys.modules, f'pymargins eagerly imported {mod}'
+          print('bare import OK:', pymargins.__version__)
+          "
+
   test:
     name: Test (py${{ matrix.python-version }})
+    needs: set-matrix
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ${{ fromJSON(needs.set-matrix.outputs.pythons) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -44,7 +85,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[test,statsmodels,linearmodels,lifelines,sklearn]"
       - name: Run tests
+        # Coverage is reported, not yet enforced. Baseline as of 2026-05-28
+        # is ~80%. To turn on the gate later, add: --cov-fail-under=80
+        # (set it just under the then-current number and ratchet up).
         run: pytest --cov=pymargins --cov-report=term-missing --cov-report=xml
+      - name: Coverage summary
+        if: always() && matrix.python-version == '3.12'
+        run: |
+          pct=$(python -c "import xml.etree.ElementTree as ET; print(round(float(ET.parse('coverage.xml').getroot().get('line-rate'))*100, 1))")
+          echo "### Coverage: ${pct}%" >> "$GITHUB_STEP_SUMMARY"
       - name: Upload coverage
         if: matrix.python-version == '3.12'
         uses: actions/upload-artifact@v4
@@ -52,8 +101,30 @@ jobs:
           name: coverage-xml
           path: coverage.xml
 
+  min-versions:
+    name: Minimum dependency versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install lowest declared versions
+        # Resolve every dependency to the lowest version allowed by the >=
+        # floors in pyproject.toml, so the ranges we publish stay honest.
+        # uv's --resolution lowest-direct does this; plain pip cannot.
+        run: |
+          uv venv --python 3.10
+          uv pip install --resolution lowest-direct \
+            -e ".[test,statsmodels,linearmodels,lifelines,sklearn]"
+      - name: Show resolved versions
+        run: uv pip freeze
+      - name: Run tests
+        run: uv run pytest
+
   backend-isolation:
     name: Isolated (${{ matrix.backend }})
+    # Thorough per-backend cross-contamination check; run on merge to main and
+    # manual runs, not on every PR push (the `bare` job covers PRs cheaply).
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
