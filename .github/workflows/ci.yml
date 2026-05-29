@@ -161,7 +161,7 @@ jobs:
           - backend: linearmodels
             pattern: tests/test_adapter_linearmodels_*.py
           - backend: sklearn
-            pattern: tests/test_adapter_sklearn_*.py
+            pattern: tests/test_adapter_sklearn*.py
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6

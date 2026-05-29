@@ -15,21 +15,32 @@ from pymargins._adapters.statsmodels_ordinal_gee import StatsmodelsOrdinalGEEAda
 
 @pytest.fixture
 def df_ordinal():
-    # Clean proportional-odds design. Strong fixed effects plus a modest
-    # cluster effect yield a well-separated, balanced 3-category outcome, so
-    # the GEE converges robustly and reproducibly across BLAS/numpy builds.
-    # (The previous weak-signal noisy outcome let the fit diverge to NaN
-    # params on some CI runners, producing NaN predictions.)
-    rng = np.random.default_rng(0)
-    n_groups, group_size = 40, 25
-    n = n_groups * group_size
-    x1 = rng.normal(size=n)
-    x2 = rng.normal(size=n)
-    group = np.repeat(np.arange(n_groups), group_size)
-    u_group = rng.normal(scale=0.3, size=n_groups)[group]
-    latent = 1.2 * x1 - 0.9 * x2 + u_group + rng.logistic(size=n)
-    y = (latent > -1.2).astype(int) + (latent > 1.2).astype(int)
-    return pd.DataFrame({"x1": x1, "x2": x2, "group": group, "y": y})
+    # Use statsmodels' bundled ordinal-GEE reference dataset instead of a
+    # synthetic random design. A synthetic fit here proved numerically fragile:
+    # with branch coverage enabled (--cov-branch, the CI default) and JAX's x64
+    # LAPACK imported first (see tests/conftest.py), the borderline GEE diverged
+    # to NaN params on some runs, producing NaN predictions. This reference data
+    # converges robustly across every BLAS/coverage/JAX combination (it is the
+    # same data behind test_*_well_converged). Two of its covariates are kept
+    # as x1/x2 for the proportional-odds model below.
+    import os
+
+    csv_path = os.path.join(
+        os.path.dirname(sm.__file__),
+        "genmod",
+        "tests",
+        "results",
+        "gee_ordinal_1.csv",
+    )
+    Z = np.genfromtxt(csv_path, delimiter=",")
+    return pd.DataFrame(
+        {
+            "x1": Z[:, 2],
+            "x2": Z[:, 3],
+            "group": Z[:, 0].astype(int),
+            "y": Z[:, 1].astype(int),
+        }
+    )
 
 
 @pytest.fixture
