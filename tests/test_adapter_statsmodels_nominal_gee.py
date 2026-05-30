@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 import statsmodels.api as sm
 
+from pymargins._adapter import auto_detect_adapter
 from pymargins._adapters.statsmodels_nominal_gee import StatsmodelsNominalGEEAdapter
 
 # ---------------------------------------------------------------------------
@@ -261,3 +262,26 @@ def test_attach_validates_vcov(nominal_fit_formula):
 
     with pytest.raises(ValueError):
         adapter.attach(FakeSession2())
+
+
+# ---------------------------------------------------------------------------
+# Covariance edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_covariance_unsupported_string_raises(nominal_fit_formula):
+    adapter = auto_detect_adapter(nominal_fit_formula)
+    with pytest.raises(ValueError, match="Unsupported vcov string"):
+        adapter.covariance(vcov_spec="hac")
+
+
+def test_covariance_unsupported_dict_raises(nominal_fit_formula):
+    adapter = auto_detect_adapter(nominal_fit_formula)
+    with pytest.raises(ValueError, match="Unsupported vcov dict type"):
+        adapter.covariance(vcov_spec={"type": "hac"})
+
+
+def test_covariance_unsupported_type_raises(nominal_fit_formula):
+    adapter = auto_detect_adapter(nominal_fit_formula)
+    with pytest.raises(ValueError, match="Unsupported vcov_spec"):
+        adapter.covariance(vcov_spec=123)

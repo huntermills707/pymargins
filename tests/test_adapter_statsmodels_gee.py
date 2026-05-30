@@ -369,3 +369,26 @@ def test_attach_accepts_supported_vcov(fit_gee_logit_formula):
     cov = np.eye(len(fit_gee_logit_formula.params))
     m3 = Margins(fit_gee_logit_formula, adapter=adapter, vcov=cov)
     assert m3.vcov_spec is cov
+
+
+# ---------------------------------------------------------------------------
+# Covariance edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_covariance_unsupported_string_raises(fit_gee_logit_formula):
+    adapter = auto_detect_adapter(fit_gee_logit_formula)
+    with pytest.raises(ValueError, match="Unsupported vcov string"):
+        adapter.covariance(vcov_spec="hac")
+
+
+def test_covariance_unsupported_dict_raises(fit_gee_logit_formula):
+    adapter = auto_detect_adapter(fit_gee_logit_formula)
+    with pytest.raises(ValueError, match="Unsupported vcov dict type"):
+        adapter.covariance(vcov_spec={"type": "hac"})
+
+
+def test_covariance_unsupported_type_raises(fit_gee_logit_formula):
+    adapter = auto_detect_adapter(fit_gee_logit_formula)
+    with pytest.raises(ValueError, match="Unsupported vcov_spec"):
+        adapter.covariance(vcov_spec=123)
