@@ -297,7 +297,6 @@ class Margins:
                 ("bootstrap_config", bootstrap_config),
                 ("progress_bar", progress_bar),
                 ("matching", matching),
-                ("survey_design", survey_design),
                 ("formula", formula),
                 ("data", data),
             ]:
@@ -305,6 +304,14 @@ class Margins:
                     raise ValueError(
                         f"strict=True: argument {name!r} must be explicitly given"
                     )
+            # survey_design is genuinely optional, so it is not required above.
+            # But an explicit gradient_backend='auto' defeats the purpose of
+            # strict mode (which forbids silent backend inference).
+            if gradient_backend == "auto":
+                raise ValueError(
+                    "strict=True: gradient_backend='auto' is not allowed; "
+                    "choose an explicit backend (e.g. 'autodiff' or 'numerical')"
+                )
             if gradient_backend == "auto":
                 raise ValueError(
                     "strict=True: gradient_backend='auto' is not allowed. "
