@@ -61,7 +61,21 @@ def linearization_cov(
     fpc_fraction: np.ndarray | None,
     nest: bool = True,
 ) -> np.ndarray:
-    """Full design-based sandwich V = A M Aᵀ."""
+    """Full design-based sandwich V = A M Aᵀ.
+
+    Two calling conventions both yield a correct sandwich:
+
+    * Unweighted fit (the usual case): ``bread`` is the *unweighted*
+      ``cov_params()`` and ``score_obs`` the unweighted scores, with the
+      design weights passed in ``weights``. They are normalised to mean 1
+      below so the meat sits on the same scale as the unweighted bread —
+      an approximation that is exact when the per-row information does not
+      correlate with the weights.
+    * Weighted fit: the adapter passes the *weighted* ``cov_params()`` as
+      bread, the already-weighted ``score_obs`` as scores, and unit
+      ``weights`` (so the normalisation below is a no-op). The weighting is
+      then exact rather than approximate.
+    """
     w = np.asarray(weights, dtype=float)
     # Normalise weights to mean 1 so the meat is on the same scale as the
     # unweighted bread (which comes from an unweighted fit). Without this,
@@ -74,3 +88,22 @@ def linearization_cov(
     M = linearization_meat(u, psu, strata, fpc_fraction, nest)
     A = np.asarray(bread)
     return A @ M @ A.T
+
+
+def weights_proportional(
+    a: np.ndarray, b: np.ndarray, rtol: float = 1e-3
+) -> bool:
+    """True if weight vectors ``a`` and ``b`` are equal up to a positive scale.
+
+    The design-based variance is invariant to the overall scale of the
+    weights, so proportional vectors describe the same weighting. Adapters
+    use this to tell a harmless scale difference apart from a genuine
+    *relative* disagreement between a model's fit weights and the survey
+    design weights (which would make the variance and the point estimate
+    inconsistent).
+    """
+    a = np.asarray(a, dtype=float)
+    b = np.asarray(b, dtype=float)
+    if a.shape != b.shape or a.mean() <= 0 or b.mean() <= 0:
+        return False
+    return np.allclose(a / a.mean(), b / b.mean(), rtol=rtol)

@@ -62,7 +62,6 @@ from ._result import (
 )
 from .margins import Margins
 from .matching import PysmatchClient
-from .survey import SurveyDesign
 from .scenarios import (
     all_pairwise,
     at_levels,
@@ -73,6 +72,7 @@ from .scenarios import (
     pairwise,
     reference,
 )
+from .survey import SurveyDesign
 
 __all__ = [
     # Main entry point

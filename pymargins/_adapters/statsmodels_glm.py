@@ -14,6 +14,7 @@ factor, and the rest of the gradient machinery is the same.
 
 from __future__ import annotations
 
+import warnings
 from typing import Any
 
 import jax.numpy as jnp
@@ -170,12 +171,16 @@ class StatsmodelsGLMAdapter(GLMAdapter):
     # -----------------------------------------------------------------------
 
     def _survey_covariance(self, design) -> jnp.ndarray:
-        from .._inference._linearization import linearization_cov
         import numpy as np
+
+        from .._inference._linearization import (
+            linearization_cov,
+            weights_proportional,
+        )
 
         # Bread: the model's non-robust cov_params. Reuse, do not recompute.
         bread = np.asarray(self.results.cov_params())
-        scores = self.score_obs()  # (n, p), unweighted
+        scores = self.score_obs()  # (n, p)
 
         w = np.asarray(design.weights)
         psu = None if design.psu is None else np.asarray(design.psu)
@@ -186,6 +191,34 @@ class StatsmodelsGLMAdapter(GLMAdapter):
                 f"survey weights length {len(w)} != n_obs {scores.shape[0]}; "
                 "fit the model on the same rows the design describes."
             )
+
+        # Detect fitting weights. If the model was fit with freq_weights or
+        # var_weights, statsmodels' cov_params() and score_obs() already
+        # incorporate them (weighted bread and weighted scores). Passing
+        # survey weights again would double-count, so we use unit weights
+        # and let the design variables (strata, PSU, FPC) do the work.
+        fit_model = getattr(self.results, "model", None)
+        for attr in ("freq_weights", "var_weights"):
+            fw = getattr(fit_model, attr, None)
+            if fw is not None and not np.allclose(np.asarray(fw), 1.0):
+                # The fit weights are baked into both the bread and the scores;
+                # using unit weights here avoids double-counting. If they are not
+                # proportional to the design weights, the variance (fit weights)
+                # and the design-weighted point estimate describe different
+                # weightings, so warn rather than silently disagree.
+                if not weights_proportional(np.asarray(fw, dtype=float), w):
+                    warnings.warn(
+                        f"The fitted model's {attr} are not proportional to "
+                        "survey_design.weights, so the design-based variance "
+                        "(from the fit weights) and the design-weighted point "
+                        "estimate may be inconsistent. Fit the model unweighted "
+                        "and let survey_design supply the weights, or pass "
+                        "matching weights to both.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                w = np.ones(scores.shape[0])
+                break
 
         # Derive per-row FPC fraction f_h if requested.
         fpc_fraction = self._survey_fpc_fraction(design, psu, strata)

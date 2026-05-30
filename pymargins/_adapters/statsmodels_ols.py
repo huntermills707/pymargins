@@ -7,6 +7,7 @@ Inherits predict() from LinearPredictionAdapter (simple Xβ).
 
 from __future__ import annotations
 
+import warnings
 from typing import Any
 
 import jax.numpy as jnp
@@ -78,21 +79,26 @@ class StatsmodelsOLSAdapter(LinearPredictionAdapter):
         return jnp.asarray(self.results.params)
 
     def score_obs(self) -> np.ndarray:
-        """Per-observation score ∂ℓ_i/∂β = x_i (y_i − x_iᵀβ̂) / σ̂², shape (n, p).
+        """Per-observation score ∂ℓ_i/∂β = w_i x_i (y_i − x_iᵀβ̂) / σ̂², shape (n, p).
 
-        OLS has no ``model.score_obs``; the Gaussian score is formed from the
-        residuals directly. The ``results.scale`` factor cancels against the
-        same factor in ``cov_params`` when forming the influence function, so
-        only plain OLS (unweighted) is supported here.
+        OLS/WLS has no ``model.score_obs``; the Gaussian score is formed from
+        the residuals directly. The ``results.scale`` factor cancels against
+        the same factor in ``cov_params`` when forming the influence function.
+        For WLS the observation weights are included in the score.
         """
         model_cls = type(self.results.model).__name__
-        if model_cls != "OLS":
+        if model_cls not in ("OLS", "WLS"):
             raise NotImplementedError(
-                f"score_obs() is only implemented for plain OLS, not {model_cls}."
+                f"score_obs() is only implemented for OLS/WLS, not {model_cls}."
             )
         exog = np.asarray(self.results.model.exog)
         resid = np.asarray(self.results.resid)
-        return exog * (resid / self.results.scale)[:, None]
+        score = exog * (resid / self.results.scale)[:, None]
+        if model_cls == "WLS":
+            w = getattr(self.results.model, "weights", None)
+            if w is not None:
+                score = score * np.asarray(w)[:, None]
+        return score
 
     def covariance(self, vcov_spec: Any | None = None) -> jnp.ndarray:
         """Return Σ̂, dispatching to the requested flavor.
@@ -133,11 +139,15 @@ class StatsmodelsOLSAdapter(LinearPredictionAdapter):
         raise ValueError(f"Unsupported vcov_spec: {vcov_spec!r}")
 
     def _survey_covariance(self, design) -> jnp.ndarray:
-        from .._inference._linearization import linearization_cov
         import numpy as np
 
+        from .._inference._linearization import (
+            linearization_cov,
+            weights_proportional,
+        )
+
         bread = np.asarray(self.results.cov_params())
-        scores = self.score_obs()  # (n, p), unweighted
+        scores = self.score_obs()  # (n, p)
 
         w = np.asarray(design.weights)
         psu = None if design.psu is None else np.asarray(design.psu)
@@ -148,6 +158,28 @@ class StatsmodelsOLSAdapter(LinearPredictionAdapter):
                 f"survey weights length {len(w)} != n_obs {scores.shape[0]}; "
                 "fit the model on the same rows the design describes."
             )
+
+        # Detect fitting weights (WLS). cov_params() and score_obs() already
+        # incorporate them, so we use unit weights to avoid double-counting.
+        fit_model = getattr(self.results, "model", None)
+        if type(fit_model).__name__ == "WLS":
+            fw = getattr(fit_model, "weights", None)
+            if fw is not None and not np.allclose(np.asarray(fw), 1.0):
+                # If the WLS fit weights are not proportional to the design
+                # weights, the variance (fit weights) and the design-weighted
+                # point estimate describe different weightings, so warn.
+                if not weights_proportional(np.asarray(fw, dtype=float), w):
+                    warnings.warn(
+                        "The WLS fit weights are not proportional to "
+                        "survey_design.weights, so the design-based variance "
+                        "(from the fit weights) and the design-weighted point "
+                        "estimate may be inconsistent. Fit the model unweighted "
+                        "and let survey_design supply the weights, or pass "
+                        "matching weights to both.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                w = np.ones(scores.shape[0])
 
         fpc_fraction = self._survey_fpc_fraction(design, psu, strata)
 

@@ -491,18 +491,6 @@ class Margins:
             # Default vcov to the survey linearization unless user overrode it.
             if self.vcov_spec is None:
                 self.vcov_spec = {"type": "survey", "design": self.survey_design}
-            # Warn on double-counted weights (model already weighted at fit time).
-            model = getattr(self.adapter, "results", None)
-            fit_model = getattr(model, "model", None)
-            for attr in ("var_weights", "freq_weights"):
-                wv = getattr(fit_model, attr, None)
-                if wv is not None and not np.allclose(np.asarray(wv), 1.0):
-                    warnings.warn(
-                        f"The fitted model carries non-trivial {attr}; combining it "
-                        "with survey_design weights may double-count. Fit the model "
-                        "unweighted and declare weights only via survey_design.",
-                        UserWarning, stacklevel=2,
-                    )
             # Design weights and aggregation weights are conceptually distinct.
             # Do NOT silently copy survey_design.weights into the aggregation slot;
             # the user must explicitly request a weighted point estimate.

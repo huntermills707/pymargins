@@ -6,9 +6,9 @@ jax.config.update("jax_enable_x64", True)
 
 import numpy as np
 import pandas as pd
+import pytest
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
-import pytest
 
 from pymargins import Margins
 

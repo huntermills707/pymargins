@@ -8,7 +8,6 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
-import pytest
 
 from pymargins import Margins, SurveyDesign
 from pymargins._inference._bootstrap import _generate_resample_indices
