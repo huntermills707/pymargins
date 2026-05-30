@@ -212,12 +212,14 @@ def test_adapter_drift_detected():
 
     # Mutate coefficients
     orig_params = fit.params.copy()
-    fit.params.iloc[0] += 1.0
+    new_params = fit.params.copy()
+    new_params.iloc[0] += 1.0
+    fit.params = new_params
     try:
         with pytest.raises(RuntimeError, match="has changed"):
             _ = m.predict()
     finally:
-        fit.params.iloc[0] = orig_params.iloc[0]
+        fit.params = orig_params
 
 
 def test_delta_session_no_cache_no_freeze():

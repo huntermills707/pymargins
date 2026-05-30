@@ -95,6 +95,8 @@ class InferenceConfig:
     cov_params: jnp.ndarray | None = None
     cluster: Any | None = None
     block_size: int | None = None
+    strata: Any | None = None
+    survey_design: Any | None = None
     matching: Any | None = None
     """MatchingClient for bootstrap rematching. Ignored by delta and K–R."""
 

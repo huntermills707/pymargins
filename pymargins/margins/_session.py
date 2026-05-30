@@ -268,6 +268,7 @@ class Margins:
         bootstrap_config: dict | None = _NOT_GIVEN,
         progress_bar: bool = _NOT_GIVEN,
         matching: Any | None = _NOT_GIVEN,
+        survey_design: Any | None = _NOT_GIVEN,
         formula: str | None = _NOT_GIVEN,
         data: pd.DataFrame | None = _NOT_GIVEN,
         strict: bool = False,
@@ -303,6 +304,14 @@ class Margins:
                     raise ValueError(
                         f"strict=True: argument {name!r} must be explicitly given"
                     )
+            # survey_design is genuinely optional, so it is not required above.
+            # But an explicit gradient_backend='auto' defeats the purpose of
+            # strict mode (which forbids silent backend inference).
+            if gradient_backend == "auto":
+                raise ValueError(
+                    "strict=True: gradient_backend='auto' is not allowed; "
+                    "choose an explicit backend (e.g. 'autodiff' or 'numerical')"
+                )
             if gradient_backend == "auto":
                 raise ValueError(
                     "strict=True: gradient_backend='auto' is not allowed. "
@@ -336,6 +345,7 @@ class Margins:
         bootstrap_config = None if bootstrap_config is _NOT_GIVEN else bootstrap_config
         progress_bar = False if progress_bar is _NOT_GIVEN else progress_bar
         matching = None if matching is _NOT_GIVEN else matching
+        survey_design = None if survey_design is _NOT_GIVEN else survey_design
         formula = None if formula is _NOT_GIVEN else formula
         data = None if data is _NOT_GIVEN else data
 
@@ -373,6 +383,7 @@ class Margins:
         self.bootstrap_config = bootstrap_config
         self.progress_bar = progress_bar
         self.matching = matching
+        self.survey_design = survey_design
         self.strict = strict
 
         # Adapter setup
@@ -387,13 +398,15 @@ class Margins:
             self.adapter = auto_detect_adapter(model, **detect_kwargs)
         self.adapter.attach(self)
 
-        # Validate weights
+        # Validate weights (eager — must happen before any JAX tracing)
         if self.weights is not None:
             w_arr = np.asarray(self.weights)
             if not np.all(np.isfinite(w_arr)):
                 raise ValueError("weights must be finite (no NaN or Inf).")
             if np.any(w_arr < 0):
                 raise ValueError("weights must be non-negative.")
+            if np.sum(w_arr) == 0:
+                raise ValueError("weights must not sum to zero.")
 
         # Validate matching object
         if self.matching is not None:
@@ -458,6 +471,59 @@ class Margins:
                     raise ValueError(
                         f"weights length ({len(w_arr)}) must equal matched_data "
                         f"length ({n_matched}) when matching is provided."
+                    )
+
+        # Validate survey design
+        if self.survey_design is not None:
+            from ..survey import SurveyDesign
+            if not isinstance(self.survey_design, SurveyDesign):
+                raise TypeError(
+                    "survey_design must be a pymargins.SurveyDesign instance."
+                )
+            try:
+                n_data = len(self.adapter.training_data)
+            except (NotImplementedError, AttributeError, TypeError):
+                n_data = None
+            if n_data is not None and len(self.survey_design.weights) != n_data:
+                raise ValueError(
+                    f"survey_design length ({len(self.survey_design.weights)}) "
+                    f"must match training data length ({n_data})."
+                )
+            # Mutual exclusion with cluster/block (survey carries its own clustering)
+            if self.cluster is not None or self.block_size is not None:
+                raise ValueError(
+                    "survey_design is mutually exclusive with cluster= and "
+                    "block_size=; the design's PSU/strata define the resampling."
+                )
+            # Default vcov to the survey linearization unless user overrode it.
+            if self.vcov_spec is None:
+                self.vcov_spec = {"type": "survey", "design": self.survey_design}
+            # Design weights and aggregation weights are conceptually distinct.
+            # Do NOT silently copy survey_design.weights into the aggregation slot;
+            # the user must explicitly request a weighted point estimate.
+            if self.weights is not None:
+                if len(self.weights) != len(self.survey_design.weights):
+                    raise ValueError(
+                        f"weights length ({len(self.weights)}) != "
+                        f"survey_design.weights length "
+                        f"({len(self.survey_design.weights)})."
+                    )
+            else:
+                warnings.warn(
+                    "survey_design is set but weights= is not. The point estimate "
+                    "will be unweighted. Pass weights=survey_design.weights "
+                    "to obtain a population-weighted average marginal effect "
+                    "(Stata svy: margins behavior).",
+                    UserWarning, stacklevel=2,
+                )
+            # Fail fast if the adapter can't do linearization, pointing to bootstrap.
+            if not hasattr(self.adapter, "score_obs"):
+                if self.method != "bootstrap":
+                    raise NotImplementedError(
+                        f"{type(self.adapter).__name__} does not expose score_obs(), "
+                        "so design-based (delta/simulation) survey SEs are "
+                        "unavailable. Use method='bootstrap' with survey_design for "
+                        "design-correct resampling instead."
                     )
 
         # Validate cluster IDs against training data length

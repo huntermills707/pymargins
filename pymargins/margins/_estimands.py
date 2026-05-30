@@ -20,6 +20,23 @@ from .._scenarios import (
 )
 
 
+def _bootstrap_weights_for_adapter(session, adapter: ModelAdapter | None = None):
+    """Return session weights, subsetted by bootstrap resample index if needed.
+
+    During bootstrap, the adapter may carry the resample index on
+    ``_pymargins_bootstrap_idx``.  When present, subset aggregation weights
+    so they match the resampled evaluation data.
+    """
+    weights = session.weights
+    adapter = adapter if adapter is not None else session.adapter
+    if weights is not None and hasattr(adapter, "_pymargins_bootstrap_idx"):
+        idx = adapter._pymargins_bootstrap_idx
+        if idx is not None:
+            import numpy as np
+            weights = np.asarray(weights)[idx]
+    return weights
+
+
 def _get_base_data(session, adapter: ModelAdapter | None = None):
     """Get base data from an adapter, applying matching if active.
 
@@ -67,7 +84,8 @@ def _build_prediction_estimand(
     estimand_adapter = _scenario_adapter(adapter, scenario)
     base_data = _get_base_data(session, adapter)
     var_meta = adapter.variable_metadata()
-    resolver = make_aggregation_resolver(session.at, session.weights)
+    weights = _bootstrap_weights_for_adapter(session, adapter)
+    resolver = make_aggregation_resolver(session.at, weights)
     from ._atoms import _enumerate_groups, _finalize_atoms, _format_atom_label
 
     groups, over_keys = _enumerate_groups(session, scenario, base_data, var_meta)
@@ -112,8 +130,8 @@ def _build_prediction_estimand(
                 estimand_adapter,
                 X_i,
                 aggregate=agg_kind,
-                weights=jnp.asarray(session.weights)
-                if session.weights is not None
+                weights=jnp.asarray(weights)
+                if weights is not None
                 else None,
                 phi_inv=session.phi_inv,
                 transform=transform,
@@ -186,7 +204,8 @@ def _build_slope_estimand(
     estimand_adapter = _scenario_adapter(adapter, scenario)
     base_data = _get_base_data(session, adapter)
     var_meta = adapter.variable_metadata()
-    resolver = make_aggregation_resolver(session.at, session.weights)
+    weights = _bootstrap_weights_for_adapter(session, adapter)
+    resolver = make_aggregation_resolver(session.at, weights)
     from ._atoms import _enumerate_groups, _finalize_atoms, _format_atom_label
 
     groups, over_keys = _enumerate_groups(session, scenario, base_data, var_meta)
@@ -233,8 +252,8 @@ def _build_slope_estimand(
                 df,
                 var_name,
                 aggregate=agg_kind,
-                weights=jnp.asarray(session.weights)
-                if session.weights is not None
+                weights=jnp.asarray(weights)
+                if weights is not None
                 else None,
                 phi_inv=session.phi_inv,
                 transform=transform,
@@ -263,13 +282,14 @@ def _build_contrast_estimand(
     scenarios_X = []
     scenario_predict_fns = []
     any_per_scenario_predict = False
+    weights = _bootstrap_weights_for_adapter(session, adapter)
     for scenario in scenarios:
         df, _ = expand_scenario(
             scenario,
             base_data=base_data,
             aggregation_resolver=make_aggregation_resolver(
                 session.at,
-                session.weights,
+                weights,
             ),
             variable_metadata=adapter.variable_metadata(),
         )
@@ -324,13 +344,14 @@ def _build_evaluate_estimand(
     scenarios_X = []
     scenario_predict_fns = []
     any_per_scenario_predict = False
+    weights = _bootstrap_weights_for_adapter(session, adapter)
     for scenario in scenarios:
         df, _ = expand_scenario(
             scenario,
             base_data=base_data,
             aggregation_resolver=make_aggregation_resolver(
                 session.at,
-                session.weights,
+                weights,
             ),
             variable_metadata=adapter.variable_metadata(),
         )

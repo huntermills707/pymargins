@@ -41,6 +41,7 @@ linearmodels, lifelines, and scikit-learn model classes.
     tutorials/inference_methods
     tutorials/scales_and_kappa
     tutorials/sklearn_models
+    tutorials/survey_design
 
 .. toctree::
     :maxdepth: 1
@@ -76,6 +77,7 @@ linearmodels, lifelines, and scikit-learn model classes.
     demos/rossi_recidivism
     demos/wage_panel
     demos/anes96_party
+    demos/california_api_survey
 
 .. toctree::
     :maxdepth: 2
