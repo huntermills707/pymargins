@@ -25,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   value). Weight validation moved to session construction so it runs eagerly
   rather than inside the differentiated kernel.
 
+### Development
+
+- Expanded test coverage from 80% to 89%.
+- Added 200+ tests across adapters, result objects, and bootstrap inference
+
 ## 0.1.2 - 2026-05-29
 
 ### Internal

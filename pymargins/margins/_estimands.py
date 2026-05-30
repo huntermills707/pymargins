@@ -33,6 +33,7 @@ def _bootstrap_weights_for_adapter(session, adapter: ModelAdapter | None = None)
         idx = adapter._pymargins_bootstrap_idx
         if idx is not None:
             import numpy as np
+
             weights = np.asarray(weights)[idx]
     return weights
 
@@ -130,9 +131,7 @@ def _build_prediction_estimand(
                 estimand_adapter,
                 X_i,
                 aggregate=agg_kind,
-                weights=jnp.asarray(weights)
-                if weights is not None
-                else None,
+                weights=jnp.asarray(weights) if weights is not None else None,
                 phi_inv=session.phi_inv,
                 transform=transform,
             )
@@ -252,9 +251,7 @@ def _build_slope_estimand(
                 df,
                 var_name,
                 aggregate=agg_kind,
-                weights=jnp.asarray(weights)
-                if weights is not None
-                else None,
+                weights=jnp.asarray(weights) if weights is not None else None,
                 phi_inv=session.phi_inv,
                 transform=transform,
                 fd_step=session.fd_step,

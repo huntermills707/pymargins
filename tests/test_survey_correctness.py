@@ -30,8 +30,10 @@ def test_survey_ame_matches_R():
     expected_se = ref.loc[0, "std_error"]
 
     assert np.isclose(float(r.estimate), expected_est, rtol=1e-4), (
-        float(r.estimate), expected_est
+        float(r.estimate),
+        expected_est,
     )
     assert np.isclose(float(r.std_error), expected_se, rtol=1e-3), (
-        float(r.std_error), expected_se
+        float(r.std_error),
+        expected_se,
     )

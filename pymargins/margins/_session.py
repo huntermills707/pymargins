@@ -476,6 +476,7 @@ class Margins:
         # Validate survey design
         if self.survey_design is not None:
             from ..survey import SurveyDesign
+
             if not isinstance(self.survey_design, SurveyDesign):
                 raise TypeError(
                     "survey_design must be a pymargins.SurveyDesign instance."
@@ -514,7 +515,8 @@ class Margins:
                     "will be unweighted. Pass weights=survey_design.weights "
                     "to obtain a population-weighted average marginal effect "
                     "(Stata svy: margins behavior).",
-                    UserWarning, stacklevel=2,
+                    UserWarning,
+                    stacklevel=2,
                 )
             # Fail fast if the adapter can't do linearization, pointing to bootstrap.
             if not hasattr(self.adapter, "score_obs"):

@@ -17,15 +17,20 @@ def test_stratified_resample_no_cross_contamination():
     """Resampled PSUs must stay within their stratum."""
     rng = np.random.default_rng(0)
     n = 300
-    df = pd.DataFrame({
-        "x": rng.normal(size=n),
-        "psu": rng.integers(0, 30, n),
-        "strat": rng.integers(0, 3, n),
-    })
+    df = pd.DataFrame(
+        {
+            "x": rng.normal(size=n),
+            "psu": rng.integers(0, 30, n),
+            "strat": rng.integers(0, 3, n),
+        }
+    )
 
     idx_list = _generate_resample_indices(
-        rng_seed=1, n_boot=20, n_obs=n,
-        cluster_ids=df.psu.values, strata=df.strat.values
+        rng_seed=1,
+        n_boot=20,
+        n_obs=n,
+        cluster_ids=df.psu.values,
+        strata=df.strat.values,
     )
 
     for idx in idx_list:
@@ -40,11 +45,13 @@ def test_bootstrap_bank_key_changes_with_design():
     """Changing the survey design must invalidate the bootstrap bank cache."""
     rng = np.random.default_rng(0)
     n = 100
-    df = pd.DataFrame({
-        "x": rng.normal(size=n),
-        "psu": rng.integers(0, 10, n),
-        "strat": rng.integers(0, 2, n),
-    })
+    df = pd.DataFrame(
+        {
+            "x": rng.normal(size=n),
+            "psu": rng.integers(0, 10, n),
+            "strat": rng.integers(0, 2, n),
+        }
+    )
     df["y"] = (rng.random(n) < 0.5).astype(int)
     fit = smf.glm("y ~ x", df, family=sm.families.Binomial()).fit()
 
@@ -69,19 +76,25 @@ def test_bootstrap_se_close_to_linearization():
     """Bootstrap SE should be in the same ballpark as linearization SE."""
     rng = np.random.default_rng(0)
     n = 300
-    df = pd.DataFrame({
-        "x": rng.normal(size=n),
-        "psu": rng.integers(0, 30, n),
-        "strat": rng.integers(0, 3, n),
-    })
+    df = pd.DataFrame(
+        {
+            "x": rng.normal(size=n),
+            "psu": rng.integers(0, 30, n),
+            "strat": rng.integers(0, 3, n),
+        }
+    )
     df["y"] = (rng.random(n) < 1 / (1 + np.exp(-df.x))).astype(int)
     df["w"] = rng.uniform(0.5, 2.0, n)
     fit = smf.glm("y ~ x", df, family=sm.families.Binomial()).fit()
     d = SurveyDesign(weights=df.w.values, psu=df.psu.values, strata=df.strat.values)
 
     m_boot = Margins(
-        fit, survey_design=d, weights=df.w.values,
-        method="bootstrap", n_boot=400, rng_seed=1,
+        fit,
+        survey_design=d,
+        weights=df.w.values,
+        method="bootstrap",
+        n_boot=400,
+        rng_seed=1,
     )
     r_boot = m_boot.dydx("x")
 
@@ -89,26 +102,34 @@ def test_bootstrap_se_close_to_linearization():
     r_lin = m_lin.dydx("x")
 
     rel_diff = abs(r_boot.std_error - r_lin.std_error) / r_lin.std_error
-    assert rel_diff < 0.3, f"Bootstrap SE {r_boot.std_error} too far from linearization {r_lin.std_error}"
+    assert rel_diff < 0.3, (
+        f"Bootstrap SE {r_boot.std_error} too far from linearization {r_lin.std_error}"
+    )
 
 
 def test_bootstrap_with_explicit_weights():
     """Bootstrap must work when both survey_design and weights are given."""
     rng = np.random.default_rng(0)
     n = 200
-    df = pd.DataFrame({
-        "x": rng.normal(size=n),
-        "psu": rng.integers(0, 20, n),
-        "strat": rng.integers(0, 2, n),
-    })
+    df = pd.DataFrame(
+        {
+            "x": rng.normal(size=n),
+            "psu": rng.integers(0, 20, n),
+            "strat": rng.integers(0, 2, n),
+        }
+    )
     df["y"] = (rng.random(n) < 0.5).astype(int)
     df["w"] = rng.uniform(0.5, 2.0, n)
     fit = smf.glm("y ~ x", df, family=sm.families.Binomial()).fit()
     d = SurveyDesign(weights=df.w.values, psu=df.psu.values, strata=df.strat.values)
 
     m = Margins(
-        fit, survey_design=d, weights=df.w.values,
-        method="bootstrap", n_boot=100, rng_seed=1,
+        fit,
+        survey_design=d,
+        weights=df.w.values,
+        method="bootstrap",
+        n_boot=100,
+        rng_seed=1,
     )
     r = m.dydx("x")
     assert np.isfinite(r.std_error)

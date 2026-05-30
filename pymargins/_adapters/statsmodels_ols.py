@@ -183,13 +183,15 @@ class StatsmodelsOLSAdapter(LinearPredictionAdapter):
 
         fpc_fraction = self._survey_fpc_fraction(design, psu, strata)
 
-        V = linearization_cov(bread, scores, w, psu, strata, fpc_fraction,
-                              nest=design.nest)
+        V = linearization_cov(
+            bread, scores, w, psu, strata, fpc_fraction, nest=design.nest
+        )
         return jnp.asarray(V)
 
     @staticmethod
     def _survey_fpc_fraction(design, psu, strata):
         import numpy as np
+
         if design.fpc is None:
             return None
         fpc = np.asarray(design.fpc, dtype=float)

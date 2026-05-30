@@ -90,9 +90,7 @@ def linearization_cov(
     return A @ M @ A.T
 
 
-def weights_proportional(
-    a: np.ndarray, b: np.ndarray, rtol: float = 1e-3
-) -> bool:
+def weights_proportional(a: np.ndarray, b: np.ndarray, rtol: float = 1e-3) -> bool:
     """True if weight vectors ``a`` and ``b`` are equal up to a positive scale.
 
     The design-based variance is invariant to the overall scale of the

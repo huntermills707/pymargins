@@ -19,11 +19,13 @@ def test_survey_se_differs_from_default():
     """Survey design-based SEs must differ from the default (non-robust) SE."""
     rng = np.random.default_rng(0)
     n = 300
-    df = pd.DataFrame({
-        "x": rng.normal(size=n),
-        "psu": rng.integers(0, 30, n),
-        "strat": rng.integers(0, 3, n),
-    })
+    df = pd.DataFrame(
+        {
+            "x": rng.normal(size=n),
+            "psu": rng.integers(0, 30, n),
+            "strat": rng.integers(0, 3, n),
+        }
+    )
     df["y"] = (rng.random(n) < 1 / (1 + np.exp(-df.x))).astype(int)
     df["w"] = rng.uniform(0.5, 2.0, n)
     fit = smf.glm("y ~ x", df, family=sm.families.Binomial()).fit()
@@ -73,11 +75,13 @@ def test_survey_ols_adapter():
     """OLS adapter must also produce design-based SEs."""
     rng = np.random.default_rng(0)
     n = 200
-    df = pd.DataFrame({
-        "x": rng.normal(size=n),
-        "psu": rng.integers(0, 20, n),
-        "strat": rng.integers(0, 3, n),
-    })
+    df = pd.DataFrame(
+        {
+            "x": rng.normal(size=n),
+            "psu": rng.integers(0, 20, n),
+            "strat": rng.integers(0, 3, n),
+        }
+    )
     df["y"] = 1.0 + 0.5 * df["x"] + rng.normal(size=n)
     df["w"] = rng.uniform(0.5, 2.0, n)
     fit = smf.ols("y ~ x", df).fit()
@@ -114,17 +118,20 @@ def test_weighted_fit_avoids_double_counting():
     unit weights to the linearization kernel."""
     rng = np.random.default_rng(0)
     n = 300
-    df = pd.DataFrame({
-        "x": rng.normal(size=n),
-        "psu": rng.integers(0, 30, n),
-        "strat": rng.integers(0, 3, n),
-    })
+    df = pd.DataFrame(
+        {
+            "x": rng.normal(size=n),
+            "psu": rng.integers(0, 30, n),
+            "strat": rng.integers(0, 3, n),
+        }
+    )
     df["y"] = (rng.random(n) < 1 / (1 + np.exp(-df.x))).astype(int)
     df["w"] = rng.uniform(0.5, 2.0, n)
 
     # Fit WITH weights
-    fit_w = smf.glm("y ~ x", df, family=sm.families.Binomial(),
-                    freq_weights=df.w.values).fit()
+    fit_w = smf.glm(
+        "y ~ x", df, family=sm.families.Binomial(), freq_weights=df.w.values
+    ).fit()
     d = SurveyDesign(weights=df.w.values, psu=df.psu.values, strata=df.strat.values)
 
     # Fit weights == design weights → proportional → must NOT warn.
@@ -152,17 +159,18 @@ def test_weighted_fit_mismatched_weights_warns():
     weights while the point estimate uses the design weights."""
     rng = np.random.default_rng(1)
     n = 300
-    df = pd.DataFrame({
-        "x": rng.normal(size=n),
-        "psu": rng.integers(0, 30, n),
-        "strat": rng.integers(0, 3, n),
-    })
+    df = pd.DataFrame(
+        {
+            "x": rng.normal(size=n),
+            "psu": rng.integers(0, 30, n),
+            "strat": rng.integers(0, 3, n),
+        }
+    )
     df["y"] = (rng.random(n) < 1 / (1 + np.exp(-df.x))).astype(int)
     w_fit = rng.uniform(0.5, 2.0, n)
     w_design = rng.uniform(0.5, 2.0, n)  # independent draw → not proportional
 
-    fit = smf.glm("y ~ x", df, family=sm.families.Binomial(),
-                  freq_weights=w_fit).fit()
+    fit = smf.glm("y ~ x", df, family=sm.families.Binomial(), freq_weights=w_fit).fit()
     d = SurveyDesign(weights=w_design, psu=df.psu.values, strata=df.strat.values)
     with pytest.warns(UserWarning, match="not proportional"):
         Margins(fit, survey_design=d, weights=w_design).dydx("x")
@@ -172,22 +180,29 @@ def test_fpc_fraction():
     """FPC supplied as a fraction must reduce variance relative to no FPC."""
     rng = np.random.default_rng(0)
     n = 300
-    df = pd.DataFrame({
-        "x": rng.normal(size=n),
-        "psu": rng.integers(0, 30, n),
-        "strat": rng.integers(0, 3, n),
-    })
+    df = pd.DataFrame(
+        {
+            "x": rng.normal(size=n),
+            "psu": rng.integers(0, 30, n),
+            "strat": rng.integers(0, 3, n),
+        }
+    )
     df["y"] = (rng.random(n) < 1 / (1 + np.exp(-df.x))).astype(int)
     fit = smf.glm("y ~ x", df, family=sm.families.Binomial()).fit()
 
-    d_no_fpc = SurveyDesign(weights=np.ones(n), psu=df.psu.values, strata=df.strat.values)
+    d_no_fpc = SurveyDesign(
+        weights=np.ones(n), psu=df.psu.values, strata=df.strat.values
+    )
     se_no_fpc = Margins(fit, survey_design=d_no_fpc).dydx("x").std_error
 
     # Small FPC fraction (0.1) → modest variance reduction
     fpc = np.full(n, 0.1)
     d_fpc = SurveyDesign(
-        weights=np.ones(n), psu=df.psu.values, strata=df.strat.values,
-        fpc=fpc, fpc_is_fraction=True
+        weights=np.ones(n),
+        psu=df.psu.values,
+        strata=df.strat.values,
+        fpc=fpc,
+        fpc_is_fraction=True,
     )
     se_fpc = Margins(fit, survey_design=d_fpc).dydx("x").std_error
 
