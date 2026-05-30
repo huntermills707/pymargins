@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `SurveyDesign` and `Margins(survey_design=...)` for complex-survey
+  inference: design-weighted estimates with Taylor-linearization standard
+  errors (stratified, clustered, with optional finite-population correction)
+  on the delta and simulation paths, and stratified PSU resampling on the
+  bootstrap path. Numerically matches R `survey::svyglm` + `marginaleffects`.
+  Survey SEs are available for the statsmodels GLM and OLS/WLS adapters;
+  adapters without `score_obs()` raise a clear error pointing to the
+  bootstrap path.
+
+### Fixed
+
+- `dydx` now applies session `weights=` when aggregating slopes (previously
+  the weighted average marginal effect silently returned the unweighted
+  value). Weight validation moved to session construction so it runs eagerly
+  rather than inside the differentiated kernel.
+
 ## 0.1.2 - 2026-05-29
 
 ### Internal
