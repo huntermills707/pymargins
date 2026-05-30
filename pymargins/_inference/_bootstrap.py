@@ -69,8 +69,7 @@ def _generate_resample_indices(
         for h in strata_levels:
             in_h = strata == h
             psus_h = np.unique(cluster_ids[in_h])
-            rows_by_psu = {c: np.where((cluster_ids == c) & in_h)[0]
-                           for c in psus_h}
+            rows_by_psu = {c: np.where((cluster_ids == c) & in_h)[0] for c in psus_h}
             per_stratum.append((psus_h, rows_by_psu))
 
         all_idx = []

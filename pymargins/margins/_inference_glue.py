@@ -237,7 +237,9 @@ def _inference_config(session) -> InferenceConfig:
         cov_params=_frozen_cov(session),
         cluster=session.cluster,
         block_size=session.block_size,
-        strata=session.survey_design.strata if session.survey_design is not None else None,
+        strata=session.survey_design.strata
+        if session.survey_design is not None
+        else None,
         survey_design=session.survey_design,
         matching=session.matching,
         bootstrap_config=session.bootstrap_config,
