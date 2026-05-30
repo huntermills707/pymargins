@@ -9,14 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `SurveyDesign` and `Margins(survey_design=...)` for complex-survey
+  inference: design-weighted estimates with Taylor-linearization standard
+  errors (stratified, clustered, with optional finite-population correction)
+  on the delta and simulation paths, and stratified PSU resampling on the
+  bootstrap path. Numerically matches R `survey::svyglm` + `marginaleffects`.
+  Survey SEs are available for the statsmodels GLM and OLS/WLS adapters;
+  adapters without `score_obs()` raise a clear error pointing to the
+  bootstrap path.
 - `py.typed` marker (PEP 561) so downstream type checkers (mypy, pyright)
   pick up the package's inline type annotations.
+
+### Fixed
+
+- `dydx` now applies session `weights=` when aggregating slopes (previously
+  the weighted average marginal effect silently returned the unweighted
+  value). Weight validation moved to session construction so it runs eagerly
+  rather than inside the differentiated kernel.
 
 ### Internal
 
 - CI: a `typecheck` job runs mypy on the package. Reported, not enforced for
   now (mirrors the coverage step); `[tool.mypy]` config in `pyproject.toml`.
 - `.gitignore`: ignore `.mypy_cache/` and the CI `mypy.log`.
+
+### Development
+
+- Expanded test coverage from 80% to 89%.
+- Added 200+ tests across adapters, result objects, and bootstrap inference
 
 ## 0.1.2 - 2026-05-29
 

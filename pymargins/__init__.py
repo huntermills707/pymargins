@@ -72,6 +72,7 @@ from .scenarios import (
     pairwise,
     reference,
 )
+from .survey import SurveyDesign
 
 __all__ = [
     # Main entry point
@@ -107,6 +108,8 @@ __all__ = [
     "all_pairwise",
     # Matching support
     "PysmatchClient",
+    # Survey design
+    "SurveyDesign",
     # Package metadata
     "__version__",
 ]

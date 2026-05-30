@@ -48,6 +48,7 @@ def _generate_resample_indices(
     cluster_ids=None,
     block_size=None,
     block_type="moving",
+    strata=None,
 ):
     """Generate the list of resample index arrays for bootstrap.
 
@@ -59,6 +60,29 @@ def _generate_resample_indices(
 
     if cluster_ids is not None:
         cluster_ids = np.asarray(cluster_ids)
+
+    if strata is not None and cluster_ids is not None:
+        strata = np.asarray(strata)
+        # Precompute, per stratum: the unique PSUs and a map PSU -> row indices
+        strata_levels = np.unique(strata)
+        per_stratum = []
+        for h in strata_levels:
+            in_h = strata == h
+            psus_h = np.unique(cluster_ids[in_h])
+            rows_by_psu = {c: np.where((cluster_ids == c) & in_h)[0] for c in psus_h}
+            per_stratum.append((psus_h, rows_by_psu))
+
+        all_idx = []
+        for _ in range(n_boot):
+            parts = []
+            for psus_h, rows_by_psu in per_stratum:
+                # Rao–Wu: draw n_h PSUs with replacement WITHIN the stratum
+                sampled = rng.choice(psus_h, size=len(psus_h), replace=True)
+                parts.append(np.concatenate([rows_by_psu[c] for c in sampled]))
+            all_idx.append(np.concatenate(parts))
+        return all_idx
+
+    if cluster_ids is not None:
         unique_clusters = np.unique(cluster_ids)
         n_clusters = len(unique_clusters)
 
@@ -314,6 +338,7 @@ def _refit_replicate_task(args, adapter, data, matching=None):
                 f"Parameter count mismatch after refit: "
                 f"{len(new_adapter.coefficients())} vs {len(adapter.coefficients())}"
             )
+        new_adapter._pymargins_bootstrap_idx = index
         return b, new_adapter, None
     except Exception as exc:
         # Broad catch is intentional: bootstrap resampling can trigger
@@ -888,6 +913,11 @@ def _run_bootstrap(
     else:
         cluster_ids = config.cluster
 
+    strata = config.strata
+    if config.survey_design is not None:
+        cluster_ids = config.survey_design.psu
+        strata = config.survey_design.strata
+
     data = np.asarray(data) if not hasattr(data, "iloc") else data
     n_obs = len(data)
 
@@ -946,6 +976,7 @@ def _run_bootstrap(
             cluster_ids=cluster_ids,
             block_size=block_size,
             block_type=block_type,
+            strata=strata,
         )
 
     # Pre-compute JAX differentiability once to avoid per-replicate

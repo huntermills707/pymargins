@@ -285,3 +285,39 @@ def test_attach_rejects_bad_vcov(mnlogit_fit_formula):
     session.vcov_spec = "HAC"
     with pytest.raises(ValueError, match="HAC"):
         adapter.attach(session)
+
+
+# ---------------------------------------------------------------------------
+# Covariance edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_covariance_unsupported_string_raises(mnlogit_fit_formula):
+    adapter = auto_detect_adapter(mnlogit_fit_formula)
+    with pytest.raises(ValueError, match="Unsupported vcov string"):
+        adapter.covariance(vcov_spec="hac")
+
+
+def test_covariance_unsupported_dict_raises(mnlogit_fit_formula):
+    adapter = auto_detect_adapter(mnlogit_fit_formula)
+    with pytest.raises(ValueError, match="Unsupported vcov dict type"):
+        adapter.covariance(vcov_spec={"type": "hac"})
+
+
+def test_covariance_cluster_missing_groups_raises(mnlogit_fit_formula):
+    adapter = auto_detect_adapter(mnlogit_fit_formula)
+    with pytest.raises(ValueError, match="cluster vcov requires"):
+        adapter.covariance(vcov_spec={"type": "cluster"})
+
+
+def test_covariance_unsupported_type_raises(mnlogit_fit_formula):
+    adapter = auto_detect_adapter(mnlogit_fit_formula)
+    with pytest.raises(ValueError, match="Unsupported vcov_spec"):
+        adapter.covariance(vcov_spec=123)
+
+
+def test_covariance_precomputed_matrix(mnlogit_fit_formula):
+    adapter = auto_detect_adapter(mnlogit_fit_formula)
+    cov0 = adapter.covariance()
+    cov1 = adapter.covariance(vcov_spec=np.asarray(cov0))
+    np.testing.assert_allclose(np.asarray(cov0), np.asarray(cov1), rtol=1e-10)

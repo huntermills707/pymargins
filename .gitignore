@@ -35,3 +35,4 @@ notes/
 docs/_build/
 docs/_autosummary/
 docs/jupyter_execute/
+.claude/

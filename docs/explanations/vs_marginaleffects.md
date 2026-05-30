@@ -40,7 +40,28 @@ arbitrary JAX callables; the same chain-rule machinery handles
 log-RR, Fisher-z, lift, or any user-defined scale. See
 [](inference_scale.md).
 
-## 5. Narrower scope
+## 5. Design-based survey inference
+
+`pymargins` does complex-survey inference natively. Declare the design
+once with a `SurveyDesign` (sampling weights, PSUs/clusters, strata, and
+an optional finite-population correction) and pass it to the constructor:
+
+```python
+from pymargins import Margins, SurveyDesign
+d = SurveyDesign(weights=w, psu=psu, strata=strat)
+m = Margins(fit, survey_design=d, weights=w)
+m.dydx("x")   # design-weighted AME with Taylor-linearization SE
+```
+
+The point estimate is design-weighted and the standard error is the
+stratified, clustered Taylor-linearization sandwich — the same quantity
+R's `survey::svyglm` + `marginaleffects` produce, matched numerically.
+Because the design-based covariance flows through the same frozen-cov
+chokepoint as every other `vcov`, the delta *and* simulation paths are
+both design-based with no extra wiring; the bootstrap path resamples PSUs
+*within* strata. See [](../tutorials/survey_design.md).
+
+## 6. Narrower scope
 
 `pymargins` does adjusted predictions, slopes, contrasts, and
 differentiable compositions. It does not do:
@@ -63,6 +84,7 @@ If you are coming from `marginaleffects`, the conceptual mapping is:
 | `comparisons()`       | `m.contrasts()`      | Linear contrasts with joint covariance |
 | `avg_predictions()`   | `m.predict(at="overall")` | AAP is the default `at` |
 | `avg_slopes()`        | `m.dydx(at="overall")` | AME is the default `at` |
+| `svydesign()` + `svyglm()` | `Margins(survey_design=SurveyDesign(...))` | Design-based survey SEs (linearization or stratified bootstrap) |
 | `plot_predictions()`  | `m.predict(...)` + `to_frame()` + matplotlib | See [](../howto/plotting.md) |
 | `hypotheses()`        | `m.evaluate()`       | Nonlinear compositions |
 | `type = "link"`       | `phi_inv` scale      | `pymargins` commits to one scale per session |
@@ -76,4 +98,5 @@ If you are coming from `marginaleffects`, the conceptual mapping is:
 | Audit trail and pre-registration                    | `pymargins`         |
 | Curvature-aware fallback                            | `pymargins`         |
 | Custom inference scales                             | `pymargins`         |
+| Complex-survey design-based SEs                     | both (numerically agreed) |
 | Stata-style replications                            | both (numerically agreed) |
