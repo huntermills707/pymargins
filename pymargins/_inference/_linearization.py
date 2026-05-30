@@ -62,7 +62,15 @@ def linearization_cov(
     nest: bool = True,
 ) -> np.ndarray:
     """Full design-based sandwich V = A M Aᵀ."""
-    u = weights[:, None] * np.asarray(score_obs)
+    w = np.asarray(weights, dtype=float)
+    # Normalise weights to mean 1 so the meat is on the same scale as the
+    # unweighted bread (which comes from an unweighted fit). Without this,
+    # non-unit sampling weights inflate the meat quadratically while the
+    # bread stays fixed, producing SEs that are off by a factor of w̄².
+    w_mean = w.mean()
+    if w_mean > 0:
+        w = w / w_mean
+    u = w[:, None] * np.asarray(score_obs)
     M = linearization_meat(u, psu, strata, fpc_fraction, nest)
     A = np.asarray(bread)
     return A @ M @ A.T
