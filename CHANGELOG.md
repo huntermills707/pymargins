@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-05-31
+
 ### Added
 
 - `SurveyDesign` and `Margins(survey_design=...)` for complex-survey
@@ -172,7 +174,9 @@ Initial public release on PyPI and Read the Docs.
 - Documentation site with tutorials, how-to guides, API reference,
   and theory/design explanations.
 
-[Unreleased]: https://github.com/huntermills707/pymargins/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/huntermills707/pymargins/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/huntermills707/pymargins/compare/v0.1.2...v0.2.0
+[0.1.2]: https://github.com/huntermills707/pymargins/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/huntermills707/pymargins/releases/tag/v0.1.1
 [0.1.0]: https://github.com/huntermills707/pymargins/releases/tag/v0.1.0
 [0.0.1]: https://github.com/huntermills707/pymargins/releases/tag/v0.0.1
