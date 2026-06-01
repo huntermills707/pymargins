@@ -245,3 +245,96 @@ def test_attach_rejects_bad_vcov(poisson_fit_formula):
     session.vcov_spec = "HAC"
     with pytest.raises(ValueError, match="HAC"):
         adapter.attach(session)
+
+
+# ---------------------------------------------------------------------------
+# Covariance edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_covariance_hc3_via_refit(poisson_fit_formula):
+    adapter = StatsmodelsDiscreteCountAdapter(poisson_fit_formula)
+    cov = adapter.covariance(vcov_spec="hc3")
+    assert cov.shape == (
+        adapter.coefficients().shape[0],
+        adapter.coefficients().shape[0],
+    )
+
+
+def test_covariance_cluster_via_refit(poisson_fit_formula, df_count):
+    adapter = StatsmodelsDiscreteCountAdapter(poisson_fit_formula)
+    groups = df_count["treatment"].values
+    cov = adapter.covariance(vcov_spec={"type": "cluster", "groups": groups})
+    assert cov.shape == (
+        adapter.coefficients().shape[0],
+        adapter.coefficients().shape[0],
+    )
+
+
+def test_covariance_unsupported_string_raises(poisson_fit_formula):
+    adapter = StatsmodelsDiscreteCountAdapter(poisson_fit_formula)
+    with pytest.raises(ValueError, match="Unsupported vcov string"):
+        adapter.covariance(vcov_spec="hac")
+
+
+def test_covariance_unsupported_dict_raises(poisson_fit_formula):
+    adapter = StatsmodelsDiscreteCountAdapter(poisson_fit_formula)
+    with pytest.raises(ValueError, match="Unsupported vcov dict type"):
+        adapter.covariance(vcov_spec={"type": "hac"})
+
+
+def test_covariance_cluster_missing_groups_raises(poisson_fit_formula):
+    adapter = StatsmodelsDiscreteCountAdapter(poisson_fit_formula)
+    with pytest.raises(ValueError, match="cluster vcov requires"):
+        adapter.covariance(vcov_spec={"type": "cluster"})
+
+
+def test_covariance_unsupported_type_raises(poisson_fit_formula):
+    adapter = StatsmodelsDiscreteCountAdapter(poisson_fit_formula)
+    with pytest.raises(ValueError, match="Unsupported vcov_spec"):
+        adapter.covariance(vcov_spec=123)
+
+
+def test_covariance_precomputed_matrix(poisson_fit_formula):
+    adapter = StatsmodelsDiscreteCountAdapter(poisson_fit_formula)
+    cov0 = adapter.covariance()
+    cov1 = adapter.covariance(vcov_spec=np.asarray(cov0))
+    np.testing.assert_allclose(np.asarray(cov0), np.asarray(cov1), rtol=1e-10)
+
+
+# ---------------------------------------------------------------------------
+# Score observations
+# ---------------------------------------------------------------------------
+
+
+def test_score_obs(poisson_fit_formula):
+    adapter = StatsmodelsDiscreteCountAdapter(poisson_fit_formula)
+    score = adapter.score_obs()
+    assert score.ndim == 2
+    assert score.shape[1] == adapter.coefficients().shape[0]
+
+
+# ---------------------------------------------------------------------------
+# Column index
+# ---------------------------------------------------------------------------
+
+
+def test_column_index_of_variable(poisson_fit_formula):
+    adapter = StatsmodelsDiscreteCountAdapter(poisson_fit_formula)
+    idx = adapter.column_index_of_variable("x1")
+    assert isinstance(idx, int)
+    assert idx >= 0
+
+
+# ---------------------------------------------------------------------------
+# Refit with index
+# ---------------------------------------------------------------------------
+
+
+def test_refit_with_index(poisson_fit_formula, df_count):
+    adapter = StatsmodelsDiscreteCountAdapter(poisson_fit_formula)
+    idx = np.random.default_rng(7).choice(
+        len(df_count), size=len(df_count), replace=True
+    )
+    new_adapter = adapter.refit(adapter.training_data.iloc[idx], index=idx)
+    assert isinstance(new_adapter, StatsmodelsDiscreteCountAdapter)

@@ -263,7 +263,12 @@ class PolarsTabular:
         # Standard numpy-backed conversion for patsy/formulaic safety.
         # PyArrow-backed (use_pyarrow_extension_array=True) is faster but
         # patsy does not handle Arrow extension dtypes correctly.
-        return self._df.to_pandas()
+        pdf = self._df.to_pandas()
+        # Polars >= 1.26 converts strings to pandas StringDtype, but patsy
+        # needs plain object dtype.
+        for col in pdf.select_dtypes(include="string").columns:
+            pdf[col] = pdf[col].astype(object)
+        return pdf
 
     def to_jax_dict(self) -> dict[str, Any]:
         import jax.numpy as jnp

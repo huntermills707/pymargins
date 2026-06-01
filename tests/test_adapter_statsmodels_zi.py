@@ -10,6 +10,7 @@ from statsmodels.discrete.count_model import (
 )
 
 from pymargins import Margins
+from pymargins._adapter import auto_detect_adapter
 from pymargins._adapters.statsmodels_zi import StatsmodelsZIAdapter
 
 # ---------------------------------------------------------------------------
@@ -318,3 +319,69 @@ def test_refit_array_fit(zi_data):
     new_adapter = adapter.refit(resampled)
     assert isinstance(new_adapter, StatsmodelsZIAdapter)
     assert len(new_adapter.coefficients()) == len(adapter.coefficients())
+
+
+# ---------------------------------------------------------------------------
+# Covariance edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_covariance_unsupported_string_raises(zi_data):
+    from statsmodels.discrete.count_model import ZeroInflatedPoisson
+
+    mod = ZeroInflatedPoisson.from_formula(
+        "y ~ x", exog_infl=zi_data[["z"]], data=zi_data
+    )
+    res = mod.fit(disp=False)
+    adapter = auto_detect_adapter(res)
+    with pytest.raises(ValueError, match="Unsupported vcov string"):
+        adapter.covariance(vcov_spec="hac")
+
+
+def test_covariance_unsupported_dict_raises(zi_data):
+    from statsmodels.discrete.count_model import ZeroInflatedPoisson
+
+    mod = ZeroInflatedPoisson.from_formula(
+        "y ~ x", exog_infl=zi_data[["z"]], data=zi_data
+    )
+    res = mod.fit(disp=False)
+    adapter = auto_detect_adapter(res)
+    with pytest.raises(ValueError, match="Unsupported vcov dict type"):
+        adapter.covariance(vcov_spec={"type": "hac"})
+
+
+def test_covariance_cluster_missing_groups_raises(zi_data):
+    from statsmodels.discrete.count_model import ZeroInflatedPoisson
+
+    mod = ZeroInflatedPoisson.from_formula(
+        "y ~ x", exog_infl=zi_data[["z"]], data=zi_data
+    )
+    res = mod.fit(disp=False)
+    adapter = auto_detect_adapter(res)
+    with pytest.raises(ValueError, match="cluster vcov requires"):
+        adapter.covariance(vcov_spec={"type": "cluster"})
+
+
+def test_covariance_unsupported_type_raises(zi_data):
+    from statsmodels.discrete.count_model import ZeroInflatedPoisson
+
+    mod = ZeroInflatedPoisson.from_formula(
+        "y ~ x", exog_infl=zi_data[["z"]], data=zi_data
+    )
+    res = mod.fit(disp=False)
+    adapter = auto_detect_adapter(res)
+    with pytest.raises(ValueError, match="Unsupported vcov_spec"):
+        adapter.covariance(vcov_spec=123)
+
+
+def test_covariance_precomputed_matrix(zi_data):
+    from statsmodels.discrete.count_model import ZeroInflatedPoisson
+
+    mod = ZeroInflatedPoisson.from_formula(
+        "y ~ x", exog_infl=zi_data[["z"]], data=zi_data
+    )
+    res = mod.fit(disp=False)
+    adapter = auto_detect_adapter(res)
+    cov0 = adapter.covariance()
+    cov1 = adapter.covariance(vcov_spec=np.asarray(cov0))
+    np.testing.assert_allclose(np.asarray(cov0), np.asarray(cov1), rtol=1e-10)

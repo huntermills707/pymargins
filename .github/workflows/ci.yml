@@ -26,6 +26,38 @@ jobs:
       - name: ruff format --check
         run: ruff format --check .
 
+  typecheck:
+    name: Type check (mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install package (core) and mypy
+        # Core install only: numpy/pandas ship stubs (real signal); the optional
+        # backends are untyped, so [tool.mypy] ignore_missing_imports covers them
+        # and we skip the heavy installs here.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . mypy
+      - name: Run mypy
+        # Non-blocking for now: mypy output is reported, not enforced, mirroring
+        # the coverage step below. The package ships py.typed, so the goal is to
+        # keep its public annotations coherent and ratchet strictness up over
+        # time. To enforce later, drop continue-on-error and tighten [tool.mypy].
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          mypy | tee mypy.log
+      - name: mypy summary
+        if: always()
+        run: |
+          n=$(grep -cE 'error:' mypy.log 2>/dev/null || echo 0)
+          echo "### mypy: ${n} error(s) (reported, not enforced)" >> "$GITHUB_STEP_SUMMARY"
+
   set-matrix:
     name: Pick Python matrix
     runs-on: ubuntu-latest

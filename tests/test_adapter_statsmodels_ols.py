@@ -411,3 +411,51 @@ def test_attach_validates_phi_phi_inv(fit_ols_formula):
         ValueError, match="phi and phi_inv do not appear to be inverses"
     ):
         Margins(fit_ols_formula, adapter=adapter, phi=jnp.exp, phi_inv=jnp.exp)
+
+
+# ---------------------------------------------------------------------------
+# Covariance edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_covariance_unsupported_string_raises(fit_ols_formula):
+    adapter = StatsmodelsOLSAdapter(fit_ols_formula)
+    with pytest.raises(ValueError, match="Unsupported vcov string"):
+        adapter.covariance(vcov_spec="hac")
+
+
+def test_covariance_unsupported_dict_raises(fit_ols_formula):
+    adapter = StatsmodelsOLSAdapter(fit_ols_formula)
+    with pytest.raises(ValueError, match="Unsupported vcov dict type"):
+        adapter.covariance(vcov_spec={"type": "hac"})
+
+
+def test_covariance_cluster_missing_groups_raises(fit_ols_formula):
+    adapter = StatsmodelsOLSAdapter(fit_ols_formula)
+    with pytest.raises(ValueError, match="cluster vcov requires"):
+        adapter.covariance(vcov_spec={"type": "cluster"})
+
+
+def test_covariance_unsupported_type_raises(fit_ols_formula):
+    adapter = StatsmodelsOLSAdapter(fit_ols_formula)
+    with pytest.raises(ValueError, match="Unsupported vcov_spec"):
+        adapter.covariance(vcov_spec=123)
+
+
+def test_covariance_precomputed_matrix(fit_ols_formula):
+    adapter = StatsmodelsOLSAdapter(fit_ols_formula)
+    cov0 = adapter.covariance()
+    cov1 = adapter.covariance(vcov_spec=np.asarray(cov0))
+    np.testing.assert_allclose(np.asarray(cov0), np.asarray(cov1), rtol=1e-10)
+
+
+# ---------------------------------------------------------------------------
+# score_obs
+# ---------------------------------------------------------------------------
+
+
+def test_score_obs(fit_ols_formula):
+    adapter = StatsmodelsOLSAdapter(fit_ols_formula)
+    score = adapter.score_obs()
+    assert score.ndim == 2
+    assert score.shape[1] == adapter.coefficients().shape[0]

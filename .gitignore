@@ -20,6 +20,10 @@ venv/
 .pytest_cache/
 .coverage
 
+# Type checking
+.mypy_cache/
+mypy.log
+
 # Build artifacts
 *.egg-info/
 dist/
@@ -31,3 +35,4 @@ notes/
 docs/_build/
 docs/_autosummary/
 docs/jupyter_execute/
+.claude/

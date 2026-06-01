@@ -234,3 +234,72 @@ def test_attach_rejects_bad_vcov(ordered_fit_array, df_ordered):
     session.vcov_spec = "HAC"
     with pytest.raises(ValueError, match="HAC"):
         adapter.attach(session)
+
+
+# ---------------------------------------------------------------------------
+# Covariance edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_covariance_hc3_via_refit(ordered_fit_array, df_ordered):
+    adapter = StatsmodelsOrderedAdapter(ordered_fit_array, training_data=df_ordered)
+    cov = adapter.covariance(vcov_spec="hc3")
+    assert cov.shape == (
+        adapter.coefficients().shape[0],
+        adapter.coefficients().shape[0],
+    )
+
+
+def test_covariance_cluster_via_refit(ordered_fit_array, df_ordered):
+    adapter = StatsmodelsOrderedAdapter(ordered_fit_array, training_data=df_ordered)
+    groups = df_ordered["treatment"].values
+    cov = adapter.covariance(vcov_spec={"type": "cluster", "groups": groups})
+    assert cov.shape == (
+        adapter.coefficients().shape[0],
+        adapter.coefficients().shape[0],
+    )
+
+
+def test_covariance_unsupported_string_raises(ordered_fit_array, df_ordered):
+    adapter = StatsmodelsOrderedAdapter(ordered_fit_array, training_data=df_ordered)
+    with pytest.raises(ValueError, match="Unsupported vcov string"):
+        adapter.covariance(vcov_spec="hac")
+
+
+def test_covariance_unsupported_dict_raises(ordered_fit_array, df_ordered):
+    adapter = StatsmodelsOrderedAdapter(ordered_fit_array, training_data=df_ordered)
+    with pytest.raises(ValueError, match="Unsupported vcov dict type"):
+        adapter.covariance(vcov_spec={"type": "hac"})
+
+
+def test_covariance_cluster_missing_groups_raises(ordered_fit_array, df_ordered):
+    adapter = StatsmodelsOrderedAdapter(ordered_fit_array, training_data=df_ordered)
+    with pytest.raises(ValueError, match="cluster vcov requires"):
+        adapter.covariance(vcov_spec={"type": "cluster"})
+
+
+def test_covariance_unsupported_type_raises(ordered_fit_array, df_ordered):
+    adapter = StatsmodelsOrderedAdapter(ordered_fit_array, training_data=df_ordered)
+    with pytest.raises(ValueError, match="Unsupported vcov_spec"):
+        adapter.covariance(vcov_spec=123)
+
+
+# ---------------------------------------------------------------------------
+# Outcome labels and native predict
+# ---------------------------------------------------------------------------
+
+
+def test_outcome_labels(ordered_fit_array, df_ordered):
+    adapter = StatsmodelsOrderedAdapter(ordered_fit_array, training_data=df_ordered)
+    labels = adapter.outcome_labels
+    assert labels is not None
+    assert len(labels) == adapter.n_outcomes
+
+
+def test_native_predict(ordered_fit_array, df_ordered):
+    adapter = StatsmodelsOrderedAdapter(ordered_fit_array, training_data=df_ordered)
+    beta = np.asarray(adapter.coefficients())
+    X = adapter.design_matrix_from_df(df_ordered[:5])
+    pred = adapter.native_predict(beta, X)
+    assert pred.shape[0] == 5
+    assert pred.shape[1] == adapter.n_outcomes
