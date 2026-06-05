@@ -87,6 +87,16 @@ Gradient helpers (for adapter authors)
     GradientBackend
     InferenceMethod
 
+Transform pipeline (bootstrap)
+------------------------------
+
+.. autosummary::
+    :toctree: _autosummary
+
+    reimpute
+    drop_outliers
+    trim
+
 Matching
 --------
 

@@ -98,7 +98,10 @@ class InferenceConfig:
     strata: Any | None = None
     survey_design: Any | None = None
     matching: Any | None = None
-    """MatchingClient for bootstrap rematching. Ignored by delta and K–R."""
+    """MatchingClient for bootstrap rematching. Ignored by delta and simulation."""
+
+    transforms: list | None = None
+    """Transform pipeline stages for bootstrap. Ignored by delta and simulation."""
 
     bootstrap_config: dict | None = None
     all_idx: list | None = None

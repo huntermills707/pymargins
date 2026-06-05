@@ -82,6 +82,7 @@ linearmodels, lifelines, and scikit-learn model classes.
     demos/travel_mode_wtp
     demos/california_api_survey
     demos/bayesian_mroz
+    demos/transform_pipeline
 
 .. toctree::
     :maxdepth: 2

@@ -61,6 +61,7 @@ from ._result import (
     adjust,
 )
 from .margins import Margins
+from ._transforms import drop_outliers, reimpute, trim
 from .matching import PysmatchClient
 from .scenarios import (
     all_pairwise,
@@ -110,6 +111,10 @@ __all__ = [
     "PysmatchClient",
     # Survey design
     "SurveyDesign",
+    # Transform pipeline stages
+    "reimpute",
+    "drop_outliers",
+    "trim",
     # Package metadata
     "__version__",
 ]

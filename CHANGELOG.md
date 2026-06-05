@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Transform pipeline (`Margins(transforms=[...])`) for bootstrap inference.
+  Stages apply `frame → frame` transforms that are re-derived on every
+  bootstrap replicate.  v1 stages:
+  - `reimpute(imputer, incomplete=df)` — bootstrap-then-impute multiple
+    imputation.  The imputer is fit-and-imputed fresh each replicate,
+    injecting imputation-model uncertainty into the bootstrap distribution.
+    Produces an ordinary bootstrap `MarginsResult`; no Rubin combinator.
+  - `drop_outliers(rule)` — row filter re-applied per replicate.
+  - `trim(lower=, upper=, columns=)` — bound-based row filter re-applied
+    per replicate.
+- Structural guards: `survey_design` × row-altering/source-overriding stages
+  are rejected; `matching=` and `transforms=` are mutually exclusive;
+  `requires_resampling=True` stages force `method='bootstrap'`; weighted
+  aggregation + row-altering stages are rejected (3b) to prevent silent
+  misalignment.
+- New end-to-end demo `docs/demos/transform_pipeline.md` walking the Wage
+  panel through `reimpute`, stage composition, `drop_outliers`, and the
+  structural guards.
+
+### Fixed
+
+- Docstring wording in `InferenceConfig`: "K–R" corrected to "simulation"
+  (only delta/simulation/bootstrap exist).
+
 ## [0.2.0] — 2026-05-31
 
 ### Added
