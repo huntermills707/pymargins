@@ -68,6 +68,24 @@ def _bootstrap_bank_key(session) -> str:
     else:
         parts.append("none")
 
+    # Fold in pipeline identity + per-stage seeds (None-stable sentinel)
+    if session.transforms is not None:
+        # Hash the types, source_data shapes, and optional stage hash keys
+        pipe_parts = []
+        for stage in session.transforms:
+            pipe_parts.append(type(stage).__name__)
+            if stage.source_data is not None:
+                pipe_parts.append(str(len(stage.source_data)))
+            pipe_parts.append(str(stage.alters_rows))
+            pipe_parts.append(str(stage.requires_resampling))
+            # F10: distinguish same-type stages with different internals
+            hk = getattr(stage, "_pymargins_hash_key", None)
+            if hk is not None:
+                pipe_parts.append(str(hk))
+        parts.append(hashlib.sha256("|".join(pipe_parts).encode()).hexdigest()[:16])
+    else:
+        parts.append("none")
+
     return hashlib.sha256("|".join(parts).encode()).hexdigest()[:32]
 
 
@@ -95,6 +113,13 @@ def _bootstrap_resample_bank(session):
         n_obs = len(data)
     except (NotImplementedError, AttributeError, TypeError):
         n_obs = 0
+
+    # Honor a pipeline's first source_data override for resample length
+    if session.transforms is not None:
+        for stage in session.transforms:
+            if stage.source_data is not None:
+                n_obs = len(stage.source_data)
+                break
 
     if session.matching is not None:
         cluster_ids = session.matching.cluster_ids
@@ -149,6 +174,12 @@ def _bootstrap_states_bank(session):
 
     if session.matching is not None:
         data = session.matching.matched_data
+    elif session.transforms is not None:
+        # Resolve the resample source from the pipeline's first source_data override
+        for stage in session.transforms:
+            if stage.source_data is not None:
+                data = stage.source_data
+                break
 
     if data is None:
         raise NotImplementedError(
@@ -163,6 +194,8 @@ def _bootstrap_states_bank(session):
         data,
         all_idx,
         matching=session.matching,
+        transforms=session.transforms,
+        rng_seed=session.rng_seed,
         n_jobs=session.n_jobs,
         progress=session.progress_bar,
     )
@@ -242,6 +275,7 @@ def _inference_config(session) -> InferenceConfig:
         else None,
         survey_design=session.survey_design,
         matching=session.matching,
+        transforms=session.transforms,
         bootstrap_config=session.bootstrap_config,
         all_idx=all_idx,
         all_states=all_states,

@@ -167,6 +167,8 @@ class MarginsResult:
     resample_bank_id: str | None = None
     n_boot_effective: int | None = None
     n_boot_failed: int | None = None
+    imputation_diagnostic: Any | None = None
+    """Rubin pooling diagnostic; present only on pool_imputations() output."""
 
     # -----------------------------------------------------------------------
     # Reporting
@@ -197,13 +199,15 @@ class MarginsResult:
 
         z_vals = []
         p_vals = []
-        is_delta = self.gradient is not None
+        stat_label = "z" if self.gradient is not None else "statistic"
         # Note: null=0 is on the inference scale. For logit-scale predictions,
         # this tests H0: logit(p)=0 i.e. p=0.5, which is rarely the intended null.
         try:
             tr = self.test(value=0.0, null_scale="inference")
             z_vals = np.atleast_1d(tr.statistic).ravel()
             p_vals = np.atleast_1d(tr.pvalue).ravel()
+            if self.imputation_diagnostic is not None:
+                stat_label = "t"
         except (ValueError, TypeError, np.linalg.LinAlgError) as exc:
             warnings.warn(f"Test statistics omitted from summary: {exc}", stacklevel=2)
 
@@ -219,7 +223,7 @@ class MarginsResult:
             if i < len(z_vals):
                 row["statistic"] = float(z_vals[i])
                 row["pvalue"] = float(p_vals[i])
-                row["stat_label"] = "z" if is_delta else "statistic"
+                row["stat_label"] = stat_label
             rows.append(row)
         return rows
 
@@ -282,7 +286,8 @@ class MarginsResult:
         data_keys = [("estimate", "estimate"), ("std_error", "std err")]
         if has_stat:
             stat_header = rows[0].get("stat_label", "z") if rows else "z"
-            data_keys.extend([("statistic", stat_header), ("pvalue", "P>|z|")])
+            p_header = "P>|t|" if stat_header == "t" else "P>|z|"
+            data_keys.extend([("statistic", stat_header), ("pvalue", p_header)])
         data_keys.append(("ci", f"[{self.level * 100:.0f}% Conf. Int.]"))
 
         def _fmt(key, row):
@@ -364,6 +369,8 @@ class MarginsResult:
             footers.append(
                 f"Delta-vs-sim disagreement: {self.delta_sim_disagreement:.3%}"
             )
+        if self.imputation_diagnostic is not None:
+            footers.append(self.imputation_diagnostic.footer())
         if footers:
             out_lines.extend([""] + footers)
 
@@ -551,7 +558,8 @@ class MarginsResult:
         data_keys = [("estimate", "estimate"), ("std_error", "std err")]
         if has_stat:
             stat_header = rows[0].get("stat_label", "z") if rows else "z"
-            data_keys.extend([("statistic", stat_header), ("pvalue", "P>|z|")])
+            p_header = "P>|t|" if stat_header == "t" else "P>|z|"
+            data_keys.extend([("statistic", stat_header), ("pvalue", p_header)])
         data_keys.append(("ci", f"[{self.level * 100:.0f}\\% Conf. Int.]"))
 
         def _fmt(key, row):
@@ -624,7 +632,8 @@ class MarginsResult:
         data_keys = [("estimate", "estimate"), ("std_error", "std err")]
         if has_stat:
             stat_header = rows[0].get("stat_label", "z") if rows else "z"
-            data_keys.extend([("statistic", stat_header), ("pvalue", "P>|z|")])
+            p_header = "P>|t|" if stat_header == "t" else "P>|z|"
+            data_keys.extend([("statistic", stat_header), ("pvalue", p_header)])
         data_keys.append(("ci", f"[{self.level * 100:.0f}% Conf. Int.]"))
 
         def _fmt(key, row):
@@ -700,6 +709,20 @@ class MarginsResult:
         est_inf = (
             self.phi_inv(self.estimate) if self.phi_inv is not None else self.estimate
         )
+
+        if self.imputation_diagnostic is not None:
+            if simultaneous:
+                raise NotImplementedError(
+                    "Simultaneous CIs are not yet supported for pooled results."
+                )
+            se = np.asarray(self.std_error)
+            df = np.asarray(self.imputation_diagnostic.df)
+            tcrit = stats.t.ppf(0.5 + level / 2.0, df)
+            lo_inf = est_inf - tcrit * se
+            hi_inf = est_inf + tcrit * se
+            if self.phi is not None:
+                return np.asarray(self.phi(lo_inf)), np.asarray(self.phi(hi_inf))
+            return np.asarray(lo_inf), np.asarray(hi_inf)
 
         if self.gradient is not None and self.cov_params is not None:
             # Delta method
@@ -948,6 +971,29 @@ class MarginsResult:
                 else self.draws
             )
         )
+
+        if self.imputation_diagnostic is not None:
+            # Pooled result: t-test against Rubin df. Same alternative
+            # conventions as delta_wald_test, with Student-t in place of normal.
+            se = np.asarray(self.std_error)
+            df = np.asarray(self.imputation_diagnostic.df)
+            t_stat = (np.asarray(est_inf) - null_inf) / se
+            if alternative == "two-sided":
+                pvalue = 2.0 * stats.t.sf(np.abs(t_stat), df)
+            elif alternative == "greater":
+                pvalue = stats.t.sf(t_stat, df)
+            elif alternative == "less":
+                pvalue = stats.t.cdf(t_stat, df)
+            else:
+                raise ValueError(f"Unknown alternative: {alternative!r}")
+            return TestResult(
+                statistic=t_stat,
+                pvalue=pvalue,
+                null_value=value,
+                alternative=alternative,
+                method="wald",
+                estimand_metadata=self.estimand_metadata,
+            )
 
         if self.gradient is not None and self.cov_params is None:
             raise ValueError(

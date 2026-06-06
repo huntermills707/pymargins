@@ -56,10 +56,13 @@ from ._gradients import (
 from ._result import (
     AdjustedResults,
     DiagnosticResult,
+    ImputationDiagnostic,
     MarginsResult,
     TestResult,
     adjust,
+    pool_imputations,
 )
+from ._transforms import drop_outliers, reimpute, trim
 from .margins import Margins
 from .matching import PysmatchClient
 from .scenarios import (
@@ -83,6 +86,8 @@ __all__ = [
     "DiagnosticResult",
     "AdjustedResults",
     "adjust",
+    "pool_imputations",
+    "ImputationDiagnostic",
     # Adapter interface (for extension)
     "ModelAdapter",
     "GLMAdapter",
@@ -110,6 +115,10 @@ __all__ = [
     "PysmatchClient",
     # Survey design
     "SurveyDesign",
+    # Transform pipeline stages
+    "reimpute",
+    "drop_outliers",
+    "trim",
     # Package metadata
     "__version__",
 ]

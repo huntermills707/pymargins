@@ -305,7 +305,9 @@ def _bca_confint(h_draws_inf, estimate, level, z0, a, phi):
 # ---------------------------------------------------------------------------
 
 
-def _refit_replicate_task(args, adapter, data, matching=None):
+def _refit_replicate_task(
+    args, adapter, data, matching=None, transforms=None, rng_seed=None
+):
     """Module-level helper for bootstrap refit parallelism.
 
     Must be defined at module level so it can be pickled for
@@ -316,6 +318,36 @@ def _refit_replicate_task(args, adapter, data, matching=None):
         resampled = data.iloc[idx]
     else:
         resampled = data[idx]
+
+    # Apply transform pipeline after resampling
+    if transforms is not None:
+        try:
+            for i, stage in enumerate(transforms):
+                # Deterministic per-replicate seeding for stochastic stages
+                if rng_seed is not None:
+                    import hashlib
+
+                    seed_bytes = hashlib.sha256(
+                        f"pymargins|{rng_seed}|{b}|{i}".encode()
+                    ).digest()
+                    stage._pymargins_replicate_seed = int.from_bytes(
+                        seed_bytes[:8], "big"
+                    )
+                else:
+                    stage._pymargins_replicate_seed = None
+                resampled = stage.prepare_resample(resampled)
+        except Exception as exc:
+            if isinstance(
+                exc, (AssertionError, MemoryError, RecursionError, KeyboardInterrupt)
+            ):
+                raise
+            return b, None, exc
+        if any(stage.alters_rows for stage in transforms):
+            index = None
+        else:
+            index = idx
+    else:
+        index = idx
 
     # Rematch after resampling when a matching object is provided
     if matching is not None:
@@ -328,8 +360,6 @@ def _refit_replicate_task(args, adapter, data, matching=None):
                 raise
             return b, None, exc
         index = None  # rematching breaks the original index mapping
-    else:
-        index = idx
 
     try:
         new_adapter = adapter.refit(resampled, index=index)
@@ -653,7 +683,14 @@ def _run_fast_path(
 
 
 def _harvest_bootstrap_states(
-    adapter, data, all_idx, matching=None, n_jobs=1, progress=False
+    adapter,
+    data,
+    all_idx,
+    matching=None,
+    transforms=None,
+    rng_seed=None,
+    n_jobs=1,
+    progress=False,
 ):
     """Resample + refit, returning bootstrap_state() snapshots.
 
@@ -667,6 +704,8 @@ def _harvest_bootstrap_states(
         Resample indices.
     matching : optional
         Matching object with a ``rematch`` method.
+    transforms : list of Stage, optional
+        Pipeline stages applied after resampling and before refit.
     n_jobs : int
         Number of parallel workers.
     progress : bool
@@ -706,10 +745,12 @@ def _harvest_bootstrap_states(
             pickle.dumps(data)
             if matching is not None:
                 pickle.dumps(matching)
+            if transforms is not None:
+                pickle.dumps(transforms)
             use_processes = True
-        except (TypeError, pickle.PicklingError):
+        except (TypeError, pickle.PicklingError, AttributeError):
             warnings.warn(
-                "Adapter, data, or matching object cannot be pickled; falling back "
+                "Adapter, data, matching object, or transforms cannot be pickled; falling back "
                 "to thread-based parallel bootstrap. Consider setting n_jobs=1 "
                 "for stability.",
                 RuntimeWarning,
@@ -731,6 +772,8 @@ def _harvest_bootstrap_states(
                             [adapter] * len(all_idx),
                             [data] * len(all_idx),
                             [matching] * len(all_idx),
+                            [transforms] * len(all_idx),
+                            [rng_seed] * len(all_idx),
                         ),
                         desc="Bootstrap refit",
                         total=len(all_idx),
@@ -747,6 +790,8 @@ def _harvest_bootstrap_states(
                                 [adapter] * len(all_idx),
                                 [data] * len(all_idx),
                                 [matching] * len(all_idx),
+                                [transforms] * len(all_idx),
+                                [rng_seed] * len(all_idx),
                             ),
                             desc="Bootstrap refit",
                             total=len(all_idx),
@@ -761,6 +806,8 @@ def _harvest_bootstrap_states(
                     [adapter] * len(all_idx),
                     [data] * len(all_idx),
                     [matching] * len(all_idx),
+                    [transforms] * len(all_idx),
+                    [rng_seed] * len(all_idx),
                 ),
                 desc="Bootstrap refit",
                 total=len(all_idx),
@@ -910,6 +957,13 @@ def _run_bootstrap(
     if config.matching is not None:
         data = config.matching.matched_data
         cluster_ids = config.matching.cluster_ids
+    elif config.transforms is not None:
+        # Resolve the resample source from the pipeline's first source_data override
+        for stage in config.transforms:
+            if getattr(stage, "source_data", None) is not None:
+                data = stage.source_data
+                break
+        cluster_ids = config.cluster
     else:
         cluster_ids = config.cluster
 
@@ -926,6 +980,14 @@ def _run_bootstrap(
     bootstrap_config = config.bootstrap_config or {}
     block_type = bootstrap_config.get("block_type", "moving")
     ci_method = bootstrap_config.get("ci_method", "percentile")
+    if ci_method == "bca" and config.transforms is not None:
+        raise ValueError(
+            "ci_method='bca' is not supported with transform pipelines. "
+            "The BCa jackknife operates on the raw source frame without "
+            "running the pipeline, producing an inconsistent acceleration "
+            "parameter. Use ci_method='percentile' or 'studentized' instead."
+        )
+
     if ci_method not in ("percentile", "basic", "bca", "studentized"):
         raise ValueError(
             f"Unsupported bootstrap ci_method: {ci_method!r}. "
@@ -996,6 +1058,8 @@ def _run_bootstrap(
             data,
             all_idx,
             matching=config.matching,
+            transforms=config.transforms,
+            rng_seed=config.rng_seed,
             n_jobs=config.n_jobs,
             progress=config.progress_bar,
         )
