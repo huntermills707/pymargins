@@ -97,6 +97,20 @@ Transform pipeline (bootstrap)
     drop_outliers
     trim
 
+Multiple imputation (pooling)
+-----------------------------
+
+Rubin's-rules combinator over ``MarginsResult`` objects from M completed
+datasets. The artifacts-side counterpart to the bootstrap ``reimpute`` stage:
+use ``pool_imputations`` when you already hold M precomputed imputations, and
+``reimpute`` when you have a re-runnable imputer.
+
+.. autosummary::
+    :toctree: _autosummary
+
+    pool_imputations
+    ImputationDiagnostic
+
 Matching
 --------
 

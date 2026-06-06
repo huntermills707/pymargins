@@ -119,9 +119,12 @@ missingness in their predictors are essentially unchanged.
 
 ## Limitations
 
-- **Frozen frames are not supported.** If your imputations came from R ``mice``
-  you should either wrap the R imputation engine as a Python callable, or stay
-  in R's ``marginaleffects`` + ``mice`` + ``pool()`` ecosystem.
+- **Frozen frames are not supported on this path.** ``reimpute`` needs a
+  re-runnable imputer because it re-imputes every bootstrap replicate. If you
+  already hold M *precomputed* completed frames (e.g. from R ``mice`` exported
+  to CSV), pool them with Rubin's rules via
+  [``pool_imputations``](pooling_imputations.md) instead — no Python imputer
+  required, just the M completed frames.
 - **BCa CIs are rejected.** The BCa jackknife operates on the raw incomplete
   frame without re-imputing, producing an inconsistent acceleration parameter.
   Use ``ci_method="percentile"`` (default) or ``"studentized"``.

@@ -24,9 +24,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `requires_resampling=True` stages force `method='bootstrap'`; weighted
   aggregation + row-altering stages are rejected (3b) to prevent silent
   misalignment.
-- New end-to-end demo `docs/demos/transform_pipeline.md` walking the Wage
-  panel through `reimpute`, stage composition, `drop_outliers`, and the
-  structural guards.
+- `pool_imputations(results, *, label=, complete_df=)` — Rubin's-rules
+  combinator over M `MarginsResult` objects from precomputed imputations, the
+  artifacts-side counterpart to the bootstrap `reimpute` stage. Pools on the
+  inference scale and reports through `φ`; uses a Student-*t* interval on the
+  Rubin (1987) degrees of freedom, with an optional Barnard–Rubin (1999)
+  small-sample correction via `complete_df=`. Inference-method-agnostic: each
+  branch's `W_m = se_m²` may have come from delta, simulation, or bootstrap.
+  Validates cross-imputation commensurability (labels, `kind`, `at`,
+  `scenarios`, level, scale) and fails loudly on mismatch. Surfaces a new
+  `ImputationDiagnostic` (FMI, relative efficiency, degrees of freedom, and the
+  within/between/total variances) on `MarginsResult.imputation_diagnostic` and
+  in the `summary()` footer. Pooled results recompute their interval at a new
+  `conf_int(level=)` and report a pooled *t*-test from `test()`.
+- New tutorial `docs/tutorials/pooling_imputations.md` (precomputed-frames MI),
+  the artifacts twin of `mi_via_reimpute.md`.
 
 ### Fixed
 

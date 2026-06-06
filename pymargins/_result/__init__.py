@@ -10,6 +10,7 @@ from ._margins import (
     _join_fallback_reasons,
     compose_results,
 )
+from ._pooling import ImputationDiagnostic, pool_imputations
 from ._test import AdjustedResults, TestResult, adjust
 
 __all__ = [
@@ -18,6 +19,8 @@ __all__ = [
     "adjust",
     "DiagnosticResult",
     "MarginsResult",
+    "ImputationDiagnostic",
+    "pool_imputations",
     "_join_fallback_reasons",
     "_combine_results",
     "compose_results",

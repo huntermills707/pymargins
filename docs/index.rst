@@ -42,6 +42,8 @@ linearmodels, lifelines, and scikit-learn model classes.
     tutorials/scales_and_kappa
     tutorials/sklearn_models
     tutorials/survey_design
+    tutorials/mi_via_reimpute
+    tutorials/pooling_imputations
 
 .. toctree::
     :maxdepth: 1

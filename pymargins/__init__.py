@@ -56,9 +56,11 @@ from ._gradients import (
 from ._result import (
     AdjustedResults,
     DiagnosticResult,
+    ImputationDiagnostic,
     MarginsResult,
     TestResult,
     adjust,
+    pool_imputations,
 )
 from .margins import Margins
 from ._transforms import drop_outliers, reimpute, trim
@@ -84,6 +86,8 @@ __all__ = [
     "DiagnosticResult",
     "AdjustedResults",
     "adjust",
+    "pool_imputations",
+    "ImputationDiagnostic",
     # Adapter interface (for extension)
     "ModelAdapter",
     "GLMAdapter",
