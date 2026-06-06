@@ -71,11 +71,9 @@ class _ReimputeStage:
         # Stable hash key for bank discrimination (F10).
         # Uses type only (coarse but stable across sessions); if users need
         # finer discrimination they should pass distinct callables.
-        self._pymargins_hash_key = (
-            hashlib.sha256(
-                f"{type(imputer).__module__}.{type(imputer).__name__}".encode()
-            ).hexdigest()[:16]
-        )
+        self._pymargins_hash_key = hashlib.sha256(
+            f"{type(imputer).__module__}.{type(imputer).__name__}".encode()
+        ).hexdigest()[:16]
 
     def prepare(self, data: pd.DataFrame) -> pd.DataFrame:
         return data
@@ -103,9 +101,10 @@ def _warn_if_deterministic(imputer, incomplete: pd.DataFrame, max_rows: int = 20
         return
 
     try:
-        identical = out1.shape == out2.shape and (
-            out1.fillna("__NA__") == out2.fillna("__NA__")
-        ).all().all()
+        identical = (
+            out1.shape == out2.shape
+            and (out1.fillna("__NA__") == out2.fillna("__NA__")).all().all()
+        )
     except Exception:
         return
 

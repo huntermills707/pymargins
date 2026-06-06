@@ -10,7 +10,6 @@ import statsmodels.formula.api as smf
 from pymargins import Margins
 from pymargins._transforms import IdentityStage
 
-
 # ---------------------------------------------------------------------------
 # Regression guard: IdentityStage yields identical results to no pipeline
 # ---------------------------------------------------------------------------
@@ -29,9 +28,7 @@ def test_identity_pipeline_yields_identical_results():
     df["y"] = 1.0 + 0.5 * df["x1"] - 0.3 * df["x2"] + rng.normal(scale=0.5, size=n)
     fit = smf.ols("y ~ x1 + x2", data=df).fit()
 
-    m_no_pipe = Margins(
-        fit, method="bootstrap", n_boot=50, n_jobs=1, rng_seed=7
-    )
+    m_no_pipe = Margins(fit, method="bootstrap", n_boot=50, n_jobs=1, rng_seed=7)
     r_no_pipe = m_no_pipe.predict(atexog={"x1": 0})
 
     m_pipe = Margins(

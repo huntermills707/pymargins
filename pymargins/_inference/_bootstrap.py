@@ -305,7 +305,9 @@ def _bca_confint(h_draws_inf, estimate, level, z0, a, phi):
 # ---------------------------------------------------------------------------
 
 
-def _refit_replicate_task(args, adapter, data, matching=None, transforms=None, rng_seed=None):
+def _refit_replicate_task(
+    args, adapter, data, matching=None, transforms=None, rng_seed=None
+):
     """Module-level helper for bootstrap refit parallelism.
 
     Must be defined at module level so it can be pickled for
@@ -681,7 +683,14 @@ def _run_fast_path(
 
 
 def _harvest_bootstrap_states(
-    adapter, data, all_idx, matching=None, transforms=None, rng_seed=None, n_jobs=1, progress=False
+    adapter,
+    data,
+    all_idx,
+    matching=None,
+    transforms=None,
+    rng_seed=None,
+    n_jobs=1,
+    progress=False,
 ):
     """Resample + refit, returning bootstrap_state() snapshots.
 

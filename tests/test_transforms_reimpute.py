@@ -5,11 +5,9 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
-import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
 from pymargins import Margins, reimpute
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -47,7 +45,9 @@ def test_reimpute_with_delta_raises():
     fit = smf.ols("y ~ x1 + x2", data=df_nan.fillna(df_nan.mean())).fit()
 
     with pytest.raises(ValueError, match="method='delta' is not compatible"):
-        Margins(fit, transforms=[reimpute(_mean_imputer, incomplete=df_nan)], method="delta")
+        Margins(
+            fit, transforms=[reimpute(_mean_imputer, incomplete=df_nan)], method="delta"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +127,6 @@ def test_reimpute_end_to_end_predict():
 def test_reimpute_freshness_across_replicates():
     """A stochastic imputer should produce different fills on repeated calls."""
     pytest.importorskip("sklearn")
-    from sklearn.experimental import enable_iterative_imputer
     from sklearn.impute import IterativeImputer
 
     rng = np.random.default_rng(42)
@@ -165,7 +164,9 @@ def test_reimpute_freshness_across_replicates():
         coef = np.asarray(adapter.coefficients())
         if not np.allclose(coef, orig_coef, atol=1e-6):
             diffs += 1
-    assert diffs > 0, "All replicates had identical coefficients — imputer may be frozen"
+    assert diffs > 0, (
+        "All replicates had identical coefficients — imputer may be frozen"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +178,6 @@ def test_reimpute_reproducible_with_fresh_seeded_imputer():
     """Two fresh sessions with the same seeded imputer and rng_seed must
     produce identical bootstrap draws."""
     pytest.importorskip("sklearn")
-    from sklearn.experimental import enable_iterative_imputer
     from sklearn.impute import IterativeImputer
 
     rng = np.random.default_rng(42)
@@ -234,7 +234,6 @@ def test_reimpute_widens_se_on_affected_coefficient():
     large as plain-bootstrap SE on the completed data, because MI injects
     imputation-model uncertainty."""
     pytest.importorskip("sklearn")
-    from sklearn.experimental import enable_iterative_imputer
     from sklearn.impute import IterativeImputer
 
     rng = np.random.default_rng(42)
@@ -296,7 +295,6 @@ def test_reimpute_draws_differ_from_plain_bootstrap():
     """MI bootstrap draws must differ from plain-bootstrap draws, proving
     that imputation uncertainty is injected into the distribution."""
     pytest.importorskip("sklearn")
-    from sklearn.experimental import enable_iterative_imputer
     from sklearn.impute import IterativeImputer
 
     rng = np.random.default_rng(42)

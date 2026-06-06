@@ -9,7 +9,6 @@ import statsmodels.formula.api as smf
 
 from pymargins import Margins, drop_outliers, reimpute, trim
 
-
 # ---------------------------------------------------------------------------
 # drop_outliers
 # ---------------------------------------------------------------------------

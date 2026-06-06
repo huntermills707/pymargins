@@ -510,10 +510,14 @@ class Margins:
             if self.survey_design is not None:
                 if self.survey_design.psu is not None:
                     if np.any(pd.isna(np.asarray(self.survey_design.psu))):
-                        raise ValueError("survey_design.psu must not contain NaN values.")
+                        raise ValueError(
+                            "survey_design.psu must not contain NaN values."
+                        )
                 if self.survey_design.strata is not None:
                     if np.any(pd.isna(np.asarray(self.survey_design.strata))):
-                        raise ValueError("survey_design.strata must not contain NaN values.")
+                        raise ValueError(
+                            "survey_design.strata must not contain NaN values."
+                        )
 
             # G4: survey_design + source_data override or row-altering stage
             if self.survey_design is not None:

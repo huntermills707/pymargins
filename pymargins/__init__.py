@@ -62,8 +62,8 @@ from ._result import (
     adjust,
     pool_imputations,
 )
-from .margins import Margins
 from ._transforms import drop_outliers, reimpute, trim
+from .margins import Margins
 from .matching import PysmatchClient
 from .scenarios import (
     all_pairwise,

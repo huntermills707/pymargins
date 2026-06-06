@@ -10,7 +10,6 @@ import statsmodels.formula.api as smf
 from pymargins import Margins, drop_outliers, reimpute
 from pymargins._transforms import IdentityStage
 
-
 # ---------------------------------------------------------------------------
 # G4: survey_design + source_data override or row-altering stage
 # ---------------------------------------------------------------------------
@@ -108,7 +107,9 @@ def test_matching_plus_transforms_raises():
     )
     fit = smf.ols("y ~ x", data=df).fit()
 
-    with pytest.raises(ValueError, match="matching= and transforms= cannot be used together"):
+    with pytest.raises(
+        ValueError, match="matching= and transforms= cannot be used together"
+    ):
         Margins(
             fit,
             matching=_FakeMatcher(n),
