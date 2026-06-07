@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-06-06
+
+### Added
+
+- Transform pipeline (`Margins(transforms=[...])`) for bootstrap inference.
+  Stages apply `frame → frame` transforms that are re-derived on every
+  bootstrap replicate.  v1 stages:
+  - `reimpute(imputer, incomplete=df)` — bootstrap-then-impute multiple
+    imputation.  The imputer is fit-and-imputed fresh each replicate,
+    injecting imputation-model uncertainty into the bootstrap distribution.
+    Produces an ordinary bootstrap `MarginsResult`; no Rubin combinator.
+  - `drop_outliers(rule)` — row filter re-applied per replicate.
+  - `trim(lower=, upper=, columns=)` — bound-based row filter re-applied
+    per replicate.
+- Structural guards: `survey_design` × row-altering/source-overriding stages
+  are rejected; `matching=` and `transforms=` are mutually exclusive;
+  `requires_resampling=True` stages force `method='bootstrap'`; weighted
+  aggregation + row-altering stages are rejected (3b) to prevent silent
+  misalignment.
+- `pool_imputations(results, *, label=, complete_df=)` — Rubin's-rules
+  combinator over M `MarginsResult` objects from precomputed imputations, the
+  artifacts-side counterpart to the bootstrap `reimpute` stage. Pools on the
+  inference scale and reports through `φ`; uses a Student-*t* interval on the
+  Rubin (1987) degrees of freedom, with an optional Barnard–Rubin (1999)
+  small-sample correction via `complete_df=`. Inference-method-agnostic: each
+  branch's `W_m = se_m²` may have come from delta, simulation, or bootstrap.
+  Validates cross-imputation commensurability (labels, `kind`, `at`,
+  `scenarios`, level, scale) and fails loudly on mismatch. Surfaces a new
+  `ImputationDiagnostic` (FMI, relative efficiency, degrees of freedom, and the
+  within/between/total variances) on `MarginsResult.imputation_diagnostic` and
+  in the `summary()` footer. Pooled results recompute their interval at a new
+  `conf_int(level=)` and report a pooled *t*-test from `test()`.
+- New tutorial `docs/tutorials/pooling_imputations.md` (precomputed-frames MI),
+  the artifacts twin of `mi_via_reimpute.md`.
+
+### Fixed
+
+- Docstring wording in `InferenceConfig`: "K–R" corrected to "simulation"
+  (only delta/simulation/bootstrap exist).
+
 ## [0.2.0] — 2026-05-31
 
 ### Added
@@ -174,7 +214,8 @@ Initial public release on PyPI and Read the Docs.
 - Documentation site with tutorials, how-to guides, API reference,
   and theory/design explanations.
 
-[Unreleased]: https://github.com/huntermills707/pymargins/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/huntermills707/pymargins/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/huntermills707/pymargins/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/huntermills707/pymargins/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/huntermills707/pymargins/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/huntermills707/pymargins/releases/tag/v0.1.1

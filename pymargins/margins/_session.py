@@ -216,6 +216,7 @@ class Margins:
             "block_size",
             "bootstrap_config",
             "matching",
+            "transforms",
         }
     )
 
@@ -268,6 +269,7 @@ class Margins:
         bootstrap_config: dict | None = _NOT_GIVEN,
         progress_bar: bool = _NOT_GIVEN,
         matching: Any | None = _NOT_GIVEN,
+        transforms: list | None = _NOT_GIVEN,
         survey_design: Any | None = _NOT_GIVEN,
         formula: str | None = _NOT_GIVEN,
         data: pd.DataFrame | None = _NOT_GIVEN,
@@ -345,6 +347,7 @@ class Margins:
         bootstrap_config = None if bootstrap_config is _NOT_GIVEN else bootstrap_config
         progress_bar = False if progress_bar is _NOT_GIVEN else progress_bar
         matching = None if matching is _NOT_GIVEN else matching
+        transforms = None if transforms is _NOT_GIVEN else transforms
         survey_design = None if survey_design is _NOT_GIVEN else survey_design
         formula = None if formula is _NOT_GIVEN else formula
         data = None if data is _NOT_GIVEN else data
@@ -383,6 +386,7 @@ class Margins:
         self.bootstrap_config = bootstrap_config
         self.progress_bar = progress_bar
         self.matching = matching
+        self.transforms = transforms
         self.survey_design = survey_design
         self.strict = strict
 
@@ -472,6 +476,76 @@ class Margins:
                         f"weights length ({len(w_arr)}) must equal matched_data "
                         f"length ({n_matched}) when matching is provided."
                     )
+
+        # Validate transform pipeline
+        if self.transforms is not None:
+            # G5: matching and transforms are mutually exclusive
+            if self.matching is not None:
+                raise ValueError(
+                    "matching= and transforms= cannot be used together. "
+                    "Use one or the other."
+                )
+
+            # Normalize to list
+            if not isinstance(self.transforms, list):
+                self.transforms = list(self.transforms)
+
+            # G1: requires_resampling stages are bootstrap-only
+            if self.method != "bootstrap":
+                for stage in self.transforms:
+                    if getattr(stage, "requires_resampling", False):
+                        raise ValueError(
+                            f"method='{self.method}' is not compatible with "
+                            f"transform stage {type(stage).__name__} because "
+                            f"requires_resampling=True. Use method='bootstrap'."
+                        )
+
+            # G2: structural arrays must be NaN-free
+            if self.cluster is not None:
+                if np.any(pd.isna(np.asarray(self.cluster))):
+                    raise ValueError("cluster IDs must not contain NaN values.")
+            if self.weights is not None:
+                if np.any(pd.isna(np.asarray(self.weights))):
+                    raise ValueError("weights must not contain NaN values.")
+            if self.survey_design is not None:
+                if self.survey_design.psu is not None:
+                    if np.any(pd.isna(np.asarray(self.survey_design.psu))):
+                        raise ValueError(
+                            "survey_design.psu must not contain NaN values."
+                        )
+                if self.survey_design.strata is not None:
+                    if np.any(pd.isna(np.asarray(self.survey_design.strata))):
+                        raise ValueError(
+                            "survey_design.strata must not contain NaN values."
+                        )
+
+            # G4: survey_design + source_data override or row-altering stage
+            if self.survey_design is not None:
+                for stage in self.transforms:
+                    if getattr(stage, "source_data", None) is not None:
+                        raise ValueError(
+                            "survey_design is not compatible with transform stages "
+                            f"that override source_data ({type(stage).__name__}). "
+                            "Impute externally and pass the completed data, or "
+                            "omit survey_design."
+                        )
+                    if getattr(stage, "alters_rows", False):
+                        raise ValueError(
+                            "survey_design is not compatible with row-altering "
+                            f"transform stages ({type(stage).__name__}). "
+                            "Row-altering stages break the fixed-design assumption."
+                        )
+
+            # 3b: weighted aggregation + row-altering stage
+            if self.weights is not None:
+                for stage in self.transforms:
+                    if getattr(stage, "alters_rows", False):
+                        raise ValueError(
+                            "weights= is not compatible with row-altering transform "
+                            f"stages ({type(stage).__name__}). Row-altering stages "
+                            "thin the data but session weights are not thinned, "
+                            "so weighted aggregation would misalign."
+                        )
 
         # Validate survey design
         if self.survey_design is not None:
