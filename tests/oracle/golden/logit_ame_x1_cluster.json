@@ -1,0 +1,37 @@
+{
+  "case_id": "logit_ame_x1_cluster",
+  "created": "2026-06-11",
+  "r_version": "R version 4.6.0 (2026-04-24)",
+  "packages": {
+    "marginaleffects": "0.32.0",
+    "sandwich": "3.1.1",
+    "survey": "4.5"
+  },
+  "data": "oracle_main.csv",
+  "model": {
+    "formula": "y_bin ~ treat + x1 + x2",
+    "family": "binomial(logit)",
+    "fit_control": "glm.control(epsilon = 1e-12, maxit = 200)"
+  },
+  "r_call": "avg_slopes(fit, variables = 'x1', vcov = vcovCL(fit, cluster = ~g, type = 'HC1'))",
+  "vcov": "cluster(g)",
+  "ci_convention": {
+    "dist": "z",
+    "level": 0.95
+  },
+  "labels": [
+    "x1"
+  ],
+  "quantities": {
+    "coefficients": [-0.551675573129041, 1.04244514394938, 0.550350316045096, -0.462215108393738],
+    "estimate": 0.11786426784517,
+    "std_error": 0.0252336090239956,
+    "conf_low": 0.0684073029581733,
+    "conf_high": 0.167321232732166,
+    "vcov_matrix": [0.0209208831622955, -0.0218474066043633, -0.000875301971947764, -0.00221697545026151, -0.0218474066043633, 0.0607055647624676, 0.0113925904787527, 0.005394219036564, -0.000875301971947764, 0.0113925904787527, 0.0187059295966155, -0.00672994939931771, -0.00221697545026151, 0.005394219036564, -0.00672994939931771, 0.0179145497878105]
+  },
+  "tolerances": {
+    "std_error": 2e-05
+  },
+  "notes": "alignment golden: vcovCL(cluster=~g, type='HC1') matrix included; IRLS meat precision leaves SE ~1e-5 from vcov_matrix-derived SE"
+}

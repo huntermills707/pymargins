@@ -1,0 +1,34 @@
+{
+  "case_id": "logit_ame_x1_hc1",
+  "created": "2026-06-11",
+  "r_version": "R version 4.6.0 (2026-04-24)",
+  "packages": {
+    "marginaleffects": "0.32.0",
+    "sandwich": "3.1.1",
+    "survey": "4.5"
+  },
+  "data": "oracle_main.csv",
+  "model": {
+    "formula": "y_bin ~ treat + x1 + x2",
+    "family": "binomial(logit)",
+    "fit_control": "glm.control(epsilon = 1e-12, maxit = 200)"
+  },
+  "r_call": "avg_slopes(fit, variables = 'x1', vcov = vcovHC(fit, type = 'HC1'))",
+  "vcov": "HC1",
+  "ci_convention": {
+    "dist": "z",
+    "level": 0.95
+  },
+  "labels": [
+    "x1"
+  ],
+  "quantities": {
+    "coefficients": [-0.551675573129041, 1.04244514394938, 0.550350316045096, -0.462215108393738],
+    "estimate": 0.11786426784517,
+    "std_error": 0.0234420766544811,
+    "conf_low": 0.0719186418795593,
+    "conf_high": 0.16380989381078
+  },
+  "tolerances": {},
+  "notes": "StatsmodelsGLMAdapter now applies the n/(n-k) HC1 finite-sample correction; output matches R vcovHC(type='HC1') at default tolerance"
+}

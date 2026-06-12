@@ -1,0 +1,37 @@
+{
+  "case_id": "ols_ame_x1_cluster",
+  "created": "2026-06-11",
+  "r_version": "R version 4.6.0 (2026-04-24)",
+  "packages": {
+    "marginaleffects": "0.32.0",
+    "sandwich": "3.1.1",
+    "survey": "4.5"
+  },
+  "data": "oracle_main.csv",
+  "model": {
+    "formula": "y_cont ~ treat + x1 + x2",
+    "family": "gaussian(identity)",
+    "fit_control": "lm()"
+  },
+  "r_call": "avg_slopes(fit, variables = 'x1', vcov = vcovCL(fit, cluster = ~g, type = 'HC1'))",
+  "vcov": "cluster(g)",
+  "ci_convention": {
+    "dist": "z",
+    "level": 0.95
+  },
+  "labels": [
+    "x1"
+  ],
+  "quantities": {
+    "coefficients": [0.963687783269367, 2.00517323181344, 1.42623830140146, -0.993470135630923],
+    "estimate": 1.42623830140152,
+    "std_error": 0.0562534963312309,
+    "conf_low": 1.31598347458785,
+    "conf_high": 1.53649312821519,
+    "vcov_matrix": [0.00303440122471274, -0.00219711783633414, -0.000262618068084377, 0.000299608764757753, -0.00219711783633414, 0.0083094502915516, 0.000256607771248626, 0.000347846417811523, -0.000262618068084377, 0.000256607771248625, 0.00316446923653312, 0.000496108852095521, 0.000299608764757753, 0.000347846417811523, 0.000496108852095521, 0.00140812220088055]
+  },
+  "tolerances": {
+    "std_error": 2e-05
+  },
+  "notes": "alignment golden: vcovCL(cluster=~g, type='HC1') matrix included; OLS closed-form matches within machine precision"
+}

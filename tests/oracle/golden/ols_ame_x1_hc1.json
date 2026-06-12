@@ -1,0 +1,34 @@
+{
+  "case_id": "ols_ame_x1_hc1",
+  "created": "2026-06-11",
+  "r_version": "R version 4.6.0 (2026-04-24)",
+  "packages": {
+    "marginaleffects": "0.32.0",
+    "sandwich": "3.1.1",
+    "survey": "4.5"
+  },
+  "data": "oracle_main.csv",
+  "model": {
+    "formula": "y_cont ~ treat + x1 + x2",
+    "family": "gaussian(identity)",
+    "fit_control": "lm()"
+  },
+  "r_call": "avg_slopes(fit, variables = 'x1', vcov = vcovHC(fit, type = 'HC1'))",
+  "vcov": "HC1",
+  "ci_convention": {
+    "dist": "z",
+    "level": 0.95
+  },
+  "labels": [
+    "x1"
+  ],
+  "quantities": {
+    "coefficients": [0.963687783269367, 2.00517323181344, 1.42623830140146, -0.993470135630923],
+    "estimate": 1.42623830140152,
+    "std_error": 0.0506354829239318,
+    "conf_low": 1.32699457853082,
+    "conf_high": 1.52548202427222
+  },
+  "tolerances": {},
+  "notes": ""
+}
