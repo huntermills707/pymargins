@@ -548,23 +548,75 @@ def test_predict_h_matches_legacy_grid_plus_over(fit_logit):
     assert len(scen_old) == len(cq.scenarios)
 
 
-@pytest.mark.xfail(
-    reason="weights + over subset bug — see ledger D12",
-    raises=TypeError,
-)
-def test_predict_weights_plus_over_xfail(fit_logit):
-    """Documented crash: full-length weights are not subset per over-group."""
+def test_predict_weights_plus_over_weighted_group_means(fit_logit):
+    """D16 (resolves D12): weights subset per over-group -> weighted group means."""
+    import jax.numpy as jnp
+
     rng = np.random.default_rng(6)
     n = len(fit_logit.model.endog)
     w = np.exp(rng.normal(0, 0.3, size=n))
     m = Margins(fit_logit, at="overall", method="delta", weights=w)
-    scenario = {"over": "g"}
-    cq = compile_query(
-        QuerySpec(kind="predict", scenario=scenario),
-        ctx_from_margins(m),
-    )
+    ctx = ctx_from_margins(m)
     beta = np.asarray(m.adapter.coefficients())
-    cq.h(beta)  # currently raises TypeError on incompatible shapes
+    cq = compile_query(QuerySpec(kind="predict", scenario={"over": "g"}), ctx)
+    got = np.asarray(cq.h(beta))
+
+    # Independent expectation: weighted mean of response-scale predictions
+    # within each group, groups in sorted order.
+    base = ctx.base_data
+    levels = sorted(base["g"].unique())
+    expected = []
+    for g_val in levels:
+        mask = (base["g"] == g_val).to_numpy()
+        X_g = m.adapter.design_matrix_from_df(base[mask])
+        mu = m.adapter.predict(jnp.asarray(beta), X_g, offset=None)
+        w_g = jnp.asarray(w[mask])
+        expected.append(float(jnp.sum(w_g * mu) / jnp.sum(w_g)))
+    np.testing.assert_allclose(got, np.asarray(expected), rtol=1e-12)
+    assert cq.labels == [f"g={v}" for v in levels]
+
+    # Legacy still crashes (frozen until R7); divergence is intentional (D16).
+    h_old, _, _ = _build_prediction_estimand(m, {"over": "g"}, None)
+    with pytest.raises(TypeError):
+        h_old(beta)
+
+
+def test_dydx_weights_plus_over_matches_per_group_runs(fit_logit):
+    """D16: over= with weights equals stacking per-group weighted runs.
+
+    The no-over weighted dydx path is dual-run-anchored to legacy, so the
+    per-group runs serve as the oracle for the over= vector.
+    """
+    rng = np.random.default_rng(9)
+    n = len(fit_logit.model.endog)
+    w = np.exp(rng.normal(0, 0.3, size=n))
+    m = Margins(fit_logit, at="overall", method="delta", weights=w)
+    ctx = ctx_from_margins(m)
+    beta = np.asarray(m.adapter.coefficients())
+    cq = compile_query(
+        QuerySpec(kind="dydx", scenario={"over": "g"}, variables=("x1",)), ctx
+    )
+    got = np.asarray(cq.h(beta))
+
+    base = ctx.base_data
+    expected = []
+    for g_val in sorted(base["g"].unique()):
+        mask = (base["g"] == g_val).to_numpy()
+        sub_ctx = QueryContext(
+            adapter=ctx.adapter,
+            base_data=base[mask],
+            at=ctx.at,
+            weights=w[mask],
+            phi=ctx.phi,
+            phi_inv=ctx.phi_inv,
+            fd_step=ctx.fd_step,
+            gradient_backend=ctx.gradient_backend,
+        )
+        sub = compile_query(
+            QuerySpec(kind="dydx", scenario={}, variables=("x1",)), sub_ctx
+        )
+        expected.append(float(np.asarray(sub.h(beta))))
+    np.testing.assert_allclose(got, np.asarray(expected), rtol=1e-12)
 
 
 def test_contrasts_2d_matrix_h_matches_legacy_numbers(fit_logit):
@@ -583,31 +635,130 @@ def test_contrasts_2d_matrix_h_matches_legacy_numbers(fit_logit):
     )
     beta = np.asarray(m.adapter.coefficients())
     np.testing.assert_array_equal(np.asarray(h_old(beta)), np.asarray(cq.h(beta)))
-    # Raw 2D matrix currently gets a single generic label (F3 label gap).
-    assert cq.labels == ["contrast"]
+    # D18 (resolves D14): raw 2D matrices normalize to named contrasts.
+    assert cq.labels == ["contrast[0]", "contrast[1]"]
 
 
-def test_contrasts_weights_ignored_in_aggregation(fit_logit):
-    """Documented legacy defect: contrast aggregation ignores session weights."""
+def test_contrasts_list_of_lists_matches_2d(fit_logit):
+    """D18: list-of-lists normalizes identically to a 2D matrix."""
+    m = Margins(fit_logit, at="overall", method="delta")
+    scenarios = (
+        {"atexog": {"x1": 0.0}},
+        {"atexog": {"x1": 1.0}},
+        {"atexog": {"x1": 2.0}},
+    )
+    C = np.array([[1.0, -1.0, 0.0], [0.0, 1.0, -1.0]])
+    cq_mat = compile_query(
+        QuerySpec(kind="contrasts", scenarios=scenarios, contrast_weights=C),
+        ctx_from_margins(m),
+    )
+    cq_lol = compile_query(
+        QuerySpec(
+            kind="contrasts",
+            scenarios=scenarios,
+            contrast_weights=[[1.0, -1.0, 0.0], [0.0, 1.0, -1.0]],
+        ),
+        ctx_from_margins(m),
+    )
+    beta = np.asarray(m.adapter.coefficients())
+    np.testing.assert_array_equal(
+        np.asarray(cq_mat.h(beta)), np.asarray(cq_lol.h(beta))
+    )
+    assert cq_lol.labels == ["contrast[0]", "contrast[1]"]
+
+
+def test_contrasts_weight_length_mismatch_raises(fit_logit):
+    m = Margins(fit_logit, at="overall", method="delta")
+    scenarios = ({"atexog": {"x1": 0.0}}, {"atexog": {"x1": 1.0}})
+    with pytest.raises(ValueError, match="has 3 weights but 2 scenarios"):
+        compile_query(
+            QuerySpec(
+                kind="contrasts",
+                scenarios=scenarios,
+                contrast_weights=np.array([1.0, -1.0, 0.0]),
+            ),
+            ctx_from_margins(m),
+        )
+
+
+def test_contrasts_nonfinite_weights_raise(fit_logit):
+    m = Margins(fit_logit, at="overall", method="delta")
+    scenarios = ({"atexog": {"x1": 0.0}}, {"atexog": {"x1": 1.0}})
+    with pytest.raises(ValueError, match="must be finite"):
+        compile_query(
+            QuerySpec(
+                kind="contrasts",
+                scenarios=scenarios,
+                contrast_weights=np.array([np.nan, 1.0]),
+            ),
+            ctx_from_margins(m),
+        )
+
+
+def test_contrasts_non_dict_scenario_raises(fit_logit):
+    m = Margins(fit_logit, at="overall", method="delta")
+    with pytest.raises(TypeError, match="must be a dict"):
+        compile_query(
+            QuerySpec(
+                kind="contrasts",
+                scenarios=("notadict",),
+                contrast_weights=np.array([1.0]),
+            ),
+            ctx_from_margins(m),
+        )
+
+
+def test_contrasts_weights_honored_in_aggregation(fit_logit):
+    """D17 (resolves D13): contrast scenario aggregation uses declared weights."""
+    import jax.numpy as jnp
+
     rng = np.random.default_rng(7)
     n = len(fit_logit.model.endog)
     w = np.exp(rng.normal(0, 0.3, size=n))
     m_w = Margins(fit_logit, at="overall", method="delta", weights=w)
-    m0 = Margins(fit_logit, at="overall", method="delta", weights=None)
     scenarios = [{"atexog": {"x1": 0.0}}, {"atexog": {"x1": 1.0}}]
-    weights = np.array([1.0, -1.0])
-    h_w = _build_contrast_estimand(m_w, scenarios, weights)
-    h_0 = _build_contrast_estimand(m0, scenarios, weights)
+    cw = np.array([1.0, -1.0])
     cqw = compile_query(
-        QuerySpec(kind="contrasts", scenarios=tuple(scenarios), contrast_weights=weights),
+        QuerySpec(kind="contrasts", scenarios=tuple(scenarios), contrast_weights=cw),
         ctx_from_margins(m_w),
     )
     beta = np.asarray(m_w.adapter.coefficients())
-    np.testing.assert_array_equal(np.asarray(h_w(beta)), np.asarray(cqw.h(beta)))
-    np.testing.assert_array_equal(np.asarray(h_w(beta)), np.asarray(h_0(beta)))
+    got = float(np.asarray(cqw.h(beta)))
+
+    # Independent expectation: weighted mean of response-scale predictions
+    # per counterfactual scenario, then the linear combination.
+    base = m_w._base_data
+    w_jnp = jnp.asarray(w)
+    vals_w, vals_u = [], []
+    for x1v in (0.0, 1.0):
+        df_s = base.copy()
+        df_s["x1"] = x1v
+        X_s = m_w.adapter.design_matrix_from_df(df_s)
+        mu = m_w.adapter.predict(jnp.asarray(beta), X_s, offset=None)
+        vals_w.append(float(jnp.sum(w_jnp * mu) / jnp.sum(w_jnp)))
+        vals_u.append(float(jnp.mean(mu)))
+    np.testing.assert_allclose(got, vals_w[0] - vals_w[1], rtol=1e-12)
+
+    # Legacy combines the UNWEIGHTED per-scenario means — divergence is D17.
+    h_legacy = _build_contrast_estimand(m_w, scenarios, jnp.asarray(cw))
+    np.testing.assert_allclose(
+        float(np.asarray(h_legacy(beta))), vals_u[0] - vals_u[1], rtol=1e-12
+    )
+
+    # Unweighted construction is unchanged: still matches legacy bit-for-bit.
+    m0 = Margins(fit_logit, at="overall", method="delta")
+    cq0 = compile_query(
+        QuerySpec(kind="contrasts", scenarios=tuple(scenarios), contrast_weights=cw),
+        ctx_from_margins(m0),
+    )
+    h0 = _build_contrast_estimand(m0, scenarios, jnp.asarray(cw))
+    np.testing.assert_array_equal(np.asarray(h0(beta)), np.asarray(cq0.h(beta)))
 
 
-def test_evaluate_h_matches_legacy_weights(fit_logit):
+def test_evaluate_weights_honored_in_aggregation(fit_logit):
+    """D17: evaluate scenario aggregation uses declared weights."""
+    import jax.numpy as jnp
+
     rng = np.random.default_rng(8)
     n = len(fit_logit.model.endog)
     w = np.exp(rng.normal(0, 0.3, size=n))
@@ -620,13 +771,68 @@ def test_evaluate_h_matches_legacy_weights(fit_logit):
     def compose(p):
         return p[0] / p[1]
 
-    h_old = _build_evaluate_estimand(m, scenarios, compose)
     cq = compile_query(
         QuerySpec(kind="evaluate", scenarios=tuple(scenarios), compose=compose),
         ctx_from_margins(m),
     )
     beta = np.asarray(m.adapter.coefficients())
+    got = float(np.asarray(cq.h(beta)))
+
+    base = m._base_data
+    w_jnp = jnp.asarray(w)
+    vals_w, vals_u = [], []
+    for g_val in ("a", "b"):
+        df_s = base.copy()
+        df_s["g"] = g_val
+        X_s = m.adapter.design_matrix_from_df(df_s)
+        mu = m.adapter.predict(jnp.asarray(beta), X_s, offset=None)
+        vals_w.append(float(jnp.sum(w_jnp * mu) / jnp.sum(w_jnp)))
+        vals_u.append(float(jnp.mean(mu)))
+    np.testing.assert_allclose(got, vals_w[0] / vals_w[1], rtol=1e-12)
+
+    # Legacy composes the UNWEIGHTED per-scenario means — divergence is D17.
+    h_legacy = _build_evaluate_estimand(m, scenarios, compose)
+    np.testing.assert_allclose(
+        float(np.asarray(h_legacy(beta))), vals_u[0] / vals_u[1], rtol=1e-12
+    )
+
+
+def test_contrasts_weights_at_mean_single_row_matches_legacy(fit_logit_num):
+    """Single-row scenarios (at='mean') aggregate trivially; weighted ctx
+    stays bit-identical to legacy."""
+    import jax.numpy as jnp
+
+    rng = np.random.default_rng(10)
+    n = len(fit_logit_num.model.endog)
+    w = np.exp(rng.normal(0, 0.3, size=n))
+    m = Margins(fit_logit_num, at="mean", method="delta", weights=w)
+    scenarios = [{"atexog": {"x1": 0.0}}, {"atexog": {"x1": 1.0}}]
+    cw = np.array([1.0, -1.0])
+    h_old = _build_contrast_estimand(m, scenarios, jnp.asarray(cw))
+    cq = compile_query(
+        QuerySpec(kind="contrasts", scenarios=tuple(scenarios), contrast_weights=cw),
+        ctx_from_margins(m),
+    )
+    beta = np.asarray(m.adapter.coefficients())
     np.testing.assert_array_equal(np.asarray(h_old(beta)), np.asarray(cq.h(beta)))
+
+
+def test_weights_with_data_override_scenario_refuses(fit_logit):
+    """D17: weights= with a scenario whose rows can't align refuses clearly."""
+    rng = np.random.default_rng(11)
+    n = len(fit_logit.model.endog)
+    w = np.exp(rng.normal(0, 0.3, size=n))
+    m = Margins(fit_logit, at="overall", method="delta", weights=w)
+    custom = m._base_data.head(5)
+    with pytest.raises(ValueError, match="Weighted aggregation requires"):
+        compile_query(
+            QuerySpec(
+                kind="contrasts",
+                scenarios=({"data": custom}, {"atexog": {"x1": 1.0}}),
+                contrast_weights=np.array([1.0, -1.0]),
+            ),
+            ctx_from_margins(m),
+        )
 
 
 # ---------------------------------------------------------------------------

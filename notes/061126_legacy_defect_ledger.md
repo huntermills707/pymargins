@@ -338,3 +338,98 @@ WTP (a scalar ratio of slopes) and avoids the unnecessary evaluate indirection;
 recorded for R8 changelog.
 
 Status: recorded-for-R8-changelog
+
+## D16 — D12 resolved: weights= + over= computes weighted means within group (R2 follow-up)
+
+Decision (user, 2026-06-12): per-group weighted means. Aggregation weights are
+per-row of the base data; each over-group's estimand is Σ w_i·μ_i / Σ w_i over
+that group's rows only. Matches `marginaleffects` `by=` + `wts=` and Stata
+`margins, over() [pw=]`.
+
+Where: `pymargins/_engine/_queries.py::_enumerate_groups`
+(`track_positions=`), `_build_prediction_query`, `_build_slope_query`.
+Positions are tracked positionally (not by index label) so the subsetting
+stays correct for bootstrap-resampled frames with duplicate index labels.
+The per-group weights also feed `make_aggregation_resolver`, so
+`at="mean"/"typical"` under `over=` summarizes covariates with the group's
+weights (previously also a latent crash).
+
+Evidence:
+- `tests/test_engine_queries.py::test_predict_weights_plus_over_weighted_group_means`
+  — independent closed-form expectation (per-group weighted mean of
+  response-scale predictions) at rtol 1e-12; also pins that legacy still
+  raises TypeError (frozen until R7), so the divergence is intentional.
+- `tests/test_engine_queries.py::test_dydx_weights_plus_over_matches_per_group_runs`
+  — the over= vector equals stacking per-group runs of the
+  legacy-dual-run-anchored no-over weighted path.
+
+Disposition: fixed in the new engine only; legacy remains frozen-broken until
+R7 deletes it. An R oracle golden (`avg_predictions(by =, wts =)`) lands with
+the R5/R6 case matrix.
+
+Status: fixed (R2 follow-up commit); recorded-for-R8-changelog
+
+## D17 — D13 resolved: contrasts()/evaluate() aggregate with declared weights (R2 follow-up)
+
+Decision (user, 2026-06-12): honor weights. Per-scenario predictions are
+aggregated with the declared per-observation weights before the linear
+combination / compose, consistent with `predict()`/`dydx()` and with
+`marginaleffects::avg_comparisons(wts =)`. This CHANGES SHIPPED 0.3.0
+NUMBERS for weighted contrasts/evaluate (which silently aggregated
+unweighted) — R8 Corrections entry required.
+
+Companion convention decided in the same session (guide Appendix D.1):
+`steps.input(design=)` implies design-weighted aggregation at R6 (matching
+`marginaleffects` auto-extraction of svyglm weights and Stata
+`svy: margins`); weighted twin goldens land at R6.
+
+Where: `pymargins/_engine/_queries.py::_scenario_weights_for`,
+`_build_contrast_query`, `_build_evaluate_query` (threads
+`scenario_weights=` into `make_linear_combination_estimand` /
+`make_evaluate_estimand`; the kernels already supported it with
+finiteness/non-negativity validation). Single-row scenarios
+(`at="mean"/"typical"`) aggregate trivially and carry None; any other
+row-count mismatch (data-override / grid scenarios) refuses with a clear
+ValueError rather than a broadcast crash.
+
+Evidence:
+- `test_contrasts_weights_honored_in_aggregation` — new value equals the
+  weighted closed form; legacy equals the unweighted closed form (both at
+  rtol 1e-12), pinning the intentional divergence; unweighted construction
+  remains bit-identical to legacy.
+- `test_evaluate_weights_honored_in_aggregation` — same shape for compose.
+- `test_contrasts_weights_at_mean_single_row_matches_legacy` — single-row
+  path unchanged, bit-identical to legacy.
+- `test_weights_with_data_override_scenario_refuses` — alignment refusal.
+
+Disposition: fixed in the new engine only; legacy frozen until R7.
+
+Status: fixed (R2 follow-up commit); recorded-for-R8-changelog
+
+## D18 — D14 resolved: contrast normalization lives in the builder (R2 follow-up)
+
+Decision (user, 2026-06-12): port the legacy session normalization +
+validation into `_build_contrast_query` now (not at R6). The R6 noun stays
+"three lines"; `QuerySpec.contrast_weights` is normalized at compile time for
+every caller.
+
+Where: `pymargins/_engine/_queries.py::_normalize_contrast_weights`
+(dict / 2D ndarray / list-of-lists / 1D vector forms, ported from
+`_session.py:1145–1170`), `_validate_contrast_weights` (length +
+finiteness, ported from `_session.py:1180–1200`). One deliberate ordering
+improvement over legacy: the scenario type check runs BEFORE normalization,
+so a non-dict scenario raises the intended TypeError instead of legacy's
+incidental AttributeError from the vector-label default reading
+`scenarios[0].get(...)`.
+
+Evidence: `test_contrasts_2d_matrix_h_matches_legacy_numbers` (labels now
+`['contrast[0]', 'contrast[1]']`, numbers unchanged vs the legacy dict
+spelling), `test_contrasts_list_of_lists_matches_2d`,
+`test_contrasts_weight_length_mismatch_raises`,
+`test_contrasts_nonfinite_weights_raise`,
+`test_contrasts_non_dict_scenario_raises`.
+
+Disposition: fixed in the new engine; label-only + validation change (no
+shipped numbers affected).
+
+Status: fixed (R2 follow-up commit)

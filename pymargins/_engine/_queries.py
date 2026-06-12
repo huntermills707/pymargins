@@ -169,11 +169,20 @@ def _enumerate_groups(
     scenario: dict,
     base_data,
     variable_metadata: dict,
+    *,
+    track_positions: bool = False,
 ):
-    """Resolve ``scenario['over']`` into a list of (group_label, df) pairs."""
+    """Resolve ``scenario['over']`` into (group_label, df, positions) triples.
+
+    ``positions`` is the positional row index of each group within
+    ``base_data``, computed only when ``track_positions`` is set — it is
+    what lets per-observation aggregation weights be subset per over-group
+    (ledger D16). Positional (not label) indexing keeps the mapping correct
+    for bootstrap-resampled frames with duplicate index labels.
+    """
     over_spec = scenario.get("over")
     if over_spec is None:
-        return [(None, base_data)], None
+        return [(None, base_data, None)], None
     over_keys = [over_spec] if isinstance(over_spec, str) else list(over_spec)
     unknown = set(over_keys) - set(variable_metadata.keys())
     if unknown:
@@ -185,7 +194,15 @@ def _enumerate_groups(
         raise TypeError(
             f"over= requires base_data to support groupby, got {type(base_data).__name__}"
         )
-    groups = [(g, gdf) for g, gdf in base_data.groupby(over_keys, sort=True)]
+    if track_positions:
+        df = to_pandas_if_needed(base_data)
+        tmp = df.assign(__pymargins_pos=np.arange(len(df)))
+        groups = [
+            (g, gdf.drop(columns="__pymargins_pos"), gdf["__pymargins_pos"].to_numpy())
+            for g, gdf in tmp.groupby(over_keys, sort=True)
+        ]
+    else:
+        groups = [(g, gdf, None) for g, gdf in base_data.groupby(over_keys, sort=True)]
     if not groups:
         raise ValueError(
             f"over={over_keys!r} produced no groups; base data may be empty."
@@ -262,16 +279,26 @@ def _build_prediction_query(spec: QuerySpec, ctx: QueryContext) -> CompiledQuery
     base_data = ctx.base_data
     var_meta = adapter.variable_metadata()
     weights = _bootstrap_weights_for_adapter(ctx)
-    resolver = make_aggregation_resolver(ctx.at, weights)
 
     scenario = dict(spec.scenario or {})
-    groups, over_keys = _enumerate_groups(scenario, base_data, var_meta)
+    groups, over_keys = _enumerate_groups(
+        scenario, base_data, var_meta, track_positions=weights is not None
+    )
 
     sub_scenario = {k: v for k, v in scenario.items() if k != "over"}
     atoms: list[tuple[str | None, Callable]] = []
     scenarios: list[dict] = []
 
-    for group_label, group_df in groups:
+    for group_label, group_df, group_pos in groups:
+        # D16: aggregation weights are per-row of base_data; subset them to
+        # the group's rows so the group estimand is a weighted mean over the
+        # group only (marginaleffects by=+wts= / Stata over() [pw=] semantics).
+        w_g = (
+            np.asarray(weights)[group_pos]
+            if weights is not None and group_pos is not None
+            else weights
+        )
+        resolver = make_aggregation_resolver(ctx.at, w_g)
         df, meta = expand_scenario(sub_scenario, group_df, resolver, var_meta)
         X = adapter.design_matrix_from_df(to_pandas_if_needed(df))
         n_grid = meta.get("n_grid_points", 1)
@@ -293,7 +320,7 @@ def _build_prediction_query(spec: QuerySpec, ctx: QueryContext) -> CompiledQuery
                 estimand_adapter,
                 X_i,
                 aggregate=agg_kind,
-                weights=jnp.asarray(weights) if weights is not None else None,
+                weights=jnp.asarray(w_g) if w_g is not None else None,
                 phi_inv=ctx.phi_inv,
                 transform=spec.transform,
             )
@@ -370,7 +397,6 @@ def _build_slope_query(spec: QuerySpec, ctx: QueryContext) -> CompiledQuery:
     base_data = ctx.base_data
     var_meta = adapter.variable_metadata()
     weights = _bootstrap_weights_for_adapter(ctx)
-    resolver = make_aggregation_resolver(ctx.at, weights)
 
     scenario = dict(spec.scenario or {})
     var_list = list(spec.variables or ())
@@ -380,12 +406,21 @@ def _build_slope_query(spec: QuerySpec, ctx: QueryContext) -> CompiledQuery:
     for v in var_list:
         adapter.column_index_of_variable(v)
 
-    groups, over_keys = _enumerate_groups(scenario, base_data, var_meta)
+    groups, over_keys = _enumerate_groups(
+        scenario, base_data, var_meta, track_positions=weights is not None
+    )
     sub_scenario = {k: v for k, v in scenario.items() if k != "over"}
     atoms: list[tuple[str | None, Callable]] = []
     scenarios: list[dict] = []
 
-    for group_label, group_df in groups:
+    for group_label, group_df, group_pos in groups:
+        # D16: subset per-row aggregation weights to the group's rows.
+        w_g = (
+            np.asarray(weights)[group_pos]
+            if weights is not None and group_pos is not None
+            else weights
+        )
+        resolver = make_aggregation_resolver(ctx.at, w_g)
         df, meta = expand_scenario(sub_scenario, group_df, resolver, var_meta)
         agg_kind = "overall" if ctx.at == "overall" else ("none" if len(df) == 1 else "overall")
 
@@ -407,7 +442,7 @@ def _build_slope_query(spec: QuerySpec, ctx: QueryContext) -> CompiledQuery:
                 df,
                 var_name,
                 aggregate=agg_kind,
-                weights=jnp.asarray(weights) if weights is not None else None,
+                weights=jnp.asarray(w_g) if w_g is not None else None,
                 phi_inv=ctx.phi_inv,
                 transform=spec.transform,
                 fd_step=ctx.fd_step,
@@ -446,6 +481,92 @@ def _build_slope_query(spec: QuerySpec, ctx: QueryContext) -> CompiledQuery:
     )
 
 
+def _normalize_contrast_weights(weights_arg, scenarios):
+    """Normalize the contrasts argument into the dict-or-vector forms accepted
+    by ``make_linear_combination_estimand`` (legacy session normalization,
+    ported per ledger D18)."""
+    if weights_arg is None:
+        raise ValueError("contrasts() requires contrast_weights")
+    if isinstance(weights_arg, dict):
+        weights_arg = {name: jnp.asarray(w) for name, w in weights_arg.items()}
+        labels = list(weights_arg.keys())
+    elif isinstance(weights_arg, (np.ndarray, jnp.ndarray)) and weights_arg.ndim == 2:
+        weights_arg = {
+            f"contrast[{i}]": jnp.asarray(weights_arg[i])
+            for i in range(weights_arg.shape[0])
+        }
+        labels = list(weights_arg.keys())
+    elif (
+        isinstance(weights_arg, list) and weights_arg and isinstance(weights_arg[0], list)
+    ):
+        contrasts_arr = jnp.asarray(weights_arg)
+        if contrasts_arr.ndim != 2:
+            raise ValueError(
+                f"list-of-lists contrast must be 2D after conversion, got {contrasts_arr.ndim}D"
+            )
+        weights_arg = {
+            f"contrast[{i}]": contrasts_arr[i]
+            for i in range(contrasts_arr.shape[0])
+        }
+        labels = list(weights_arg.keys())
+    else:
+        weights_arg = jnp.asarray(weights_arg)
+        labels = [scenarios[0].get("label", "contrast")]
+    return weights_arg, labels
+
+
+def _validate_contrast_weights(weights_arg, n_scenarios: int) -> None:
+    """Length and finiteness validation for normalized contrast weights."""
+    _weights_to_check = []
+    if isinstance(weights_arg, dict):
+        for name, w in weights_arg.items():
+            if w.shape[0] != n_scenarios:
+                raise ValueError(
+                    f"Contrast {name!r} has {w.shape[0]} weights but "
+                    f"{n_scenarios} scenarios were provided."
+                )
+            _weights_to_check.append(w)
+    else:
+        if weights_arg.shape[0] != n_scenarios:
+            raise ValueError(
+                f"Contrast has {weights_arg.shape[0]} weights but "
+                f"{n_scenarios} scenarios were provided."
+            )
+        _weights_to_check.append(weights_arg)
+    for w in _weights_to_check:
+        if not jnp.all(jnp.isfinite(w)):
+            raise ValueError("Contrast weights must be finite (no NaN or Inf)")
+
+
+def _scenario_weights_for(weights, scenarios_X):
+    """Per-scenario aggregation weights for contrast/evaluate estimands (D17).
+
+    Declared weights align row-wise with each scenario's expanded design
+    matrix. A single-row scenario (at="mean"/"typical") aggregates
+    trivially, so it carries None; any other row-count mismatch cannot be
+    weighted coherently and refuses.
+    """
+    if weights is None:
+        return None
+    w = jnp.asarray(np.asarray(weights, dtype=float))
+    out = []
+    for i, X in enumerate(scenarios_X):
+        n_rows = X.shape[0]
+        if n_rows == w.shape[0]:
+            out.append(w)
+        elif n_rows == 1:
+            out.append(None)
+        else:
+            raise ValueError(
+                f"Scenario {i} expands to {n_rows} rows but weights= has length "
+                f"{w.shape[0]}. Weighted aggregation requires the scenario rows "
+                "to align with the declared per-observation weights; "
+                "data-override or grid scenarios with a different row count are "
+                "not compatible with weights=."
+            )
+    return out
+
+
 def _build_contrast_query(spec: QuerySpec, ctx: QueryContext) -> CompiledQuery:
     """Construct a linear combination estimand for contrasts() calls."""
     adapter = ctx.adapter
@@ -454,9 +575,16 @@ def _build_contrast_query(spec: QuerySpec, ctx: QueryContext) -> CompiledQuery:
     if len(scenarios) == 0:
         raise ValueError("contrasts() requires at least one scenario")
 
-    weights_arg = spec.contrast_weights
-    if weights_arg is None:
-        raise ValueError("contrasts() requires contrast_weights")
+    # Scenario type check runs before normalization: the vector-contrast
+    # label default reads scenarios[0], which must already be a dict.
+    for i, s in enumerate(scenarios):
+        if not isinstance(s, dict):
+            raise TypeError(
+                f"Each scenario must be a dict, got {type(s).__name__} at index {i}"
+            )
+
+    weights_arg, labels = _normalize_contrast_weights(spec.contrast_weights, scenarios)
+    _validate_contrast_weights(weights_arg, len(scenarios))
 
     weights = _bootstrap_weights_for_adapter(ctx)
     scenarios_X = []
@@ -480,13 +608,10 @@ def _build_contrast_query(spec: QuerySpec, ctx: QueryContext) -> CompiledQuery:
         scenarios_X=scenarios_X,
         weights=weights_arg,
         phi_inv=ctx.phi_inv,
+        scenario_weights=_scenario_weights_for(weights, scenarios_X),
         scenario_predict_fns=scenario_predict_fns if any_per_scenario_predict else None,
     )
 
-    if isinstance(weights_arg, dict):
-        labels = list(weights_arg.keys())
-    else:
-        labels = [scenarios[0].get("label", "contrast")]
     if spec.label is not None:
         if len(labels) == 1:
             labels = [spec.label]
@@ -542,6 +667,7 @@ def _build_evaluate_query(spec: QuerySpec, ctx: QueryContext) -> CompiledQuery:
         scenarios_X=scenarios_X,
         compose=compose,
         phi_inv=ctx.phi_inv,
+        scenario_weights=_scenario_weights_for(weights, scenarios_X),
         scenario_predict_fns=scenario_predict_fns if any_per_scenario_predict else None,
     )
 

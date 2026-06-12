@@ -1664,3 +1664,28 @@ as defect-ledger entries D12–D15.
   level rather than literally through `make_evaluate_estimand`; this satisfies
   the design intent (no result-level division) but is an undeclared deviation
   worth one ledger line.
+
+### D12–D14 decisions (2026-06-12, user verdicts)
+
+All three stop-and-asks from the R2 audit were decided and implemented in the
+new engine only (legacy stays frozen until R7):
+
+- **D12 → weighted mean within group** (ledger D16). `weights=` + `over=`
+  subsets the per-observation weights to each group's rows positionally;
+  the group estimand is the weighted group mean, matching `marginaleffects`
+  `by=`+`wts=` and Stata `margins, over() [pw=]`. R golden
+  (`avg_predictions(by =, wts =)`) lands with the R5/R6 case matrix.
+- **D13 → contrasts()/evaluate() honor declared weights** (ledger D17).
+  Per-scenario aggregation is weighted, consistent with predict/dydx and
+  `avg_comparisons(wts =)`. Changes shipped 0.3.0 numbers → R8 Corrections.
+  Non-aligned scenario rows (data-override/grid) under weights= refuse with
+  a clear ValueError.
+- **D14 → normalization in the builder, now** (ledger D18). Matrix /
+  list-of-lists / dict / vector contrast forms normalize and validate in
+  `_build_contrast_query`; labels are correct before R3/R4 consume them.
+- **Appendix D.1 DECIDED: survey design weights the aggregation.** When
+  `steps.input(design=)` lands at R6, design weights drive estimand
+  aggregation (population-representative), matching `marginaleffects`'
+  automatic use of svyglm weights and Stata `svy: margins`. Weighted twin
+  goldens land at R6; the existing unweighted survey goldens become
+  explicit-unweighted corroboration or retire (ledger entry at R6).
