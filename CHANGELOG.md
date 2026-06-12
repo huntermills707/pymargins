@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-06-10
+
+### Added
+
+- **Computation graph** (design §2, §4). The estimator core is rebuilt around
+  a functional wiring graph (`steps.*`), an immutable `Plan`, and estimator
+  **nouns** (`GComputation`).
+  - `steps.input(df, design=, cluster=, block=)` — resampling root.
+  - `steps.match(node, matcher)` — matching stage.
+  - `steps.trim(node, ...)` / `steps.drop_outliers(node, ...)` /
+    `steps.reimpute(node, imputer)` — transform stages as graph nodes.
+  - `GComputation(wiring, outcome=, at=, scale=, method=, ...)` — the new
+    surface estimator. Compiles to the same engine as `Margins`; results are
+    byte-identical.
+  - `Plan` — immutable, hashable analysis descriptor. `plan.hash` is printed
+    on every result footer for pre-registration semantics.
+  - `GraphResult` — doctrine-surface result object. No `level=` in
+    `conf_int()`; plan metadata in `summary()`; self-contained `influence()`.
+- **ψ exposure** (`ModelAdapter.influence()`). Tier-1 adapters (statsmodels
+  GLM / OLS / discrete) now expose the per-observation influence function
+  ψ^β = score_obs @ cov_params. This is the foundation for stacked-ψ IPW/AIPW
+  (Phase 4) and self-contained results.
+- **Soundness layer** (`_soundness/`). Compile-time predicates with a fixed
+  severity scale (refuse / warn / note). Constants module carries citation
+  docstrings for every threshold.
+- **Anchor harness** (`tests/anchor/test_anchor_gcomputation.py`). Dual-run
+  equality tests: `GComputation` path vs `Margins` path across adapter ×
+  method × query matrices.
+
+### Notes
+
+- `Margins` retains its existing public API and behavior unchanged. The new
+  `GComputation` noun delegates inference to the existing engine internally;
+  the full Margins-as-shim refactor (W2.8) is planned for a subsequent
+  release.
+
 ## [0.3.0] — 2026-06-06
 
 ### Added

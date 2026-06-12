@@ -4,6 +4,7 @@ Re-exports all result types for backward compatibility.
 """
 
 from ._diagnostic import DiagnosticResult
+from ._graphresult import GraphResult
 from ._margins import (
     MarginsResult,
     _combine_results,
@@ -18,6 +19,7 @@ __all__ = [
     "AdjustedResults",
     "adjust",
     "DiagnosticResult",
+    "GraphResult",
     "MarginsResult",
     "ImputationDiagnostic",
     "pool_imputations",

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pymargins"
-version = "0.3.0"
+version = "0.4.0"
 description = "Expert-mode marginal effects for Python with session-level analytical pre-commitment."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -70,6 +70,7 @@ test = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "hypothesis>=6.0",
+    "ruff>=0.4",
     "polars>=1.0",
     "pyarrow>=10.0",
     "pysmatch>=2.1",
@@ -89,6 +90,7 @@ packages = ["pymargins"]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = ["-ra", "--strict-markers"]
+markers = ["slow: weekly-lane statistical tests"]
 
 [tool.ruff]
 line-length = 88

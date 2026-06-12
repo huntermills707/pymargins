@@ -38,6 +38,7 @@ from the public ``pymargins.adapters`` module — you rarely need them since
 override detection or select a non-default scale.
 """
 
+from . import steps
 from ._adapter import (
     BootstrapOnlyAdapter,
     GLMAdapter,
@@ -63,6 +64,7 @@ from ._result import (
     pool_imputations,
 )
 from ._transforms import drop_outliers, reimpute, trim
+from .estimators import GComputation
 from .margins import Margins
 from .matching import PysmatchClient
 from .scenarios import (
@@ -119,6 +121,9 @@ __all__ = [
     "reimpute",
     "drop_outliers",
     "trim",
+    # New surface (v0.4.0)
+    "GComputation",
+    "steps",
     # Package metadata
     "__version__",
 ]
