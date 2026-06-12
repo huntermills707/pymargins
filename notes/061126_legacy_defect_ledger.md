@@ -224,3 +224,40 @@ Disposition: fixed-at-R1. The stop-and-ask in D5 is closed; the correction is
 recorded for the R8 changelog.
 
 Status: fixed-at-R1; recorded-for-R8-changelog
+
+## D10 — R golden generation scripts resynced after D9 HC1 fix (R1)
+
+Where: `tools/oracle/logit.R`, `tools/oracle/poisson.R`,
+`tests/oracle/golden/logit_ame_x1_hc1.json`,
+`tests/oracle/golden/poisson_ame_x1_hc1.json`.
+
+Issue: The R scripts still emitted the pre-D9 per-case tolerance
+(`std_error = 0.006`) and the old "statsmodels omits n/(n-k)" note for the
+HC1 cases. Re-running the documented regeneration path would have resurrected
+the loosening that D9 removed.
+
+Fix: Updated both scripts to write empty tolerances and the post-fix note
+("StatsmodelsGLMAdapter now applies the n/(n-k) HC1 finite-sample correction").
+The committed goldens were already hand-edited to match; the scripts now
+regenerate identical files.
+
+Status: fixed-at-R1
+
+## D11 — History-fidelity and tolerance-policy notes (R1)
+
+Where: `pymargins/_engine/_banks.py`; `tests/oracle/_tolerances.py`.
+
+History fidelity: `pymargins/_engine/_banks.py` is the kept R1 product
+(session-free `BankSet` API). It was committed inside the R0 "interim
+scaffolding" slice (`87fa014`) because R1 was implemented before the commit
+boundary existed. The slice-4 message "replaced by R1–R6" is inaccurate for
+`_banks.py`; this entry records that it is a retained R1 component.
+
+Tolerance policy: `TOL_VCOV = 2e-5` is the matrix-alignment tolerance used by
+`_assert_vcov_matrix`. It is intentionally tighter than `TOL_SE` because it
+compares the full coefficient covariance matrix, not just a scalar SE. The
+`assert_matches_golden` helper inherits the golden's SE override for CI
+endpoints unless the golden explicitly pins `conf_int`; this keeps CI checks
+consistent with the SE convention actually under test.
+
+Status: recorded-for-R8-changelog

@@ -1597,3 +1597,24 @@ proves wrong mid-build, stop and ask — don't silently deviate.
     kwarg at R5/R6; `_graph` records it in node params so it is
     plan-hashed. The `bca` `acceleration` override has no new home —
     ledger it if a ported test needs it.)
+
+## Appendix D — Post-audit forward checklist (R1 → R2)
+
+Items recorded by the R1 audit that do not block R2 but must be resolved in
+later workstreams:
+
+1. **Survey aggregation convention (R6).** The two survey goldens currently
+   pin the *unweighted* estimand (legacy's default warning is in force). When
+   `steps.input(design=)` lands at R6, decide whether the survey posture
+   weights the aggregation and add a weighted twin golden if needed.
+
+2. **D4 regression hook (R5/R6).** The cluster oracle tests were re-spelled to
+   the explicit `vcov={"type":"cluster","groups":g}` spelling; nothing now
+   exercises the broken `cluster=` declaration path. Add a
+   cluster-declared-at-`steps.input` oracle or anchor case proving the new
+   engine's `vcov_spec` resolution does not reproduce D4.
+
+3. **Re-point Margins-direct oracle tests at R6.** Four tests still call
+   `Margins` directly because `GComputation` lacks `weights=` / `survey_design=`
+   routing; they are marked with `TODO(R6)` comments in
+   `tests/oracle/test_analytic.py` and `tests/oracle/test_r_golden.py`.

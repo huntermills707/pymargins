@@ -40,5 +40,5 @@ write_golden("poisson_ame_x1_hc1", "oracle_main.csv", mod,
                   conf_low = sh$conf.low,
                   conf_high = sh$conf.high),
              vcov = "HC1", labels = list("x1"),
-             tolerances = list(std_error = 0.006),
-             notes = "statsmodels GLM cov_type='HC1' omits n/(n-k) finite-sample correction (returns HC0); R true HC1 is sqrt(n/(n-k)) larger (~0.5%)")
+             tolerances = list(),
+             notes = "StatsmodelsGLMAdapter now applies the n/(n-k) HC1 finite-sample correction; output matches R vcovHC(type='HC1') at default tolerance")
