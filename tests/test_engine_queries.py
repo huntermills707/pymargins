@@ -60,6 +60,38 @@ def fit_logit():
     return smf.glm("y ~ x1 + x2 + C(g)", data=df, family=sm.families.Binomial()).fit()
 
 
+@pytest.fixture
+def fit_logit_num():
+    """Numeric-only logit fit for at=mean/typical (string columns break aggregation)."""
+    rng = np.random.default_rng(2)
+    n = 80
+    df = pd.DataFrame(
+        {
+            "y": rng.binomial(1, 0.5, size=n).astype(float),
+            "x1": rng.normal(size=n),
+            "x2": rng.normal(size=n),
+        }
+    )
+    return smf.glm("y ~ x1 + x2", data=df, family=sm.families.Binomial()).fit()
+
+
+@pytest.fixture
+def df_survival():
+    """Synthetic survival data for rmst sanity tests."""
+    rng = np.random.default_rng(42)
+    n = 200
+    df = pd.DataFrame(
+        {
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+        }
+    )
+    hazard = np.exp(0.5 + 0.3 * df["x1"] - 0.2 * df["x2"])
+    df["T"] = rng.exponential(1.0 / hazard)
+    df["E"] = (rng.random(n) < 0.8).astype(int)
+    return df
+
+
 # ---------------------------------------------------------------------------
 # resolve_scale
 # ---------------------------------------------------------------------------
@@ -424,6 +456,288 @@ def test_h_factory_rebuilds_prediction_on_refit_adapter(fit_logit):
         np.asarray(h_refit(beta_refit)),
         rtol=1e-10,
     )
+
+
+# ---------------------------------------------------------------------------
+# Probe axes: at=mean/typical, weights, multi-variable dydx, grid+over
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("at", ["mean", "typical"])
+def test_predict_h_matches_legacy_at_mean_typical(fit_logit_num, at):
+    m = Margins(fit_logit_num, at=at, method="delta")
+    h_old, labels_old, _ = _build_prediction_estimand(m, {}, None)
+    cq = compile_query(
+        QuerySpec(kind="predict", scenario={}),
+        ctx_from_margins(m),
+    )
+    beta = np.asarray(m.adapter.coefficients())
+    np.testing.assert_array_equal(np.asarray(h_old(beta)), np.asarray(cq.h(beta)))
+    assert labels_old == cq.labels
+
+
+@pytest.mark.parametrize("at", ["mean", "typical"])
+def test_dydx_h_matches_legacy_at_mean_typical(fit_logit_num, at):
+    m = Margins(fit_logit_num, at=at, method="delta")
+    h_old, labels_old, _ = _build_slope_estimand(m, {}, ["x1"], None)
+    cq = compile_query(
+        QuerySpec(kind="dydx", scenario={}, variables=("x1",)),
+        ctx_from_margins(m),
+    )
+    beta = np.asarray(m.adapter.coefficients())
+    np.testing.assert_array_equal(np.asarray(h_old(beta)), np.asarray(cq.h(beta)))
+    assert labels_old == cq.labels
+
+
+def test_predict_h_matches_legacy_weights(fit_logit):
+    rng = np.random.default_rng(4)
+    n = len(fit_logit.model.endog)
+    w = np.exp(rng.normal(0, 0.3, size=n))
+    m = Margins(fit_logit, at="overall", method="delta", weights=w)
+    h_old, labels_old, _ = _build_prediction_estimand(m, {}, None)
+    cq = compile_query(
+        QuerySpec(kind="predict", scenario={}),
+        ctx_from_margins(m),
+    )
+    beta = np.asarray(m.adapter.coefficients())
+    np.testing.assert_array_equal(np.asarray(h_old(beta)), np.asarray(cq.h(beta)))
+    assert labels_old == cq.labels
+
+
+def test_dydx_h_matches_legacy_weights(fit_logit):
+    rng = np.random.default_rng(5)
+    n = len(fit_logit.model.endog)
+    w = np.exp(rng.normal(0, 0.3, size=n))
+    m = Margins(fit_logit, at="overall", method="delta", weights=w)
+    h_old, labels_old, _ = _build_slope_estimand(m, {}, ["x1"], None)
+    cq = compile_query(
+        QuerySpec(kind="dydx", scenario={}, variables=("x1",)),
+        ctx_from_margins(m),
+    )
+    beta = np.asarray(m.adapter.coefficients())
+    np.testing.assert_array_equal(np.asarray(h_old(beta)), np.asarray(cq.h(beta)))
+    assert labels_old == cq.labels
+
+
+def test_dydx_h_matches_legacy_multivar(fit_logit):
+    m = Margins(fit_logit, at="overall", method="delta")
+    h_old, labels_old, scen_old = _build_slope_estimand(
+        m, {}, ["x1", "x2"], None
+    )
+    cq = compile_query(
+        QuerySpec(kind="dydx", scenario={}, variables=("x1", "x2")),
+        ctx_from_margins(m),
+    )
+    beta = np.asarray(m.adapter.coefficients())
+    np.testing.assert_array_equal(np.asarray(h_old(beta)), np.asarray(cq.h(beta)))
+    assert labels_old == cq.labels
+    assert len(scen_old) == len(cq.scenarios)
+
+
+def test_predict_h_matches_legacy_grid_plus_over(fit_logit):
+    m = Margins(fit_logit, at="overall", method="delta")
+    scenario = {"atexog": {"x1": [0.0, 1.0]}, "over": "g"}
+    h_old, labels_old, scen_old = _build_prediction_estimand(m, scenario, None)
+    cq = compile_query(
+        QuerySpec(kind="predict", scenario=scenario),
+        ctx_from_margins(m),
+    )
+    beta = np.asarray(m.adapter.coefficients())
+    np.testing.assert_array_equal(np.asarray(h_old(beta)), np.asarray(cq.h(beta)))
+    assert labels_old == cq.labels
+    assert len(scen_old) == len(cq.scenarios)
+
+
+@pytest.mark.xfail(
+    reason="weights + over subset bug — see ledger D12",
+    raises=TypeError,
+)
+def test_predict_weights_plus_over_xfail(fit_logit):
+    """Documented crash: full-length weights are not subset per over-group."""
+    rng = np.random.default_rng(6)
+    n = len(fit_logit.model.endog)
+    w = np.exp(rng.normal(0, 0.3, size=n))
+    m = Margins(fit_logit, at="overall", method="delta", weights=w)
+    scenario = {"over": "g"}
+    cq = compile_query(
+        QuerySpec(kind="predict", scenario=scenario),
+        ctx_from_margins(m),
+    )
+    beta = np.asarray(m.adapter.coefficients())
+    cq.h(beta)  # currently raises TypeError on incompatible shapes
+
+
+def test_contrasts_2d_matrix_h_matches_legacy_numbers(fit_logit):
+    m = Margins(fit_logit, at="overall", method="delta")
+    scenarios = [
+        {"atexog": {"x1": 0.0}},
+        {"atexog": {"x1": 1.0}},
+        {"atexog": {"x1": 2.0}},
+    ]
+    C = np.array([[1.0, -1.0, 0.0], [0.0, 1.0, -1.0]])
+    weights_dict = {f"contrast[{i}]": C[i] for i in range(C.shape[0])}
+    h_old = _build_contrast_estimand(m, scenarios, weights_dict)
+    cq = compile_query(
+        QuerySpec(kind="contrasts", scenarios=tuple(scenarios), contrast_weights=C),
+        ctx_from_margins(m),
+    )
+    beta = np.asarray(m.adapter.coefficients())
+    np.testing.assert_array_equal(np.asarray(h_old(beta)), np.asarray(cq.h(beta)))
+    # Raw 2D matrix currently gets a single generic label (F3 label gap).
+    assert cq.labels == ["contrast"]
+
+
+def test_contrasts_weights_ignored_in_aggregation(fit_logit):
+    """Documented legacy defect: contrast aggregation ignores session weights."""
+    rng = np.random.default_rng(7)
+    n = len(fit_logit.model.endog)
+    w = np.exp(rng.normal(0, 0.3, size=n))
+    m_w = Margins(fit_logit, at="overall", method="delta", weights=w)
+    m0 = Margins(fit_logit, at="overall", method="delta", weights=None)
+    scenarios = [{"atexog": {"x1": 0.0}}, {"atexog": {"x1": 1.0}}]
+    weights = np.array([1.0, -1.0])
+    h_w = _build_contrast_estimand(m_w, scenarios, weights)
+    h_0 = _build_contrast_estimand(m0, scenarios, weights)
+    cqw = compile_query(
+        QuerySpec(kind="contrasts", scenarios=tuple(scenarios), contrast_weights=weights),
+        ctx_from_margins(m_w),
+    )
+    beta = np.asarray(m_w.adapter.coefficients())
+    np.testing.assert_array_equal(np.asarray(h_w(beta)), np.asarray(cqw.h(beta)))
+    np.testing.assert_array_equal(np.asarray(h_w(beta)), np.asarray(h_0(beta)))
+
+
+def test_evaluate_h_matches_legacy_weights(fit_logit):
+    rng = np.random.default_rng(8)
+    n = len(fit_logit.model.endog)
+    w = np.exp(rng.normal(0, 0.3, size=n))
+    m = Margins(fit_logit, at="overall", method="delta", weights=w)
+    scenarios = [
+        {"atexog": {"g": "a"}},
+        {"atexog": {"g": "b"}},
+    ]
+
+    def compose(p):
+        return p[0] / p[1]
+
+    h_old = _build_evaluate_estimand(m, scenarios, compose)
+    cq = compile_query(
+        QuerySpec(kind="evaluate", scenarios=tuple(scenarios), compose=compose),
+        ctx_from_margins(m),
+    )
+    beta = np.asarray(m.adapter.coefficients())
+    np.testing.assert_array_equal(np.asarray(h_old(beta)), np.asarray(cq.h(beta)))
+
+
+# ---------------------------------------------------------------------------
+# Multi-estimand label warning
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        {"atexog": {"x1": [0.0, 1.0]}},
+        {"over": "g"},
+    ],
+)
+def test_multi_estimand_label_warns(fit_logit, scenario):
+    m = Margins(fit_logit, at="overall", method="delta")
+    with pytest.warns(UserWarning, match=r"label='mylabel' is ignored"):
+        compile_query(
+            QuerySpec(kind="predict", scenario=scenario, label="mylabel"),
+            ctx_from_margins(m),
+        )
+
+
+def test_single_estimand_label_used(fit_logit):
+    m = Margins(fit_logit, at="overall", method="delta")
+    cq = compile_query(
+        QuerySpec(kind="predict", scenario={}, label="mylabel"),
+        ctx_from_margins(m),
+    )
+    assert cq.labels == ["mylabel"]
+
+
+# ---------------------------------------------------------------------------
+# rmst
+# ---------------------------------------------------------------------------
+
+
+def test_rmst_refuses_non_survival_adapter(fit_logit):
+    m = Margins(fit_logit, at="overall", method="delta")
+    ctx = ctx_from_margins(m)
+    with pytest.raises(ValueError, match="per-scenario prediction time"):
+        compile_query(QuerySpec(kind="rmst", horizon=1.0), ctx)
+
+
+def test_rmst_survival_sanity(df_survival):
+    pytest.importorskip("lifelines")
+    from lifelines import CoxPHFitter
+
+    from pymargins._adapters.lifelines_coxph_survival import (
+        LifelinesCoxPHSurvivalAdapter,
+    )
+
+    cph = CoxPHFitter()
+    cph.fit(df_survival, duration_col="T", event_col="E", formula="x1 + x2")
+    adapter = LifelinesCoxPHSurvivalAdapter(
+        cph, training_data=df_survival, prediction_time=1.0
+    )
+    ctx = QueryContext(
+        adapter=adapter,
+        base_data=adapter.training_data,
+        at="overall",
+        weights=None,
+        phi=None,
+        phi_inv=None,
+        fd_step=1e-6,
+        gradient_backend="autodiff",
+    )
+    cq = compile_query(QuerySpec(kind="rmst", horizon=1.0, n_grid=20), ctx)
+    beta = np.asarray(adapter.coefficients())
+    val = np.asarray(cq.h(beta))
+    assert val.shape == ()
+    assert np.isfinite(val)
+    assert cq.h_factory is not None
+
+
+# ---------------------------------------------------------------------------
+# InferenceConfig pass-through
+# ---------------------------------------------------------------------------
+
+
+def test_config_n_sim_n_boot_pass_through(fit_logit):
+    from pymargins._graph._plan import Plan
+
+    plan = Plan(
+        method_resolved="delta",
+        method_declared="delta",
+        scale="response",
+        level=0.95,
+        ci="wald",
+        B=0,
+        n_sim=0,
+        seed=42,
+    )
+    facts = WiringFacts()
+    config = build_inference_config(plan, Margins(fit_logit).adapter, facts, None)
+    assert config.n_sim == 0
+    assert config.n_boot == 0
+
+    plan2 = Plan(
+        method_resolved="bootstrap",
+        method_declared="bootstrap",
+        scale="response",
+        level=0.95,
+        ci="percentile",
+        B=1000,
+        n_sim=4000,
+        seed=7,
+    )
+    config2 = build_inference_config(plan2, Margins(fit_logit).adapter, facts, None)
+    assert config2.n_sim == 4000
+    assert config2.n_boot == 1000
 
 
 # ---------------------------------------------------------------------------

@@ -1618,3 +1618,49 @@ later workstreams:
    `Margins` directly because `GComputation` lacks `weights=` / `survey_design=`
    routing; they are marked with `TODO(R6)` comments in
    `tests/oracle/test_analytic.py` and `tests/oracle/test_r_golden.py`.
+
+## R2 audit follow-up
+
+2026-06-12. R2 workstream (`dfcad23`) passed functional parity but needed
+process and coverage repairs. This section records the findings and the
+follow-up commit.
+
+### Citation review (I3″)
+
+Root `_estimands.py` and `margins/_atoms.py` were read and traced during the
+port. No formula defects were found; the atom kernels match their docstring
+formulas. The review produced the following legacy-behavior findings, recorded
+as defect-ledger entries D12–D15.
+
+### Findings fixed in the follow-up commit
+
+- F4 `build_inference_config`: `n_sim=plan.n_sim or 4000` and
+  `n_boot=plan.B or 1000` were replaced with pass-through values; a
+  `# TODO(R5)` marks `gradient_backend`/`fd_step` placeholders pending Plan
+  fields (appendix C #4).
+- F5 Multi-estimand `label=`: restored the legacy `UserWarning` in
+  `compile_query` when `atexog` or `over` produces multiple estimands.
+
+### Findings recorded for R5/R6 decision
+
+- **D12 — `weights=` + `over=` crash (legacy and new).** Full-length weights
+  are not subset per over-group in `_build_prediction_query` (and legacy),
+  producing a shape-mismatch `TypeError`. Fix requires oracle anchoring of the
+  intended weighted-group semantics.
+
+- **D13 — `contrasts()`/`evaluate()` ignore declared weights in per-scenario
+  aggregation.** `scenario_weights` are never passed to
+  `make_linear_combination_estimand`/`make_evaluate_estimand`, so weighted and
+  unweighted sessions yield identical contrast values. Connects to the R6
+  survey-aggregation convention.
+
+- **D14 — 2D contrast-matrix normalization has no home.** Legacy session
+  normalizes matrix/list-of-lists contrasts into named dicts; the new builder
+  receives raw weights. Numbers are correct (`jnp.dot` handles 2D), but labels
+  are `['contrast']` for a k-row estimand — a silent label/shape mismatch for
+  R4's result wrap.
+
+- **D15 — WTP spelling deviation.** `wtp()` composes slope estimands at the h
+  level rather than literally through `make_evaluate_estimand`; this satisfies
+  the design intent (no result-level division) but is an undeclared deviation
+  worth one ledger line.

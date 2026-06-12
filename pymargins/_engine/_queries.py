@@ -5,6 +5,7 @@ Design \u00a74.2/\u00a74.8, req \u00a72. Added in 0.4.0 (R2).
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -744,23 +745,33 @@ def compile_query(spec: QuerySpec, ctx: QueryContext) -> CompiledQuery:
     """Compile a QuerySpec into a CompiledQuery."""
     kind = spec.kind
     if kind == "predict":
-        return _build_prediction_query(spec, ctx)
-    if kind == "dydx":
-        return _build_slope_query(spec, ctx)
-    if kind in ("eyex", "eydx", "dyex"):
-        return _build_elasticity_query(spec, ctx)
-    if kind == "contrasts":
-        return _build_contrast_query(spec, ctx)
-    if kind == "evaluate":
-        return _build_evaluate_query(spec, ctx)
-    if kind == "wtp":
-        return _build_wtp_query(spec, ctx)
-    if kind == "rmst":
-        return _build_rmst_query(spec, ctx)
-    raise CompileError(
-        f"Unknown query kind: {spec.kind!r}. Supported: predict, dydx, "
-        "eyex, eydx, dyex, contrasts, evaluate, wtp, rmst."
-    )
+        cq = _build_prediction_query(spec, ctx)
+    elif kind == "dydx":
+        cq = _build_slope_query(spec, ctx)
+    elif kind in ("eyex", "eydx", "dyex"):
+        cq = _build_elasticity_query(spec, ctx)
+    elif kind == "contrasts":
+        cq = _build_contrast_query(spec, ctx)
+    elif kind == "evaluate":
+        cq = _build_evaluate_query(spec, ctx)
+    elif kind == "wtp":
+        cq = _build_wtp_query(spec, ctx)
+    elif kind == "rmst":
+        cq = _build_rmst_query(spec, ctx)
+    else:
+        raise CompileError(
+            f"Unknown query kind: {spec.kind!r}. Supported: predict, dydx, "
+            "eyex, eydx, dyex, contrasts, evaluate, wtp, rmst."
+        )
+
+    if spec.label is not None and cq.labels is not None and len(cq.labels) > 1:
+        warnings.warn(
+            f"label={spec.label!r} is ignored when atexog or over "
+            "produces multiple estimands",
+            UserWarning,
+            stacklevel=2,
+        )
+    return cq
 
 
 # ---------------------------------------------------------------------------
@@ -815,10 +826,12 @@ def build_inference_config(
         phi=phi,
         phi_inv=phi_inv,
         kappa_threshold=float("inf"),
+        # TODO(R5): gradient_backend/fd_step should come from Plan once Plan
+        # gains those fields (appendix C #4). Hard-coded placeholders until then.
         gradient_backend="autodiff",
         fd_step=1e-6,
-        n_sim=plan.n_sim or 4000,
-        n_boot=plan.B or 1000,
+        n_sim=plan.n_sim,
+        n_boot=plan.B,
         n_jobs=n_jobs,
         rng_seed=plan.seed,
         diagnostics=True,

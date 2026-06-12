@@ -261,3 +261,80 @@ endpoints unless the golden explicitly pins `conf_int`; this keeps CI checks
 consistent with the SE convention actually under test.
 
 Status: recorded-for-R8-changelog
+
+## D12 — `weights=` + `over=` crashes both engines (R2)
+
+Where: `pymargins/_engine/_queries.py::_build_prediction_query` and legacy
+`pymargins/margins/_estimands.py::_build_prediction_estimand`.
+
+Claim: When session weights are supplied and `over=` subgroups the base data,
+the full-length weights (n rows) are multiplied against group-subset
+predictions (m < n rows), raising `TypeError: mul got incompatible shapes for
+broadcasting`.
+
+Evidence: `tests/test_engine_queries.py::test_predict_weights_plus_over_xfail`
+documents the identical crash on both paths.
+
+Disposition: stop-and-ask. Fix requires an oracle-anchored decision on whether
+weights should be subset per group, normalized within group, or treated as
+per-row sampling weights during aggregation.
+
+Status: open
+
+## D13 — `contrasts()`/`evaluate()` ignore declared weights in per-scenario aggregation (R2)
+
+Where: `pymargins/_engine/_queries.py::_build_contrast_query` and
+`_build_evaluate_query`; legacy `pymargins/margins/_estimands.py`.
+
+Claim: Neither builder passes `scenario_weights` to
+`make_linear_combination_estimand` or `make_evaluate_estimand`. A weighted
+session and an unweighted session therefore return bit-identical contrast /
+compose values under `at="overall"`, even though `predict()` and `dydx()` honor
+the same weights.
+
+Evidence: `tests/test_engine_queries.py::test_contrasts_weights_ignored_in_aggregation`
+asserts `h_weighted == h_unweighted` on the same contrast.
+
+Disposition: stop-and-ask. The intended semantics connect to the R6
+survey-aggregation convention (see implementation guide Appendix D.1) and must
+be anchored before the new engine is wired to the surface.
+
+Status: open
+
+## D14 — 2D contrast-matrix normalization has no home (R2)
+
+Where: `pymargins/_engine/_queries.py::_build_contrast_query`.
+
+Claim: Legacy `Margins.contrasts()` normalizes a matrix or list-of-lists
+contrast into named dicts (plus length/finiteness validation) at session level.
+The new builder receives `QuerySpec.contrast_weights` raw. `jnp.dot` computes
+correct numbers, but `CompiledQuery.labels` is `['contrast']` for a k-row
+estimand, creating a silent label/shape mismatch for R4's result wrapper.
+
+Evidence: `tests/test_engine_queries.py::test_contrasts_2d_matrix_h_matches_legacy_numbers`
+compares numbers against the legacy dict spelling and asserts the current
+single-label behavior.
+
+Disposition: fix-in-place at R6. The R6 noun is "three lines"; the builder is
+the natural home for the normalization/validation.
+
+Status: open
+
+## D15 — WTP spelling deviation (R2)
+
+Where: `pymargins/_engine/_queries.py::_build_wtp_query`.
+
+Claim: Design §4.8 describes WTP as a ratio composed through
+`make_evaluate_estimand` ("not result division"). The implementation instead
+composes two slope estimands at the h level: `h(beta) = -slope_attr /
+slope_price`. Numbers match the design intent and the probe verifies parity
+with legacy `compose_results`, but this is an undeclared deviation from the
+letter of the guide.
+
+Evidence: `tests/test_engine_queries.py::test_wtp_h_matches_composed_slopes`.
+
+Disposition: accept-with-rationale. The h-level composition is equivalent for
+WTP (a scalar ratio of slopes) and avoids the unnecessary evaluate indirection;
+recorded for R8 changelog.
+
+Status: recorded-for-R8-changelog
