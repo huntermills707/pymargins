@@ -398,6 +398,52 @@ class ModelAdapter(abc.ABC):
         ...
 
     # -----------------------------------------------------------------------
+    # Influence function (optional)
+    # -----------------------------------------------------------------------
+
+    def influence(self) -> jnp.ndarray | None:
+        """Per-observation influence of β̂.
+
+        For sources with per-row scores (tier-1), returns ψ^β where row *i*
+        is ``score_obs[i] @ covariance().T``, shape ``(n_obs, n_params)``.
+        Rows are aligned to :attr:`training_data`'s index.
+
+        ``None`` means this source has no per-row score (tier 2/3).
+        """
+        return None
+
+    def data_fingerprint(self) -> str:
+        """Content hash of :attr:`training_data`.
+
+        Used for template-vs-wiring consistency checks and plan identity.
+        The result is cached on the instance.
+        """
+        if hasattr(self, "_data_fingerprint"):
+            return self._data_fingerprint
+        import hashlib
+
+        data = self.training_data
+        hasher = hashlib.sha256()
+        # Handle pandas DataFrame (the common case)
+        if hasattr(data, "shape"):
+            hasher.update(str(data.shape).encode("utf-8"))
+        if hasattr(data, "columns"):
+            for col in data.columns:
+                hasher.update(str(col).encode("utf-8"))
+                hasher.update(str(data[col].dtype).encode("utf-8"))
+                arr = data[col].to_numpy()
+                if arr.dtype == object:
+                    for v in arr:
+                        hasher.update(str(v).encode("utf-8"))
+                else:
+                    hasher.update(arr.tobytes())
+        else:
+            # Fallback for non-DataFrame training_data
+            hasher.update(str(data).encode("utf-8"))
+        self._data_fingerprint = hasher.hexdigest()
+        return self._data_fingerprint
+
+    # -----------------------------------------------------------------------
     # Bootstrap support (optional)
     # -----------------------------------------------------------------------
 

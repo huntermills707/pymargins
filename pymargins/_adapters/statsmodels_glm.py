@@ -74,6 +74,15 @@ class StatsmodelsGLMAdapter(GLMAdapter):
     def coefficients(self) -> jnp.ndarray:
         return jnp.asarray(self.results.params)
 
+    def influence(self) -> jnp.ndarray | None:
+        """Per-observation influence of β̂: ψ^β = score_obs @ cov_params.
+
+        Reuses the same bread and scores as the survey linearization path.
+        """
+        scores = np.asarray(self.score_obs())
+        cov = np.asarray(self.covariance())
+        return jnp.asarray(scores @ cov)
+
     def score_obs(self) -> np.ndarray:
         """Per-observation score ∂ℓ_i/∂β, shape (n_obs, p).
 
@@ -258,6 +267,10 @@ class StatsmodelsGLMAdapter(GLMAdapter):
         Used when the user requests a vcov flavor that the original fit did
         not compute. For formula-fit models this is straightforward; for
         array-fit models we reconstruct exog/endog and refit.
+
+        Note on GLM HC1: statsmodels' ``cov_type='HC1'`` for GLM omits the
+        ``n/(n-k)`` finite-sample correction that R ``vcovHC(type='HC1')``
+        applies. We restore it here so the adapter's HC1 matches the reference.
         """
         from statsmodels.formula.api import glm as smf_glm
 
@@ -279,7 +292,10 @@ class StatsmodelsGLMAdapter(GLMAdapter):
                 data=self._training_data,
                 family=self.family,
             ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, **fit_kwargs)
-            return jnp.asarray(new_results.cov_params())
+            cov = np.asarray(new_results.cov_params())
+            if cov_type.lower() == "hc1":
+                cov = self._apply_hc1_finite_sample_correction(cov, new_results)
+            return jnp.asarray(cov)
 
         # Array-fit refit
         endog = self.results.model.endog
@@ -290,7 +306,21 @@ class StatsmodelsGLMAdapter(GLMAdapter):
             exog,
             family=self.family,
         ).fit(cov_type=cov_type, cov_kwds=cov_kwds or {}, **fit_kwargs)
-        return jnp.asarray(new_results.cov_params())
+        cov = np.asarray(new_results.cov_params())
+        if cov_type.lower() == "hc1":
+            cov = self._apply_hc1_finite_sample_correction(cov, new_results)
+        return jnp.asarray(cov)
+
+    @staticmethod
+    def _apply_hc1_finite_sample_correction(cov, results) -> np.ndarray:
+        """Scale HC0 covariance by n/(n-k) to obtain true HC1 for GLM."""
+        nobs = float(getattr(results, "nobs", np.nan))
+        df_resid = float(getattr(results, "df_resid", np.nan))
+        if not (np.isfinite(nobs) and np.isfinite(df_resid) and df_resid > 0):
+            raise ValueError(
+                "Cannot apply HC1 finite-sample correction: invalid nobs or df_resid."
+            )
+        return cov * (nobs / df_resid)
 
     def _collect_original_fit_kwargs(self) -> dict:
         """Capture model-specific kwargs from the original fit for refit."""
