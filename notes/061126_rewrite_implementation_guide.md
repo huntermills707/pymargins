@@ -1689,3 +1689,31 @@ new engine only (legacy stays frozen until R7):
   automatic use of svyglm weights and Stata `svy: margins`. Weighted twin
   goldens land at R6; the existing unweighted survey goldens become
   explicit-unweighted corroboration or retire (ledger entry at R6).
+
+## R3 completion note
+
+2026-06-12. R3 workstream implemented.
+
+- New module: `pymargins/_engine/_execute.py` with `execute_query` — the
+  doctrine dispatch/executor entry point.
+- Behavior pinned:
+  - `method = plan.method_resolved`; no recomputation, no fallback branches.
+  - delta: `is_jax_differentiable` probe first; non-differentiable estimand
+    raises `CompileError` steering to `method="simulation"` (§6.1).
+  - delta: `kappa_threshold=float("inf")` ⇒ κ is recorded but never steers.
+  - simulation: `banks.sim_draws` injected into `InferenceConfig.sim_draws`.
+  - bootstrap: resampling declaration resolved from `wiring_facts`
+    (matching → cluster → survey-design PSU/strata); `BankSet` indices and
+    states injected into `config` before `_run_bootstrap`.
+  - bootstrap: replicate-failure rate thresholding via
+    `REPLICATE_FAILURE_NOTE` / `REPLICATE_FAILURE_WARN`; notes recorded in
+    `estimand_metadata["diagnostics"]`, warnings emitted as `SoundnessWarning`.
+  - unreachable method ⇒ `AssertionError`.
+- `pymargins/_engine/_queries.py`: `build_inference_config` now accepts a
+  pre-computed `frozen_cov` so Σ̂ is resolved once per estimator.
+- Tests: `tests/test_engine_execute.py` — 12 tests covering no-fallback
+  attributes, non-differentiable refusal, κ non-steering vs legacy,
+  survey/cluster/block resampler routing, bank replay across queries, and
+  replicate-failure warnings.
+- Gate: `pytest -m "not slow" -q` — 1686 passed, 3 skipped;
+  `ruff check .` — green.

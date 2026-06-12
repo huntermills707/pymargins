@@ -924,16 +924,22 @@ def build_inference_config(
     *,
     n_jobs: int = 1,
     progress_bar: bool = False,
+    frozen_cov: np.ndarray | None = None,
 ) -> InferenceConfig:
     """Build a doctrine-shaped InferenceConfig from a Plan.
 
     Banks are accepted for API symmetry but injection happens in the
     executor (R3); this function leaves ``all_idx``/``all_states``/
     ``all_states_failures``/``sim_draws`` as None.
+
+    ``frozen_cov`` is the estimator's pre-computed Σ̂. When omitted it is
+    computed once from the adapter; the executor always passes it so Σ̂
+    is resolved exactly once per estimator.
     """
     phi, phi_inv = resolve_scale(plan.scale)
-    vcov_spec = _resolve_vcov_spec(plan, wiring_facts)
-    frozen_cov = adapter.covariance(vcov_spec)
+    if frozen_cov is None:
+        vcov_spec = _resolve_vcov_spec(plan, wiring_facts)
+        frozen_cov = adapter.covariance(vcov_spec)
 
     strata = None
     if wiring_facts.design is not None:
