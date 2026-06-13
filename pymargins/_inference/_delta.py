@@ -65,7 +65,7 @@ def _run_delta(h, adapter, config, estimand_metadata):
     # Optional comparison against simulation. Works for scalar and vector
     # estimands; for vectors it returns the max per-component disagreement.
     delta_sim_disagreement = None
-    if config.diagnostics:
+    if config.diagnostics and config.n_sim > 0:
         try:
             delta_sim_disagreement = delta_simulation_disagreement(
                 estimate,
@@ -78,7 +78,7 @@ def _run_delta(h, adapter, config, estimand_metadata):
                 rng_seed=config.rng_seed,
                 phi=config.phi,
             )
-        except (ValueError, TypeError, jax.errors.JAXTypeError) as exc:
+        except (ValueError, TypeError, IndexError, jax.errors.JAXTypeError) as exc:
             warnings.warn(
                 f"delta-simulation diagnostic failed: {exc}",
                 RuntimeWarning,

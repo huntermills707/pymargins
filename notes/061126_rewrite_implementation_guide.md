@@ -1717,3 +1717,23 @@ new engine only (legacy stays frozen until R7):
   replicate-failure warnings.
 - Gate: `pytest -m "not slow" -q` — 1686 passed, 3 skipped;
   `ruff check .` — green.
+
+### R3 audit fixes (post-commit)
+
+2026-06-12. Seam issues found during R3 review; fixed before R5 wiring.
+
+1. **n_sim=0 delta plan crash** — `_run_delta` now skips the
+   delta-simulation disagreement diagnostic when `config.n_sim == 0` and also
+   catches `IndexError` from `np.quantile`. Prevents the `compile()` default
+   (`n_sim=0`) from crashing once R5 wires `compile()` to `execute_query()`.
+2. **Metadata mutation on replay** — `_record_replicate_failures` now copies
+   `estimand_metadata` before appending diagnostics, so re-executing the same
+   compiled query no longer accumulates duplicate entries on the frozen query
+   object.
+3. **training_data access guard** — `_resolve_resample_source` mirrors the
+   legacy glue's `(NotImplementedError, AttributeError, TypeError)` guard and
+   raises the same bootstrap-specific `NotImplementedError` when no resample
+   source is available.
+
+Regression tests added to `tests/test_engine_execute.py` for issues 1 and 2.
+Updated gate: `pytest -m "not slow" -q` — 1688 passed, 3 skipped.

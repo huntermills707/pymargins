@@ -539,3 +539,92 @@ def test_unknown_method_is_assertion():
             banks=banks,
             frozen_cov=np.eye(1),
         )
+
+
+# ---------------------------------------------------------------------------
+# Audit regression tests (seam issues found in R3 review)
+# ---------------------------------------------------------------------------
+
+
+def test_delta_nsim_zero_does_not_crash(fit_logit):
+    """compile() defaults n_sim=0; delta must not crash on the diagnostic."""
+    ctx = ctx_from_fit(fit_logit)
+    compiled = compile_query(QuerySpec(kind="predict"), ctx)
+    plan = plan_for("delta", n_sim=0)
+    facts = WiringFacts()
+    banks = BankSet(plan.plan_hash, 0, plan.seed)
+
+    result = execute_query(
+        compiled,
+        adapter=ctx.adapter,
+        plan=plan,
+        wiring_facts=facts,
+        banks=banks,
+        frozen_cov=ctx.adapter.covariance(),
+    )
+    assert result["method"] == "delta"
+    assert result["delta_sim_disagreement"] is None
+    assert np.all(np.isfinite(result["estimate"]))
+
+
+def test_replicate_failure_does_not_mutate_compiled_metadata(fit_logit, monkeypatch):
+    """Diagnostics annotate a copy; replaying a compiled query is non-destructive."""
+    ctx = ctx_from_fit(fit_logit)
+    compiled = compile_query(QuerySpec(kind="predict"), ctx)
+    original_metadata = compiled.estimand_metadata
+    assert "diagnostics" not in original_metadata
+
+    plan = plan_for("bootstrap", B=200)
+    facts = WiringFacts()
+    banks = BankSet(plan.plan_hash, 0, plan.seed)
+
+    def fake_bootstrap(h, adapter, config, estimand_metadata, *, h_factory=None):
+        return {
+            "estimate": np.array([0.5]),
+            "std_error": np.array([0.1]),
+            "conf_int_lower": np.array([0.3]),
+            "conf_int_upper": np.array([0.7]),
+            "method": "bootstrap",
+            "level": config.level,
+            "kappa": None,
+            "delta_sim_disagreement": None,
+            "fallback_triggered": False,
+            "fallback_reason": None,
+            "gradient": None,
+            "draws": None,
+            "draws_inf": None,
+            "estimand_metadata": estimand_metadata,  # same object as compiled
+            "ci_method": "percentile",
+            "bootstrap_extras": None,
+            "n_boot_effective": 189,
+            "n_boot_failed": 11,
+        }
+
+    monkeypatch.setattr("pymargins._engine._execute._run_bootstrap", fake_bootstrap)
+
+    with warnings.catch_warnings(record=True):
+        warnings.simplefilter("always")
+        result1 = execute_query(
+            compiled,
+            adapter=ctx.adapter,
+            plan=plan,
+            wiring_facts=facts,
+            banks=banks,
+            frozen_cov=ctx.adapter.covariance(),
+        )
+        result2 = execute_query(
+            compiled,
+            adapter=ctx.adapter,
+            plan=plan,
+            wiring_facts=facts,
+            banks=banks,
+            frozen_cov=ctx.adapter.covariance(),
+        )
+
+    # Compiled metadata is untouched.
+    assert "diagnostics" not in original_metadata
+    # Each result carries its own single diagnostic annotation.
+    assert result1["estimand_metadata"] is not original_metadata
+    assert result2["estimand_metadata"] is not original_metadata
+    assert len(result1["estimand_metadata"]["diagnostics"]) == 1
+    assert len(result2["estimand_metadata"]["diagnostics"]) == 1

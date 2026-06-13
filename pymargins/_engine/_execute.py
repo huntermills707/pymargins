@@ -99,9 +99,18 @@ def _resolve_resample_source(adapter: Any, wiring_facts: WiringFacts) -> tuple[A
 
     The resample source is normally ``adapter.training_data``, but a
     transform pipeline may declare a ``source_data`` override.
+
+    Mirrors the legacy glue's guard: a missing ``training_data`` implementation
+    is tolerated until we actually need the data, at which point the kernel
+    raises a bootstrap-specific ``NotImplementedError``.
     """
-    data = adapter.training_data
-    n_obs = len(data)
+    try:
+        data = adapter.training_data
+        n_obs = len(data)
+    except (NotImplementedError, AttributeError, TypeError):
+        data = None
+        n_obs = 0
+
     if wiring_facts.transforms:
         for stage in wiring_facts.transforms:
             source_data = getattr(stage, "source_data", None)
@@ -145,6 +154,12 @@ def _run_bootstrap_query(
     if wiring_facts.matching is not None:
         data = wiring_facts.matching.matched_data
 
+    if data is None:
+        raise NotImplementedError(
+            "Bootstrap inference requires the adapter to expose training_data. "
+            f"{type(adapter).__name__} does not implement it."
+        )
+
     cluster_ids, strata = _resolve_bootstrap_clusters(wiring_facts)
 
     indices = banks.resample_indices(
@@ -178,7 +193,12 @@ def _run_bootstrap_query(
 
 
 def _record_replicate_failures(result: dict) -> None:
-    """Append diagnostics / warnings for bootstrap replicate failure rates."""
+    """Append diagnostics / warnings for bootstrap replicate failure rates.
+
+    The result dict may carry the same ``estimand_metadata`` object that was
+    frozen into the ``CompiledQuery``. Copy before annotating so replaying the
+    same query does not accumulate duplicate diagnostics.
+    """
     n_eff = result.get("n_boot_effective")
     n_fail = result.get("n_boot_failed")
     if n_eff is None or n_fail is None:
@@ -188,9 +208,8 @@ def _record_replicate_failures(result: dict) -> None:
         return
     rate = n_fail / total
 
-    diagnostics = result.get("estimand_metadata", {}).get("diagnostics")
-    if diagnostics is None:
-        diagnostics = []
+    estimand_metadata = dict(result.get("estimand_metadata", {}))
+    diagnostics = list(estimand_metadata.get("diagnostics", []))
 
     if rate > REPLICATE_FAILURE_WARN:
         msg = (
@@ -198,7 +217,6 @@ def _record_replicate_failures(result: dict) -> None:
             f"{REPLICATE_FAILURE_WARN:.0%}; SE/CI may be unreliable."
         )
         diagnostics.append(msg)
-        result["estimand_metadata"]["diagnostics"] = diagnostics
         warnings.warn(msg, SoundnessWarning, stacklevel=3)
     elif rate > REPLICATE_FAILURE_NOTE:
         msg = (
@@ -206,4 +224,7 @@ def _record_replicate_failures(result: dict) -> None:
             f"{REPLICATE_FAILURE_NOTE:.0%}."
         )
         diagnostics.append(msg)
-        result["estimand_metadata"]["diagnostics"] = diagnostics
+
+    if diagnostics:
+        estimand_metadata["diagnostics"] = diagnostics
+        result["estimand_metadata"] = estimand_metadata
