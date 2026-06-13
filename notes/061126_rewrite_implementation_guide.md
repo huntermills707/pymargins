@@ -1737,3 +1737,24 @@ new engine only (legacy stays frozen until R7):
 
 Regression tests added to `tests/test_engine_execute.py` for issues 1 and 2.
 Updated gate: `pytest -m "not slow" -q` — 1688 passed, 3 skipped.
+
+### R3 audit follow-up: inference-budget invariant (root cause of issue 1)
+
+2026-06-12. Issue 1 above patched the delta *symptom*. The root cause is that
+the new plan layer dropped the legacy session's `n_sim >= 1` / `n_boot >= 1`
+invariant (`margins/_session.py` validated both and defaulted them to
+4000 / 1000). `compile()` and `GComputation` instead defaulted both to **0**,
+so the simulation path (`n_sim=0` → empty draws → `IndexError`) and bootstrap
+path (`B=0` → "All bootstrap replicates failed") carried the identical latent
+crash, reachable once R5 wires `compile()` → `execute_query()`. The lie was
+masked today only because `_extract_legacy_kwargs` forwards `n_sim`/`B` to the
+session **only when > 0**, so the session silently substituted its own
+defaults.
+
+Fix: `compile()` now defaults `B=1000`, `n_sim=4000` (matching the legacy
+session) and validates both as positive integers (`CompileError` otherwise);
+`GComputation.__init__` defaults updated to match so the Plan records the
+budget the engine actually uses. `Plan`/`build_inference_config` left as pure
+pass-throughs (their pass-through tests rely on direct construction).
+Tests: `tests/test_compile.py` — parametrized default-positivity and
+non-positive rejection across `{delta, simulation, bootstrap}`.

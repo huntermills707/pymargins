@@ -74,8 +74,8 @@ def compile(
     vcov: Any | None = None,
     ci: str = "wald",
     level: float = 0.95,
-    B: int = 0,
-    n_sim: int = 0,
+    B: int = 1000,
+    n_sim: int = 4000,
     seed: int | None = None,
     kappa_threshold: float | None = None,
     cluster: Any | None = None,
@@ -100,6 +100,18 @@ def compile(
     report : CompileReport
     """
     report = CompileReport()
+
+    # Inference-budget invariant (ported from the legacy session, which
+    # validated n_sim >= 1 and n_boot >= 1 at construction). The Plan must
+    # carry positive budgets: the executor draws ``n_sim`` simulation samples
+    # and ``B`` bootstrap replicates directly, so a zero would crash the
+    # simulation/bootstrap paths (and silently disable the delta diagnostic).
+    if not isinstance(n_sim, int) or n_sim < 1:
+        raise CompileError(f"n_sim must be a positive integer, got {n_sim!r}.")
+    if not isinstance(B, int) or B < 1:
+        raise CompileError(
+            f"B (bootstrap replicates) must be a positive integer, got {B!r}."
+        )
 
     # Walk graph
     node_kinds = []

@@ -64,3 +64,45 @@ def test_unhashable_callable_marked():
     plan, _ = compile(wiring, fit, method="delta")
     # No custom phi => not unhashable
     assert plan.unhashable_callable is False
+
+
+# ---------------------------------------------------------------------------
+# Inference-budget invariant (n_sim >= 1, B >= 1) — R3 audit follow-up
+#
+# The legacy session validated n_sim >= 1 and n_boot >= 1 and defaulted them
+# to 4000 / 1000. compile() must preserve that invariant so the Plan never
+# carries a zero budget into the executor (R5), where n_sim=0 crashes the
+# simulation path and B=0 crashes the bootstrap path.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("method", ["delta", "simulation", "bootstrap"])
+def test_compile_default_budget_is_positive(method):
+    """Every compiled Plan carries a positive simulation and bootstrap budget,
+    so the executor never sees the crashing n_sim=0 / B=0 defaults."""
+    d = df()
+    fit = smf.ols("y ~ x", data=d).fit()
+    wiring = Node(kind="input", _payload=d)
+    plan, _ = compile(wiring, fit, method=method)
+    assert plan.n_sim >= 1
+    assert plan.B >= 1
+
+
+@pytest.mark.parametrize("method", ["delta", "simulation", "bootstrap"])
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"n_sim": 0}, "n_sim"),
+        ({"n_sim": -5}, "n_sim"),
+        ({"B": 0}, "B"),
+        ({"B": -1}, "B"),
+    ],
+)
+def test_compile_rejects_nonpositive_budget(method, kwargs, match):
+    """A non-positive n_sim or B is refused at compile time, for every method,
+    rather than surfacing as a downstream executor crash."""
+    d = df()
+    fit = smf.ols("y ~ x", data=d).fit()
+    wiring = Node(kind="input", _payload=d)
+    with pytest.raises(CompileError, match=match):
+        compile(wiring, fit, method=method, **kwargs)
