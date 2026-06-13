@@ -106,3 +106,25 @@ def test_compile_rejects_nonpositive_budget(method, kwargs, match):
     wiring = Node(kind="input", _payload=d)
     with pytest.raises(CompileError, match=match):
         compile(wiring, fit, method=method, **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("method", "ci_in", "ci_out"),
+    [
+        ("bootstrap", "wald", "percentile"),  # delta-ish default -> percentile
+        ("bootstrap", "", "percentile"),  # empty default -> percentile
+        ("bootstrap", "bca", "bca"),  # explicit bootstrap ci preserved
+        ("bootstrap", "basic", "basic"),
+        ("delta", "wald", "wald"),  # non-bootstrap ci left untouched
+    ],
+)
+def test_compile_resolves_bootstrap_ci(method, ci_in, ci_out):
+    """The Plan records the interval type the engine actually runs. Bootstrap
+    never produces a Wald interval, so the 'wald'/'' default resolves to
+    percentile (else the executor rejects ci_method='wald'); explicit bootstrap
+    choices are preserved and non-bootstrap methods are untouched."""
+    d = df()
+    fit = smf.ols("y ~ x", data=d).fit()
+    wiring = Node(kind="input", _payload=d)
+    plan, _ = compile(wiring, fit, method=method, ci=ci_in)
+    assert plan.ci == ci_out

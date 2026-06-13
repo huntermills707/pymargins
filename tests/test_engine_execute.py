@@ -628,3 +628,56 @@ def test_replicate_failure_does_not_mutate_compiled_metadata(fit_logit, monkeypa
     assert result2["estimand_metadata"] is not original_metadata
     assert len(result1["estimand_metadata"]["diagnostics"]) == 1
     assert len(result2["estimand_metadata"]["diagnostics"]) == 1
+
+
+def test_bootstrap_default_ci_executes_end_to_end():
+    """compile()'s default ci='wald' must not crash the bootstrap executor.
+
+    The seam bug: compile() defaults ci='wald', which the bootstrap kernel
+    rejects. compile() resolves it to 'percentile', so the compiled Plan runs
+    through execute_query() cleanly. This bridges compile() -> execute_query()
+    (what R5 wires) to lock the fix.
+    """
+    from pymargins._graph._compile import compile as compile_plan
+    from pymargins._graph._node import Node
+
+    rng = np.random.default_rng(0)
+    n = 80
+    d = pd.DataFrame(
+        {"y": rng.binomial(1, 0.5, n).astype(float), "x1": rng.normal(size=n)}
+    )
+    fit = smf.glm("y ~ x1", data=d, family=sm.families.Binomial()).fit()
+    wiring = Node(kind="input", _payload=d)
+
+    # Default ci ("wald") + small B; compile must resolve ci to a bootstrap method.
+    plan, _ = compile_plan(wiring, fit, method="bootstrap", B=15)
+    assert plan.ci == "percentile"
+
+    m = Margins(fit, at="overall", method="delta")
+    ctx = QueryContext(
+        adapter=m.adapter,
+        base_data=m._base_data,
+        at="overall",
+        weights=None,
+        phi=None,
+        phi_inv=None,
+        fd_step=1e-6,
+        gradient_backend="autodiff",
+    )
+    compiled = compile_query(QuerySpec(kind="predict"), ctx)
+    banks = BankSet(plan.plan_hash, 0, plan.seed)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        result = execute_query(
+            compiled,
+            adapter=ctx.adapter,
+            plan=plan,
+            wiring_facts=WiringFacts(),
+            banks=banks,
+            frozen_cov=ctx.adapter.covariance(),
+        )
+
+    assert result["method"] == "bootstrap"
+    assert result["ci_method"] == "percentile"
+    assert np.all(np.isfinite(result["estimate"]))

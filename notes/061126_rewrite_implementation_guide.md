@@ -1758,3 +1758,26 @@ budget the engine actually uses. `Plan`/`build_inference_config` left as pure
 pass-throughs (their pass-through tests rely on direct construction).
 Tests: `tests/test_compile.py` — parametrized default-positivity and
 non-positive rejection across `{delta, simulation, bootstrap}`.
+
+### R3 audit follow-up: bootstrap ci honesty (option B)
+
+2026-06-12. Surfaced while verifying the budget fix end-to-end. `compile()`
+defaults `ci="wald"`; for `method="bootstrap"`, `build_inference_config`
+translated that via `plan.ci or "percentile"` into `ci_method="wald"`, which
+`_run_bootstrap` rejects — so default-ci bootstrap crashed the executor at R5.
+(The `plan_for`-based executor tests missed it because they pass `ci=None`,
+not `"wald"`.) Legacy `_extract_legacy_kwargs` had silently treated
+`""`/`"wald"` as "no bootstrap ci → percentile default".
+
+Fixed via **option B (Plan honesty)**, consistent with the n_sim fix: after
+method resolution, `compile()` maps a `"wald"`/`""` ci to `"percentile"` for
+`method_resolved == "bootstrap"`, so the Plan records the interval type the
+engine actually runs. Explicit bootstrap choices (percentile/basic/bca/
+studentized) are preserved; non-bootstrap methods are untouched (delta keeps
+`"wald"`). `build_inference_config`'s `plan.ci or "percentile"` is left as the
+defensive fallback for directly-constructed Plans (e.g. `plan_for(ci=None)`).
+Legacy session execution is unchanged: `_extract_legacy_kwargs` yields
+percentile whether `plan.ci` is `"wald"` (substituted) or `"percentile"`
+(explicit). Tests: `tests/test_compile.py::test_compile_resolves_bootstrap_ci`
+(parametrized) and `tests/test_engine_execute.py::
+test_bootstrap_default_ci_executes_end_to_end` (bridges compile → execute).

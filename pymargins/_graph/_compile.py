@@ -154,6 +154,13 @@ def compile(
     # Method / ci compatibility checks (use resolved method)
     report = check_method_adapter_compatibility(method_resolved, supported, report)
     report = check_ci_method_compatibility(ci, method_resolved, report)
+    # Resolve ci to the interval type the engine actually runs, so the Plan
+    # records it honestly. Bootstrap never produces a Wald interval: the
+    # "wald"/"" default maps to percentile (mirroring the legacy glue, which
+    # silently substituted percentile). The compatibility check above already
+    # validated the user's original ci against the resolved method.
+    if method_resolved == "bootstrap" and ci in ("", "wald"):
+        ci = "percentile"
     if method_resolved == "bootstrap" and B > 0:
         report = check_tail_count_adequacy(B, level, ci, report)
     n_clusters = None
