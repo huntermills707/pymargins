@@ -1738,6 +1738,34 @@ new engine only (legacy stays frozen until R7):
 Regression tests added to `tests/test_engine_execute.py` for issues 1 and 2.
 Updated gate: `pytest -m "not slow" -q` — 1688 passed, 3 skipped.
 
+## R4 completion note
+
+2026-06-12. R4 workstream implemented.
+
+- New module: `pymargins/_result/_intervals.py` — pure functions lifted from
+  `MarginsResult` for Wald/delta/draws intervals, sup-t bands (draws and MVN),
+  familywise level allocation, Wald/draws tests, and joint Wald.
+- `pymargins/_result/_graphresult.py` rewritten as a self-contained
+  `@dataclass(eq=False)` result object with:
+  - `from_engine(result_data, plan, ...)` for the executor path;
+  - `_from_margins_result(mr, plan)` interim adapter so the facade and anchor
+    tests stay green through R6;
+  - doctrine surface: `conf_int(correction=...)` with `level=` rejected, test,
+    joint_test, summary/to_frame/to_latex/to_html, outcome, scaled, contrast,
+    pairwise_contrasts, influence, to_disk/from_disk;
+  - `_result` compatibility shim exposing the same object, preserving
+    `tests/anchor/` access patterns.
+- `pymargins/_result/_pooling.py`: `pool_imputations` now duck-types inputs and
+  returns the input result type (MarginsResult or GraphResult) via a small
+  factory; `_validate_commensurable` returns the result class.
+- Tests:
+  - `tests/test_intervals.py` — 12 tests against scipy/computed expectations.
+  - `tests/test_graphresult.py` — rewritten, 24 tests covering from_engine,
+    from_margins_result interim, level lock, family corrections, sup-t
+    consistency, tests, summary/formatting, contrasts, psi_h variance identity,
+    disk round-trip, no session reference, and custom-phi rejection.
+- Gate: `pytest -m "not slow" -q` — 1737 passed, 3 skipped; `ruff check .` green.
+
 ### R3 audit follow-up: inference-budget invariant (root cause of issue 1)
 
 2026-06-12. Issue 1 above patched the delta *symptom*. The root cause is that
