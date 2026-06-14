@@ -63,7 +63,13 @@ def execute_query(
             config,
             compiled.estimand_metadata,
         )
-        result["cov_params"] = np.asarray(frozen_cov)
+        # Defensive fallback: Σ̂ should always be pre-resolved by R2.2, but if
+        # a caller passes None, recompute once rather than storing an object
+        # array that silently passes the `cov_params is not None` guard.
+        if frozen_cov is not None:
+            result["cov_params"] = np.asarray(frozen_cov)
+        else:
+            result["cov_params"] = np.asarray(adapter.covariance())
 
     elif method == "simulation":
         beta = np.asarray(adapter.coefficients())
