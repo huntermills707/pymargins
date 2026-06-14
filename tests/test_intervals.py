@@ -104,6 +104,26 @@ def test_draws_interval_basic():
     assert float(hi) == pytest.approx(1.96, abs=0.05)
 
 
+def test_draws_interval_bca_missing_z0_falls_back_to_percentile():
+    rng = np.random.default_rng(1)
+    draws = rng.normal(loc=0.0, scale=1.0, size=20000)
+    level = 0.95
+    lo, hi = draws_interval(draws, level, ci_method="bca", bootstrap_extras={})
+    assert float(lo) == pytest.approx(-1.96, abs=0.05)
+    assert float(hi) == pytest.approx(1.96, abs=0.05)
+
+
+def test_draws_interval_studentized_missing_extras_falls_back_to_percentile():
+    rng = np.random.default_rng(1)
+    draws = rng.normal(loc=0.0, scale=1.0, size=20000)
+    level = 0.95
+    lo, hi = draws_interval(
+        draws, level, ci_method="studentized", bootstrap_extras={}
+    )
+    assert float(lo) == pytest.approx(-1.96, abs=0.05)
+    assert float(hi) == pytest.approx(1.96, abs=0.05)
+
+
 # ---------------------------------------------------------------------------
 # Sup-t intervals
 # ---------------------------------------------------------------------------

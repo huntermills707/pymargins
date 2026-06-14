@@ -92,11 +92,17 @@ def draws_interval(
 
     Supports ``percentile``, ``basic``, ``bca`` (when ``bootstrap_extras``
     carries ``z0`` and ``a``), and ``studentized`` (when ``bootstrap_extras``
-    carries ``t_star`` and ``se_hat``).
+    carries ``t_star`` and ``se_hat``). BCa/studentized gracefully fall back to
+    percentile when their required extras are missing, matching the legacy
+    ``MarginsResult.conf_int`` behavior.
     """
     draws = np.asarray(draws_inf)
     est_inf = np.mean(draws, axis=0)
     alpha = (1.0 - level) / 2.0
+
+    # Percentile is the universal fallback default.
+    lower_inf = np.quantile(draws, alpha, axis=0)
+    upper_inf = np.quantile(draws, 1.0 - alpha, axis=0)
 
     if ci_method == "basic":
         lower_inf = 2.0 * est_inf - np.quantile(draws, 1.0 - alpha, axis=0)
@@ -119,13 +125,8 @@ def draws_interval(
             t_upper = np.quantile(t_stats, 1.0 - alpha, axis=0)
             lower_inf = est_inf - t_upper * se_hat
             upper_inf = est_inf - t_lower * se_hat
-        else:
-            ci_method = "percentile"
-    else:
-        if ci_method not in ("percentile", "bca", "studentized", "basic"):
-            raise ValueError(f"Unsupported ci_method: {ci_method!r}")
-        lower_inf = np.quantile(draws, alpha, axis=0)
-        upper_inf = np.quantile(draws, 1.0 - alpha, axis=0)
+    elif ci_method not in ("percentile", "bca", "studentized", "basic"):
+        raise ValueError(f"Unsupported ci_method: {ci_method!r}")
 
     if phi is not None:
         return np.asarray(phi(lower_inf)), np.asarray(phi(upper_inf))

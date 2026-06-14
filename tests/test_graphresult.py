@@ -471,3 +471,116 @@ def test_to_disk_rejects_custom_phi():
         path = os.path.join(tmpdir, "result.pkl")
         with pytest.raises(ValueError, match="custom function"):
             gr.to_disk(path)
+
+
+# ---------------------------------------------------------------------------
+# Audit regression tests
+# ---------------------------------------------------------------------------
+
+
+def test_joint_test_empirical():
+    """kind='empirical' must not raise UnboundLocalError on nonsingular draws."""
+    rng = np.random.default_rng(50)
+    draws = rng.multivariate_normal(
+        mean=[0.5, 0.0], cov=np.eye(2), size=2000
+    )
+    data = _sim_result_data(
+        estimate=np.array([0.5, 0.0]),
+        std_error=np.std(draws, axis=0, ddof=1),
+        conf_int_lower=np.quantile(draws, 0.025, axis=0),
+        conf_int_upper=np.quantile(draws, 0.975, axis=0),
+        draws_inf=draws,
+        estimand_metadata={"labels": ["a", "b"]},
+    )
+    gr = _graph_from_data(data)
+    tr = gr.joint_test(kind="empirical")
+    assert tr.method == "joint_empirical"
+    assert 0.0 <= float(tr.pvalue) <= 1.0
+
+
+def test_summary_kappa_once():
+    data = _delta_result_data(kappa=np.array(0.25))
+    gr = _graph_from_data(data)
+    summary = gr.summary()
+    # κ should appear exactly once (in the plan footer line).
+    assert summary.count("κ") == 1
+
+
+def test_scaled_rescales_psi_h():
+    data = _delta_result_data(
+        estimate=np.array([1.0]),
+        gradient=np.array([1.0, 0.0]),
+        cov_params=np.eye(2),
+    )
+    psi = np.ones((10, 1))
+    gr = _graph_from_data(data, psi_h=psi)
+    scaled = gr.scaled(100.0)
+    np.testing.assert_array_equal(scaled.psi_h, psi * 100.0)
+
+
+def test_from_engine_with_executor_roundtrip():
+    """A real execute_query → from_engine round-trip populates cov_params for delta."""
+    rng = np.random.default_rng(51)
+    n = 120
+    df = pd.DataFrame(
+        {
+            "y": rng.normal(size=n),
+            "x1": rng.normal(size=n),
+            "x2": rng.normal(size=n),
+        }
+    )
+    fit = smf.ols("y ~ x1 + x2", data=df).fit()
+
+    from pymargins._engine._banks import BankSet
+    from pymargins._engine._execute import execute_query
+    from pymargins._engine._queries import (
+        QueryContext,
+        QuerySpec,
+        WiringFacts,
+        build_inference_config,
+        compile_query,
+    )
+    from pymargins.margins import Margins
+
+    m = Margins(fit, at="overall", method="delta")
+    ctx = QueryContext(
+        adapter=m.adapter,
+        base_data=m._base_data,
+        at="overall",
+        weights=None,
+        phi=None,
+        phi_inv=None,
+        fd_step=1e-6,
+        gradient_backend="autodiff",
+    )
+    compiled = compile_query(QuerySpec(kind="predict"), ctx)
+    plan = _plan(method_resolved="delta")
+    facts = WiringFacts()
+    banks = BankSet(plan.plan_hash, 0, plan.seed)
+    config = build_inference_config(plan, ctx.adapter, facts, banks)
+
+    result = execute_query(
+        compiled,
+        adapter=ctx.adapter,
+        plan=plan,
+        wiring_facts=facts,
+        banks=banks,
+        frozen_cov=config.cov_params,
+    )
+
+    gr = GraphResult.from_engine(
+        result,
+        plan=plan,
+        labels=result.get("estimand_metadata", {}).get("labels"),
+        n_obs=len(df),
+        phi=None,
+        phi_inv=None,
+    )
+
+    assert gr.cov_params is not None
+    assert np.all(np.isfinite(gr.cov_params))
+    # These post-estimation ops require cov_params; they must not raise.
+    lo, hi = gr.conf_int(correction="bonferroni")
+    assert np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))
+    tr = gr.test(value=0.0, null_scale="inference")
+    assert np.all(np.isfinite(tr.pvalue))

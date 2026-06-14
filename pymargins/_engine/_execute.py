@@ -63,6 +63,7 @@ def execute_query(
             config,
             compiled.estimand_metadata,
         )
+        result["cov_params"] = np.asarray(frozen_cov)
 
     elif method == "simulation":
         beta = np.asarray(adapter.coefficients())

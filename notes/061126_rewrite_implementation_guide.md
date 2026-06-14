@@ -1809,3 +1809,34 @@ percentile whether `plan.ci` is `"wald"` (substituted) or `"percentile"`
 (explicit). Tests: `tests/test_compile.py::test_compile_resolves_bootstrap_ci`
 (parametrized) and `tests/test_engine_execute.py::
 test_bootstrap_default_ci_executes_end_to_end` (bridges compile → execute).
+
+### R4 audit fixes
+
+2026-06-12. Post-commit review found two crash regressions and several polish
+issues; all fixed and re-gated.
+
+1. **joint_test(kind="empirical") UnboundLocalError** — `emp_cov_reg` is now
+   bound to `emp_cov` before the solve, mirroring the legacy body.
+2. **from_engine missing cov_params** — `execute_query` now injects
+   `result["cov_params"] = np.asarray(frozen_cov)` on the delta branch, so
+   a real executor → `GraphResult.from_engine` round-trip can recompute
+   intervals/tests/contrasts.
+3. **draws_interval lost percentile fallback** — rewritten so percentile bounds
+   are always computed first; BCa/studentized override them only when their
+   required extras are present, matching legacy behavior.
+4. **summary printed κ twice** — removed the standalone κ footer line; only
+   the plan-line `κ = …` remains.
+5. **scaled() left psi_h stale** — psi_h is now rescaled by `by` alongside
+   gradient/draws.
+6. **Executor→GraphResult round-trip test added** —
+   `tests/test_graphresult.py::test_from_engine_with_executor_roundtrip`
+   exercises a real OLS prediction through `execute_query` and asserts that
+   `cov_params`, `conf_int(correction=...)`, and `test()` all work.
+7. **Notes/ledger (not fixed now):** pooled GraphResult ignores
+   `imputation_diagnostic` in conf_int/test/summary (only bites at R6 when
+   pooling returns GraphResult); `joint_test(value=None)` uses an inference-scale
+   zero, which matches the docstring intent but differs silently from legacy
+   `phi_inv(0)` under non-identity scales.
+
+Updated gate: `pytest -m "not slow" -q` — 1743 passed, 3 skipped;
+`ruff check .` green.

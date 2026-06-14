@@ -359,8 +359,9 @@ class GraphResult:
             if emp_cov.ndim == 0:
                 emp_cov = np.array([[emp_cov]])
             diff = est_arr - value_arr
+            emp_cov_reg = emp_cov
             try:
-                solved = np.linalg.solve(emp_cov, diff)
+                solved = np.linalg.solve(emp_cov_reg, diff)
             except np.linalg.LinAlgError:
                 ridge = 1e-12 * float(np.trace(emp_cov)) / emp_cov.shape[0]
                 ridge = max(ridge, float(np.finfo(emp_cov.dtype).eps))
@@ -539,13 +540,6 @@ class GraphResult:
             footers.append(
                 "Note: std err is on the inference scale; estimate and CI are on the reporting scale."
             )
-        if self.kappa is not None:
-            k = np.asarray(self.kappa)
-            if not np.all(np.isnan(k)):
-                kappa_str = (
-                    f"{float(k):.3f}" if k.ndim == 0 else f"max={float(np.nanmax(k)):.3f}"
-                )
-                footers.append(f"κ: {kappa_str}")
         if self.delta_sim_disagreement is not None:
             footers.append(
                 f"Delta-vs-sim disagreement: {self.delta_sim_disagreement:.3%}"
@@ -964,6 +958,7 @@ class GraphResult:
             gradient=(self.gradient * by if self.gradient is not None else None),
             draws=(self.draws * by if self.draws is not None else None),
             draws_inf=(self.draws_inf * by if self.draws_inf is not None else None),
+            psi_h=(self.psi_h * by if self.psi_h is not None else None),
         )
         meta = dict(self.estimand_metadata)
         meta["labels"] = [
