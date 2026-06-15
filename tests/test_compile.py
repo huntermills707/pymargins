@@ -92,6 +92,22 @@ def test_unhashable_callable_at_sets_flag():
     assert plan.unhashable_callable is True
 
 
+def test_nested_unhashable_callable_at_sets_flag():
+    """An un-introspectable callable nested inside an at= dict must set the honesty flag."""
+    d = make_df()
+    fit = smf.ols("y ~ x", data=d).fit()
+    wiring = Node(kind="input", _payload=d)
+
+    class NoNameCallable:
+        def __call__(self, df):
+            return df.iloc[[0]]
+
+    at = {"subgroup": NoNameCallable()}
+    plan, _, _ = compile(wiring, fit, method="delta", at=at)
+    assert "callable:unhashable_callable" in plan.at
+    assert plan.unhashable_callable is True
+
+
 def test_dict_at_with_non_json_values_fingerprints():
     d = make_df()
     fit = smf.ols("y ~ x", data=d).fit()
@@ -150,6 +166,14 @@ def test_vcov_survey_conflict():
     wiring = steps.input(d, design=design)
     with pytest.raises(CompileError, match="conflicts with the survey design"):
         compile(wiring, fit, vcov="HC1")
+
+
+def test_vcov_cluster_without_cluster_refuses():
+    d = make_df()
+    fit = smf.ols("y ~ x", data=d).fit()
+    wiring = Node(kind="input", _payload=d)
+    with pytest.raises(CompileError, match='vcov="cluster" requires a cluster variable'):
+        compile(wiring, fit, vcov="cluster")
 
 
 def test_match_plus_filter_refused():

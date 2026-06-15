@@ -114,10 +114,17 @@ def _fingerprint_callable(fn: Any) -> tuple[str, bool]:
         return "callable:unhashable_callable", True
 
 
-def _json_default_for_at(obj: Any) -> Any:
-    """JSON-default for non-serializable ``at`` values (arrays, callables, etc.)."""
+def _json_default_for_at(obj: Any, unhashable_flag: list[bool]) -> Any:
+    """JSON-default for non-serializable ``at`` values (arrays, callables, etc.).
+
+    Sets ``unhashable_flag[0] = True`` when a callable cannot be fingerprinted
+    by source or qualname, so ``_fingerprint_at`` can propagate the honesty flag
+    even for callables nested inside dicts/lists.
+    """
     if callable(obj):
-        val, _ = _fingerprint_callable(obj)
+        val, unhashable = _fingerprint_callable(obj)
+        if unhashable:
+            unhashable_flag[0] = True
         return val
     if isinstance(obj, np.ndarray):
         return obj.tolist()
@@ -142,7 +149,13 @@ def _fingerprint_at(at: Any) -> tuple[Any, bool]:
     try:
         return json.dumps(at, sort_keys=True), False
     except TypeError:
-        return json.dumps(at, sort_keys=True, default=_json_default_for_at), False
+        flag = [False]
+        return (
+            json.dumps(
+                at, sort_keys=True, default=lambda o: _json_default_for_at(o, flag)
+            ),
+            flag[0],
+        )
     except Exception:
         return repr(at), True
 
@@ -255,7 +268,11 @@ def _resolve_vcov_spec(
                 "Explicit vcov= conflicts with the survey design declared at "
                 "steps.input(). The design already determines \u03a3\u0302."
             )
-    if isinstance(vcov, str) and vcov.lower() == "cluster" and cluster is not None:
+    if isinstance(vcov, str) and vcov.lower() == "cluster":
+        if cluster is None:
+            raise CompileError(
+                'vcov="cluster" requires a cluster variable declared at steps.input(cluster=...).'
+            )
         return {"type": "cluster", "groups": cluster}
     if vcov is not None:
         return vcov

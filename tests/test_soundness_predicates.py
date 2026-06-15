@@ -56,6 +56,12 @@ def test_ci_method_compatible_pass():
     assert not report.has(Severity.REFUSE)
 
 
+def test_ci_method_delta_incompatible_refuses():
+    for ci in ("percentile", "bca", "basic"):
+        report = check_ci_method_compatibility(ci, "delta", CompileReport())
+        assert report.has(Severity.REFUSE, "ci_method_incompatible")
+
+
 def test_tail_count_adequacy_warn():
     report = check_tail_count_adequacy(50, 0.95, "percentile", CompileReport())
     assert report.has(Severity.WARN, "tail_count_low")
@@ -118,20 +124,28 @@ def test_soundness_rows_implemented_resolve():
 
 
 def test_soundness_rows_text_present():
-    """Every row carries verbatim text; future rows have no predicate."""
+    """Every row carries verbatim text; unimplemented rows with a design-table *(future)* steer include it."""
+    import re
+
+    valid_severities = {"sound", "conditional", "unrepresentable", "refuse", "warn", "note"}
+    # Row IDs whose design §6 cell steers at unshipped machinery via *(future)*.
+    future_steer_rows = {
+        "6.2-bootstrap-nn-matching-with-replacement",
+        "6.2-m-out-of-n",
+        "6.3-reimpute-percentile-sound",
+        "6.4-ipw-aipw-ml-nuisances-delta",
+        "6.4-ipw-aipw-ml-nuisances-bootstrap",
+        "6.5-ratio-small-denominator",
+    }
+    future_marker = re.compile(r"\*\(future.*?\)\*")
     for row in SOUNDNESS_ROWS:
         assert isinstance(row, SoundnessRow)
         assert row.text
-        if row.predicate is None:
-            # Unimplemented rows are honest about being unimplemented.
-            assert "*(future)*" in row.text or row.severity in {
-                "sound",
-                "conditional",
-                "unrepresentable",
-                "refuse",
-                "warn",
-                "note",
-            }
+        assert row.severity in valid_severities, f"{row.id}: invalid severity {row.severity!r}"
+        if row.predicate is None and row.id in future_steer_rows:
+            assert future_marker.search(row.text), (
+                f"{row.id}: design cell steers at unshipped machinery so text must include a *(future)* marker"
+            )
 
 
 def _dummy_adapter(cls):

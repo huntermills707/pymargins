@@ -262,6 +262,14 @@ SOUNDNESS_ROWS: tuple[SoundnessRow, ...] = (
         predicate="pymargins._soundness._predicates.check_ci_method_compatibility",
     ),
     SoundnessRow(
+        "6.1-ci-method-incompatible-delta",
+        "§6.1",
+        "refuse",
+        'ci="percentile"/"bca"/"basic" requires method!="delta". '
+        "Delta method produces Wald-type intervals; use ci='wald' or method='bootstrap'.",
+        predicate="pymargins._soundness._predicates.check_ci_method_compatibility",
+    ),
+    SoundnessRow(
         "6.1-studentized-no-per-replicate-se",
         "§6.1",
         "refuse",
@@ -297,13 +305,16 @@ SOUNDNESS_ROWS: tuple[SoundnessRow, ...] = (
         "6.1-frozen-estimated-stage",
         "§6.1",
         "unrepresentable",
-        "Frozen estimated stage under a transform is unrepresentable; stages linearize or re-execute, never freeze.",
+        "Frozen estimated stage under a transform is unrepresentable; stages linearize or re-execute, never freeze. "
+        "Freezing errs in a functional-dependent direction: conservative for IPW-ATE (Hirano–Imbens–Ridder 2003; "
+        "Lunceford–Davidian 2004), anti-conservative for outcome-side two-step nuisances — invalid either way.",
     ),
     SoundnessRow(
         "6.1-forgotten-dependence",
         "§6.1",
         "unrepresentable",
-        "Forgotten dependence in the analytic Σ̂ is unrepresentable; dependence declares once at steps.input and flows to variance and resampler alike (§4.1).",
+        "Forgotten dependence in the analytic Σ̂ is unrepresentable; dependence declares once at steps.input and "
+        "flows to VarianceScheme and resampler alike (§4.1).",
     ),
     SoundnessRow(
         "6.1-match-filter-04-refusal",
@@ -317,15 +328,19 @@ SOUNDNESS_ROWS: tuple[SoundnessRow, ...] = (
         "6.2-bootstrap-nn-matching-with-replacement",
         "§6.2",
         "warn",
-        "bootstrap ∘ NN matching with replacement is inconsistent (Abadie–Imbens 2008). "
-        "Steers: analytic AI variance (Abadie–Imbens 2006), Otsu–Rai weighted bootstrap *(future)*, m-out-of-n.",
+        "bootstrap ∘ NN matching with replacement is inconsistent (Abadie–Imbens 2008; failure can go either direction). "
+        "Steers: analytic AI variance (Abadie–Imbens 2006), "
+        "Otsu–Rai weighted bootstrap *(future — the modern fix: bootstraps the martingale representation, no re-matching, no tuning)*, "
+        "m-out-of-n.",
     ),
     SoundnessRow(
         "6.2-bootstrap-ps-matching-without-replacement",
         "§6.2",
         "warn",
-        "bootstrap ∘ PS matching without replacement has no general validity theory; simulation evidence is mildly conservative (Austin & Small 2014). "
-        "Alternatives: pair-cluster bootstrap, AI-2016 analytic variance for estimated-PS matching.",
+        "bootstrap ∘ PS matching without replacement (re-estimate PS + re-match per replicate — what the engine does) "
+        "has no general validity theory; simulation evidence is mildly conservative (Austin & Small 2014). "
+        "Alternatives: pair-cluster bootstrap (resample matched pairs — same paper), "
+        "AI-2016 analytic variance for estimated-PS matching.",
     ),
     SoundnessRow(
         "6.2-m-out-of-n",
@@ -337,20 +352,23 @@ SOUNDNESS_ROWS: tuple[SoundnessRow, ...] = (
         "6.2-matching-estimated-ps-analytic",
         "§6.2",
         "conditional",
-        "matching × estimated PS analytic route requires the PS-estimation correction (Abadie–Imbens 2016); it is not covered by naive AI-2006 variance.",
+        "matching × estimated PS analytic route requires the PS-estimation correction (Abadie–Imbens 2016); "
+        "it is not covered by naive AI-2006 variance; surface as a distinct steer, don't conflate.",
     ),
     SoundnessRow(
         "6.2-long-format-row-resampling",
         "§6.2",
         "refuse",
-        "long-format data × row resampling is invalid; resampling unit = subject/entity. Demand the cluster declaration at steps.input.",
+        "long-format data (time-varying Cox, panel) × row resampling is invalid; resampling unit = subject/entity. "
+        "Episode structure detected → demand the cluster declaration at steps.input.",
     ),
     # §6.3 Fans × views
     SoundnessRow(
         "6.3-impute-fan-est-se-rubin",
         "§6.3",
         "sound",
-        "impute-fan × (est, SE) view → Rubin is sound (Rubin 1987; Barnard–Rubin 1999 df).",
+        "impute-fan × (est, SE) view → Rubin is sound (Rubin 1987; Barnard–Rubin 1999 df; "
+        "W_m may be bootstrap-SE (Schomaker–Heumann 2018 'MI Boot pooled SE'), costs M×B — compile note points at reimpute).",
     ),
     SoundnessRow(
         "6.3-impute-fan-quantile-refuse",
@@ -362,26 +380,33 @@ SOUNDNESS_ROWS: tuple[SoundnessRow, ...] = (
         "6.3-reimpute-percentile-sound",
         "§6.3",
         "sound",
-        "reimpute (boot-MI) × percentile is sound (Schomaker–Heumann 2018; Bartlett–Hughes 2020).",
+        "reimpute (boot-MI) × percentile is sound (Schomaker–Heumann 2018); "
+        "also the uncongeniality-robust choice (Bartlett–Hughes 2020); "
+        "efficient pooled variants exist (von Hippel-style two-way decomposition) *(future)*.",
     ),
     SoundnessRow(
         "6.3-rubin-uncongenial",
         "§6.3",
         "note",
-        "Rubin × uncongenial imputer/analyst pair: Rubin's T is biased when models aren't congenial (Meng 1994). "
-        "Heuristic: imputer family ∉ analyst family → note recommending reimpute.",
+        "Rubin × uncongenial imputer/analyst pair: Rubin's T is biased when imputation and analysis models "
+        "aren't congenial (Meng 1994): conservative when the imputer is richer, anti-conservative when poorer "
+        "(Robins–Wang 2000). Heuristic predicate: imputer family ∉ analyst family (e.g., forest-imputer + GLM) "
+        "→ note recommending reimpute.",
     ),
     SoundnessRow(
         "6.3-impute-fan-simulation-mix",
         "§6.3",
         "conditional",
-        "impute-fan × simulation mixed draw clouds: default reduce per branch to (est, SE) → Rubin; pooling='mix' (Zhou–Reiter 2010) only at M ≥ 50.",
+        "impute-fan × simulation mixed draw clouds: default reduce per branch to (est, SE) → Rubin; "
+        "pooling='mix' (Zhou–Reiter 2010) only at M ≥ 50 (§6.7) — the mixture misses Rubin's (1+1/M) inflation, "
+        "~10% variance understatement at M=5; refused below the gate with the arithmetic shown.",
     ),
     SoundnessRow(
         "6.3-mi-match-sound",
         "§6.3",
         "sound",
-        "mi ∘ match (re-match per imputation) is sound (Mitra–Reiter 2016; Leyrat et al. 2019).",
+        "mi ∘ match (re-match per imputation) is sound (Mitra–Reiter 2016; Leyrat et al. 2019); "
+        "the 'across' variant (average PS, match once) is a different estimator, not offered.",
     ),
     SoundnessRow(
         "6.3-mi-survey",
@@ -395,13 +420,14 @@ SOUNDNESS_ROWS: tuple[SoundnessRow, ...] = (
         "6.4-ipw-aipw-stacked-psi",
         "§6.4",
         "sound",
-        "IPW/AIPW × stacked-ψ delta (parametric nuisances) is sound (Stefanski–Boos 2002; Lunceford–Davidian 2004).",
+        "IPW/AIPW × stacked-ψ delta (parametric nuisances) is sound: stacked M-estimation sandwich "
+        "(Stefanski–Boos 2002; Lunceford–Davidian 2004 give AIPW's explicitly).",
     ),
     SoundnessRow(
         "6.4-aipw-bootstrap",
         "§6.4",
         "sound",
-        "AIPW × bootstrap is sound; re-execution absorbs the coupling.",
+        "AIPW × bootstrap is sound; re-execution absorbs the coupling; the IF face is dormant (benign collision, §2.3).",
     ),
     SoundnessRow(
         "6.4-ipw-aipw-ml-nuisances-delta",
@@ -421,8 +447,9 @@ SOUNDNESS_ROWS: tuple[SoundnessRow, ...] = (
         "6.4-weak-overlap",
         "§6.4",
         "warn",
-        "Weak overlap / positivity: ESS, max normalized weight, and PS tail mass trip → warn. "
-        "Steers: declared trimming (Crump et al. 2009) or overlap weights/ATO (Li–Morgan–Zaslavsky 2018).",
+        "Weak overlap / positivity: ESS = (Σw)²/Σw², max normalized weight, and PS tail mass trip → warn. "
+        "Steers: declared trimming (Crump et al. 2009 — re-executed per replicate/branch, estimand relabeled "
+        "'trimmed population') or overlap weights/ATO (Li–Morgan–Zaslavsky 2018).",
     ),
     SoundnessRow(
         "6.4-population-without-support",
@@ -435,7 +462,8 @@ SOUNDNESS_ROWS: tuple[SoundnessRow, ...] = (
         "6.5-survey-bootstrap",
         "§6.5",
         "sound",
-        "survey × bootstrap is sound iff the design drives resampling (PSU-within-stratum with rescaling, Rao–Wu 1988).",
+        "survey × bootstrap is sound iff the design drives resampling (PSU-within-stratum with rescaling, Rao–Wu 1988) — "
+        "already enforced (survey.py).",
     ),
     SoundnessRow(
         "6.5-lonely-psu",
@@ -448,8 +476,9 @@ SOUNDNESS_ROWS: tuple[SoundnessRow, ...] = (
         "6.5-survey-matching",
         "§6.5",
         "warn",
-        "survey × matching warns; conventions unsettled (DuGoff–Schuler–Stuart 2014; Austin et al. 2018). "
-        "Require an explicit convention argument.",
+        "survey × matching warns; conventions unsettled (DuGoff–Schuler–Stuart 2014; Austin et al. 2018): "
+        "weighted PS model vs weights-as-covariate, survey-weighted matched analysis — "
+        "require an explicit convention argument; open item.",
     ),
     SoundnessRow(
         "6.5-few-clusters",
@@ -462,32 +491,37 @@ SOUNDNESS_ROWS: tuple[SoundnessRow, ...] = (
         "6.5-block-bootstrap-no-length",
         "§6.5",
         "conditional",
-        "Block bootstrap without a block length uses auto-selection (Politis–White 2004); fallback ⌈n^{1/3}⌉ (Hall–Horowitz–Jing 1995).",
+        "Block bootstrap without a block length uses auto-selection (Politis–White 2004), record in the plan; "
+        "~n^{1/3} fallback (Hall–Horowitz–Jing 1995).",
     ),
     SoundnessRow(
         "6.5-bca-cluster-block",
         "§6.5",
         "conditional",
-        "BCa × cluster/block resampling requires the matching jackknife unit (cluster jackknife) for sound acceleration.",
+        "BCa × cluster/block resampling requires the matching jackknife unit (cluster jackknife) for sound acceleration; "
+        "else silently unsound.",
     ),
     SoundnessRow(
         "6.5-bca-small-b",
         "§6.5",
         "note",
-        "BCa with B < 1999: acceleration/tail quantiles may be unstable.",
+        "BCa × small B (B < 1999): acceleration/tail quantiles unstable (Efron–Tibshirani; Davison–Hinkley; §6.7).",
         predicate="pymargins._soundness._predicates.check_tail_count_adequacy",
     ),
     SoundnessRow(
         "6.5-boundary-estimands",
         "§6.5",
         "warn",
-        "Boundary estimands (p̂ ≈ 0/1, variance components ≈ 0) warn under all methods; delta is nonstandard, sim draws violate support, and bootstrap is inconsistent at a boundary (Andrews 2000).",
+        "Boundary estimands (p̂ ≈ 0/1, variance components ≈ 0) warn under all methods; κ's documented blind spot; "
+        "delta is nonstandard, sim draws violate support, and the bootstrap is inconsistent at a boundary (Andrews 2000). "
+        "No clean steer; report prominently.",
     ),
     SoundnessRow(
         "6.5-ratio-small-denominator",
         "§6.5",
         "warn",
-        "Ratio estimands with small denominator |t| warn; κ trips (= 2/|t|). Steer simulation; Fieller-type interval *(future)*.",
+        "Ratio estimands with small denominator |t| warn; κ trips (= 2/|t|, §5.2). Steer simulation; "
+        "Fieller-type interval as a future ci= option *(future)*.",
     ),
     # §6.6 Quantitative predicates roster (no predicates here; implemented elsewhere)
     SoundnessRow(
@@ -509,7 +543,27 @@ SOUNDNESS_ROWS: tuple[SoundnessRow, ...] = (
         "ESS / weight concentration is reported; ESS/n < 0.5 triggers a note (Kish 1965).",
         predicate="pymargins._soundness._predicates.check_ess",
     ),
+    SoundnessRow(
+        "6.6-fd-hessian-agreement",
+        "§6.6",
+        "note",
+        "FD-Hessian agreement (tier-2 κ trustworthiness, §11.8).",
+    ),
     # §6.7 Bootstrap calibration / tail checks
+    SoundnessRow(
+        "6.7-boundary-proximity",
+        "§6.7",
+        "warn",
+        "Boundary proximity: estimand within z_level·SE of the parameter-space boundary → warn; "
+        "any scenario p̂ within 0.01 of {0,1} → note.",
+    ),
+    SoundnessRow(
+        "6.7-stabilized-weight",
+        "§6.7",
+        "warn",
+        "Stabilized-weight diagnostics: max w̃ > 20 → warn (positivity); "
+        "mean w̃ ∉ [0.9, 1.1] → note (misspecification) (Cole–Hernán 2008).",
+    ),
     SoundnessRow(
         "6.7-tail-counts",
         "§6.7",
