@@ -26,6 +26,15 @@ from pymargins._graph._plan import Plan
 from pymargins._result._graphresult import GraphResult
 
 
+def _is_user_supplied_vcov(vcov: Any) -> bool:
+    """True when the Plan's vcov came from a user-supplied ndarray Σ̂."""
+    if isinstance(vcov, np.ndarray):
+        return True
+    if isinstance(vcov, dict) and vcov.get("kind") == "user_ndarray":
+        return True
+    return False
+
+
 def _resolve_outcome(
     wiring: Node | None,
     outcome: Any,
@@ -106,11 +115,16 @@ def _compute_psi_h(
 
         beta = adapter.coefficients()
         grad = gradient(compiled_query.h, beta, backend="autodiff", fd_step=1e-6)
-        psi_beta = jnp.asarray(score_fn(beta))
-        if psi_beta.ndim != 2:
+        # score_obs is evaluated at the fitted coefficients and takes no arguments.
+        score = jnp.asarray(score_fn())
+        if score.ndim != 2:
             return None
+        # Per-observation influence of β̂ is ψ^β_i = Σ̂ s_i (bread × score); the
+        # estimand influence is ψ^h_i = ∇h · ψ^β_i. Dropping the bread Σ̂
+        # mis-scales the result by the covariance (≈ σ̂² for OLS).
+        psi_beta = score @ jnp.asarray(frozen_cov)
         return np.asarray(grad @ psi_beta.T)
-    except Exception:
+    except (TypeError, ValueError, NotImplementedError):
         return None
 
 
@@ -216,7 +230,13 @@ class GComputation:
             phi_inv=self._compiled.phi_inv,
         )
         psi_h = None
-        if self._plan.method_resolved == "delta":
+        if (
+            self._plan.method_resolved == "delta"
+            and not _is_user_supplied_vcov(self._plan.vcov)
+        ):
+            # A user-supplied covariance matrix is not guaranteed to be
+            # consistent with the model's score observations; tier-1 influence
+            # is only meaningful when Σ̂ comes from the adapter.
             psi_h = _compute_psi_h(
                 compiled_query,
                 self._compiled.adapter,
@@ -287,6 +307,94 @@ class GComputation:
                 label=label,
                 outcome=outcome,
             )
+        )
+
+    def _elasticity(
+        self,
+        kind: str,
+        variable: str,
+        *,
+        atexog=None,
+        over=None,
+        transform=None,
+        label=None,
+        outcome=None,
+    ) -> GraphResult:
+        """Shared implementation for eyex/eydx/dyex."""
+        scenario = {}
+        if atexog is not None:
+            scenario["atexog"] = atexog
+        if over is not None:
+            scenario["over"] = over
+        return self._query(
+            QuerySpec(
+                kind=kind,
+                scenario=scenario or None,
+                variables=(variable,),
+                transform=transform,
+                label=label,
+                outcome=outcome,
+            )
+        )
+
+    def eyex(
+        self,
+        variable: str,
+        *,
+        atexog=None,
+        over=None,
+        transform=None,
+        label=None,
+        outcome=None,
+    ) -> GraphResult:
+        return self._elasticity(
+            "eyex",
+            variable,
+            atexog=atexog,
+            over=over,
+            transform=transform,
+            label=label,
+            outcome=outcome,
+        )
+
+    def eydx(
+        self,
+        variable: str,
+        *,
+        atexog=None,
+        over=None,
+        transform=None,
+        label=None,
+        outcome=None,
+    ) -> GraphResult:
+        return self._elasticity(
+            "eydx",
+            variable,
+            atexog=atexog,
+            over=over,
+            transform=transform,
+            label=label,
+            outcome=outcome,
+        )
+
+    def dyex(
+        self,
+        variable: str,
+        *,
+        atexog=None,
+        over=None,
+        transform=None,
+        label=None,
+        outcome=None,
+    ) -> GraphResult:
+        return self._elasticity(
+            "dyex",
+            variable,
+            atexog=atexog,
+            over=over,
+            transform=transform,
+            label=label,
+            outcome=outcome,
         )
 
     def contrasts(

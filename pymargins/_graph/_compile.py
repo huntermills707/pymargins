@@ -114,6 +114,19 @@ def _fingerprint_callable(fn: Any) -> tuple[str, bool]:
         return "callable:unhashable_callable", True
 
 
+def _fingerprint_vcov(vcov: Any) -> Any:
+    """Replace a user-supplied covariance ndarray with a stable fingerprint.
+
+    The Plan must remain JSON-serializable and small; a raw Σ̂ array breaks
+    both.  Strings and dict specs pass through unchanged.
+    """
+    if isinstance(vcov, np.ndarray):
+        arr = np.asarray(vcov, dtype=float)
+        fp = hashlib.sha256(arr.tobytes()).hexdigest()
+        return {"kind": "user_ndarray", "fingerprint": fp}
+    return vcov
+
+
 def _json_default_for_at(obj: Any, unhashable_flag: list[bool]) -> Any:
     """JSON-default for non-serializable ``at`` values (arrays, callables, etc.).
 
@@ -643,7 +656,7 @@ def compile(
         method_declared=method,
         method_resolved=method_resolved,
         method_resolution_reason=resolution_reason,
-        vcov=vcov,
+        vcov=_fingerprint_vcov(vcov),
         ci=ci,
         level=level,
         B=B,

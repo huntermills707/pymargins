@@ -433,3 +433,33 @@ Disposition: fixed in the new engine; label-only + validation change (no
 shipped numbers affected).
 
 Status: fixed (R2 follow-up commit)
+
+## D19 — tier-1 influence ψ^h dropped the bread Σ̂ (R6 audit)
+
+Where: `pymargins/estimators/_base.py::_compute_psi_h`.
+
+Claim: `_compute_psi_h` multiplied the estimand gradient by the raw
+per-observation score `s_i` and never used its `frozen_cov` argument,
+returning `∇h · s_i` instead of the influence function `ψ^h_i = ∇h · Σ̂ s_i`
+(the per-observation influence of β̂ is `ψ^β_i = Σ̂ s_i`, bread × score). The
+result was mis-scaled by the covariance — a factor of ≈ σ̂² for OLS. The bug
+was inert while ψ^h was always None (the call used the wrong arity,
+`score_fn(beta)`, against an argless `score_obs()`); fixing the arity made the
+path live and surfaced the scaling error in the public
+`GraphResult.influence()`.
+
+Oracle: scale-equivariance + influence-variance identity. Rescaling y by c
+scales β̂, residuals, and Σ̂ such that ψ^h must scale by exactly c; and
+`sqrt(Σ_i ψ^h_i²) ≈ SE` (the influence yields the HC0 linearization variance).
+
+Evidence:
+- Buggy `∇h · s_i`: SE / (sqrt(Σψ²)/n) = 1.0 / 101.6 / 10163 at y×{1,10,100}
+  — error ∝ σ̂², invisible only because the baseline DGP has σ̂ ≈ 1.
+- Fixed `∇h · Σ̂ s_i`: SE / sqrt(Σψ²) = 1.005 at every scale (residual is the
+  robust-vs-classical gap; influence is HC0, the vcov=None SE is classical).
+
+Disposition: fix-in-place at R6. `psi_beta = score_obs() @ frozen_cov` (uses
+the previously-dead `frozen_cov`, consistent with the frozen-Σ̂ doctrine).
+Regression guard: `test_psi_h_includes_bread_scale_equivariance`.
+
+Status: fixed (R6 audit follow-up)

@@ -194,3 +194,31 @@ def test_anchor_weights_ols(df, fit_ols):
     r2 = est.predict()
     assert_anchored(r1.estimate, r2.estimate, "ols/weights/estimate")
     assert_anchored(r1.std_error, r2.std_error, "ols/weights/se")
+
+
+@pytest.mark.parametrize("query", ["eyex", "eydx", "dyex"])
+def test_anchor_elasticity_ols(df, fit_ols, query):
+    seed = 12345
+    m = Margins(fit_ols, at="overall", method="delta", rng_seed=seed)
+    est = GComputation(fit_ols, at="overall", method="delta", seed=seed)
+    r1 = getattr(m, query)("x1")
+    r2 = getattr(est, query)("x1")
+    assert_anchored(r1.estimate, r2.estimate, f"ols/{query}/estimate")
+    # SEs compose slope and prediction in different orders; under x64 they
+    # agree to ~1e-11, which is enough to catch the float32 drift that the
+    # R6 audit flagged while allowing the two code paths to differ at eps.
+    np.testing.assert_allclose(
+        r1.std_error, r2.std_error, rtol=1e-9, err_msg=f"ols/{query}/se"
+    )
+    np.testing.assert_allclose(
+        r1.conf_int_lower,
+        r2.conf_int_lower,
+        rtol=1e-9,
+        err_msg=f"ols/{query}/ci_low",
+    )
+    np.testing.assert_allclose(
+        r1.conf_int_upper,
+        r2.conf_int_upper,
+        rtol=1e-9,
+        err_msg=f"ols/{query}/ci_high",
+    )

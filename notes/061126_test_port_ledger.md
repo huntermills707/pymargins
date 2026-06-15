@@ -38,3 +38,18 @@ Disposition: re-anchored. The residual gaps P2 attributed to "statsmodels and
 The HC1 per-case tolerances were removed after the D9 fix; the remaining
 tolerances (`probit std_error = 0.007`, `cluster std_error = 2e-5`) are
 ledgered and explained in their golden notes.
+
+## P5 — `tests/anchor/test_anchor_gcomputation.py::test_anchor_elasticity_ols` (R6)
+
+Category: (b) implementation-difference tolerance.
+
+Disposition: tolerated. The point estimates remain bit-exact-anchored, but
+SE/CI use `rtol=1e-9` instead of the anchor matrix's usual bit-exact check.
+Reason: the legacy `Margins._elasticity` computes the slope and prediction as
+separate `MarginsResult`s and then applies the chain rule to their stored
+gradients, while the new engine composes `slope_cq.h` and `pred_cq.h` into a
+single estimand and autodiffs once. Under `jax_enable_x64` the two paths agree
+to ~1e-11 (float-operation-order noise) but not bit-exact. The SE is
+independently anchored by the closed-form analytic oracle
+`tests/test_gcomputation_r6.py::test_eyex_se_against_analytic_delta`, so the
+anchor tolerance is not self-referential.

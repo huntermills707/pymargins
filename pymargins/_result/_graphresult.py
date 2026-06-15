@@ -30,7 +30,7 @@ from ._intervals import (
     supt_interval_draws,
     wald_test,
 )
-from ._margins import MarginsResult, _name_to_phi, _phi_to_name
+from ._scales import _name_to_phi, _phi_to_name
 from ._test import TestResult
 
 LEVEL_LOCKED_MSG = (
@@ -136,44 +136,6 @@ class GraphResult:
             bootstrap_extras=result_data.get("bootstrap_extras"),
             phi=phi,
             phi_inv=phi_inv,
-        )
-
-    @classmethod
-    def _from_margins_result(
-        cls, result: MarginsResult, plan: Any
-    ) -> GraphResult:
-        """Interim adapter: map a legacy MarginsResult onto GraphResult.
-
-        Removed at R6 once the new surface is the only emitter.
-        """
-        return cls(
-            estimate=np.asarray(result.estimate),
-            std_error=np.asarray(result.std_error),
-            conf_int_lower=np.asarray(result.conf_int_lower),
-            conf_int_upper=np.asarray(result.conf_int_upper),
-            labels=result.estimand_metadata.get("labels"),
-            method=result.method,
-            level=float(result.level),
-            ci=getattr(plan, "ci", cls._default_ci_method(result.method)),
-            scale=getattr(plan, "scale", "response"),
-            at=getattr(plan, "at", "overall"),
-            plan=plan,
-            population_note=None,
-            n_obs=int(result.n_obs),
-            estimand_metadata=dict(result.estimand_metadata),
-            kappa=result.kappa,
-            delta_sim_disagreement=result.delta_sim_disagreement,
-            n_boot_effective=result.n_boot_effective,
-            n_boot_failed=result.n_boot_failed,
-            gradient=result.gradient,
-            cov_params=result.cov_params,
-            draws=result.draws,
-            draws_inf=result.draws_inf,
-            psi_h=None,
-            ci_method=result.ci_method,
-            bootstrap_extras=result.bootstrap_extras,
-            phi=result.phi,
-            phi_inv=result.phi_inv,
         )
 
     @staticmethod

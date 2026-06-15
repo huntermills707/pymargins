@@ -19,7 +19,6 @@ import statsmodels.formula.api as smf
 from pymargins._graph._plan import Plan
 from pymargins._result._graphresult import GraphResult
 from pymargins._result._intervals import supt_interval_delta, supt_interval_draws
-from pymargins._result._margins import MarginsResult
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -130,25 +129,6 @@ def test_from_engine_simulation():
     assert gr.method == "simulation"
     assert gr.draws_inf is not None
     assert gr.gradient is None
-
-
-def test_from_margins_result_interim():
-    """The interim adapter keeps the facade green through R6."""
-    mr = MarginsResult(
-        estimate=np.array(1.0),
-        std_error=np.array(0.1),
-        conf_int_lower=np.array(0.8),
-        conf_int_upper=np.array(1.2),
-        method="delta",
-        level=0.95,
-        gradient=np.array([1.0, 0.0]),
-        cov_params=np.array([[0.01]]),
-    )
-    plan = _plan()
-    gr = GraphResult._from_margins_result(mr, plan)
-    assert isinstance(gr, GraphResult)
-    assert np.allclose(gr.estimate, 1.0)
-    assert gr.plan is plan
 
 
 # ---------------------------------------------------------------------------

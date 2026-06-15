@@ -9,7 +9,8 @@ import numpy as np
 from scipy import stats
 
 from ._graphresult import GraphResult
-from ._margins import MarginsResult, _phi_to_name
+from ._margins import MarginsResult
+from ._scales import _phi_to_name
 
 # ---------------------------------------------------------------------------
 # Diagnostic carrier
