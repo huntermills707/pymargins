@@ -105,15 +105,13 @@ class TestAnchorOLS:
     def test_predict_matches(self, df, fit_ols, method):
         seed = 12345
         kwargs = {"at": "overall", "method": method}
+        m_kwargs = dict(kwargs)
+        est_kwargs = dict(kwargs)
         if method == "bootstrap":
-            kwargs["n_boot"] = 200
-        m = Margins(fit_ols, rng_seed=seed, **kwargs)
-        est = GComputation(fit_ols, seed=seed, **kwargs)
-        if method == "bootstrap":
-            est_kwargs = {"B": 200}
-        else:
-            est_kwargs = {}
-        est = GComputation(fit_ols, seed=seed, **kwargs, **est_kwargs)
+            m_kwargs["n_boot"] = 200
+            est_kwargs["B"] = 200
+        m = Margins(fit_ols, rng_seed=seed, **m_kwargs)
+        est = GComputation(fit_ols, seed=seed, **est_kwargs)
 
         r1 = m.predict()
         r2 = est.predict()

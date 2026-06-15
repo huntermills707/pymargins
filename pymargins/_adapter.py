@@ -62,6 +62,7 @@ if TYPE_CHECKING:
 import numpy as np
 
 from ._gradients import GradientBackend
+from ._tabular import fingerprint_frame
 
 # ---------------------------------------------------------------------------
 # Type aliases and small dataclasses
@@ -420,27 +421,7 @@ class ModelAdapter(abc.ABC):
         """
         if hasattr(self, "_data_fingerprint"):
             return self._data_fingerprint
-        import hashlib
-
-        data = self.training_data
-        hasher = hashlib.sha256()
-        # Handle pandas DataFrame (the common case)
-        if hasattr(data, "shape"):
-            hasher.update(str(data.shape).encode("utf-8"))
-        if hasattr(data, "columns"):
-            for col in data.columns:
-                hasher.update(str(col).encode("utf-8"))
-                hasher.update(str(data[col].dtype).encode("utf-8"))
-                arr = data[col].to_numpy()
-                if arr.dtype == object:
-                    for v in arr:
-                        hasher.update(str(v).encode("utf-8"))
-                else:
-                    hasher.update(arr.tobytes())
-        else:
-            # Fallback for non-DataFrame training_data
-            hasher.update(str(data).encode("utf-8"))
-        self._data_fingerprint = hasher.hexdigest()
+        self._data_fingerprint = fingerprint_frame(self.training_data)
         return self._data_fingerprint
 
     # -----------------------------------------------------------------------

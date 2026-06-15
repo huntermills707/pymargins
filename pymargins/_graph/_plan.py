@@ -40,8 +40,13 @@ class Plan:
     n_sim: int = 0
     seed: int | None = None
 
+    # Engine options (analysis-defining, so they live in the Plan)
+    gradient_backend: str = "autodiff"
+    fd_step: float = 1e-6
+
     # Data identity
     data_fingerprint: str = ""
+    weights_fingerprint: str | None = None
 
     # Callable-hash status
     unhashable_callable: bool = False
@@ -72,7 +77,10 @@ class Plan:
                 "B": self.B,
                 "n_sim": self.n_sim,
                 "seed": self.seed,
+                "gradient_backend": self.gradient_backend,
+                "fd_step": self.fd_step,
                 "data_fingerprint": self.data_fingerprint,
+                "weights_fingerprint": self.weights_fingerprint,
                 "unhashable_callable": self.unhashable_callable,
                 "population_note": self.population_note,
                 "constants_overrides": list(self.constants_overrides),
@@ -125,7 +133,10 @@ class Plan:
             "B": self.B,
             "n_sim": self.n_sim,
             "seed": self.seed,
+            "gradient_backend": self.gradient_backend,
+            "fd_step": self.fd_step,
             "data_fingerprint": self.data_fingerprint,
+            "weights_fingerprint": self.weights_fingerprint,
             "unhashable_callable": self.unhashable_callable,
             "population_note": self.population_note,
             "constants_overrides": list(self.constants_overrides),

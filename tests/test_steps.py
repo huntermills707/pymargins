@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 from pymargins import steps
+from pymargins._graph._compile import compile
 
 
 def test_input_is_only_dependence_carrier():
@@ -77,14 +78,12 @@ def test_propensity_raises():
 def test_transform_order_preserved():
     import statsmodels.formula.api as smf
     df = pd.DataFrame({"y": [0, 1, 0, 1, 0], "x": [1, 2, 3, 4, 5]})
-    smf.ols("y ~ x", data=df).fit()
-    prep = steps.trim(steps.input(df), lower=1, upper=4)
-    prep = steps.drop_outliers(prep, rule=lambda d: d["x"] > 3)
-    from pymargins._graph._plan import Plan
-    from pymargins.estimators._base import _extract_legacy_kwargs
-    plan = Plan()
-    kwargs = _extract_legacy_kwargs(prep, plan)
-    stages = kwargs["transforms"]
+    # Use no-op transforms so the wiring output still matches the fit data.
+    prep = steps.trim(steps.input(df), lower=-100, upper=100)
+    prep = steps.drop_outliers(prep, rule=lambda d: d["x"] > 100)
+    fit = smf.ols("y ~ x", data=df).fit()
+    plan, report, compiled = compile(prep, fit)
+    stages = compiled.wiring_facts.transforms
     assert len(stages) == 2
     assert type(stages[0]).__name__ == "_TrimStage"
     assert type(stages[1]).__name__ == "_DropOutliersStage"
@@ -99,8 +98,8 @@ def test_design_affects_plan_hash():
     d1 = SurveyDesign(weights=df["x"].values)
     d2 = SurveyDesign(weights=(df["x"] * 2).values)
     from pymargins._graph._compile import compile
-    plan1, _ = compile(steps.input(df, design=d1), fit)
-    plan2, _ = compile(steps.input(df, design=d2), fit)
+    plan1, _, _ = compile(steps.input(df, design=d1), fit)
+    plan2, _, _ = compile(steps.input(df, design=d2), fit)
     assert plan1.hash != plan2.hash
 
 

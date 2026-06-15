@@ -11,6 +11,8 @@ from typing import Any, Literal
 
 import numpy as np
 
+from pymargins._tabular import fingerprint_frame
+
 FanKind = Literal["imputation"]
 
 
@@ -35,19 +37,8 @@ def _fingerprint(value: Any) -> str:
         return hasher.hexdigest()
     # For pandas DataFrame / Series
     if hasattr(value, "shape") and hasattr(value, "columns"):
-        # DataFrame fingerprint
-        hasher = hashlib.sha256()
-        hasher.update(str(value.shape).encode("utf-8"))
-        for col in value.columns:
-            hasher.update(str(col).encode("utf-8"))
-            hasher.update(str(value[col].dtype).encode("utf-8"))
-            arr = value[col].to_numpy()
-            if arr.dtype == object:
-                for v in arr:
-                    hasher.update(str(v).encode("utf-8"))
-            else:
-                hasher.update(arr.tobytes())
-        return hasher.hexdigest()
+        # DataFrame fingerprint — shared with adapters/compiler
+        return fingerprint_frame(value)
     if hasattr(value, "dtype") and hasattr(value, "tobytes"):
         # Series-like
         hasher = hashlib.sha256()

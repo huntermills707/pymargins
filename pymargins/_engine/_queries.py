@@ -925,6 +925,8 @@ def build_inference_config(
     n_jobs: int = 1,
     progress_bar: bool = False,
     frozen_cov: np.ndarray | None = None,
+    phi: Any | None = None,
+    phi_inv: Any | None = None,
 ) -> InferenceConfig:
     """Build a doctrine-shaped InferenceConfig from a Plan.
 
@@ -936,7 +938,8 @@ def build_inference_config(
     computed once from the adapter; the executor always passes it so Σ̂
     is resolved exactly once per estimator.
     """
-    phi, phi_inv = resolve_scale(plan.scale)
+    if phi is None or phi_inv is None:
+        phi, phi_inv = resolve_scale(plan.scale)
     if frozen_cov is None:
         vcov_spec = _resolve_vcov_spec(plan, wiring_facts)
         frozen_cov = adapter.covariance(vcov_spec)
@@ -958,10 +961,8 @@ def build_inference_config(
         phi=phi,
         phi_inv=phi_inv,
         kappa_threshold=float("inf"),
-        # TODO(R5): gradient_backend/fd_step should come from Plan once Plan
-        # gains those fields (appendix C #4). Hard-coded placeholders until then.
-        gradient_backend="autodiff",
-        fd_step=1e-6,
+        gradient_backend=plan.gradient_backend,
+        fd_step=plan.fd_step,
         n_sim=plan.n_sim,
         n_boot=plan.B,
         n_jobs=n_jobs,

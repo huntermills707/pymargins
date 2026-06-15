@@ -42,6 +42,7 @@ def input(
     design: Any | None = None,
     cluster: Any | None = None,
     block: Any | None = None,
+    block_type: str = "moving",
 ) -> Node:
     """Resampling root node.
 
@@ -55,6 +56,8 @@ def input(
         Exchangeable cluster identifiers.
     block : int, optional
         Block-bootstrap block length.
+    block_type : str, default "moving"
+        Block type for block bootstrap ("moving", "circular", "nonoverlapping").
 
     Returns
     -------
@@ -68,6 +71,8 @@ def input(
         params.append(("cluster", cluster))
     if block is not None:
         params.append(("block", block))
+    if block_type != "moving":
+        params.append(("block_type", block_type))
     return Node(
         kind="input",
         params=tuple(params),

@@ -650,7 +650,7 @@ def test_bootstrap_default_ci_executes_end_to_end():
     wiring = Node(kind="input", _payload=d)
 
     # Default ci ("wald") + small B; compile must resolve ci to a bootstrap method.
-    plan, _ = compile_plan(wiring, fit, method="bootstrap", B=15)
+    plan, _, _ = compile_plan(wiring, fit, method="bootstrap", B=15)
     assert plan.ci == "percentile"
 
     m = Margins(fit, at="overall", method="delta")

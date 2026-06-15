@@ -146,7 +146,6 @@ class GComputation:
         seed: int | None = None,
         n_jobs: int = 1,
         progress_bar: bool = False,
-        **kwargs,
     ):
         # Handle positional-model sugar: GComputation(model)
         if outcome is None and wiring_or_model is not None:
@@ -171,7 +170,7 @@ class GComputation:
         if outcome is None:
             raise CompileError("outcome is required.")
 
-        self._plan, self._report = compile(
+        self._plan, self._report, _ = compile(
             wiring,
             outcome,
             at=at,
@@ -183,8 +182,6 @@ class GComputation:
             B=B,
             n_sim=n_sim,
             seed=seed,
-            mode="doctrine",
-            **kwargs,
         )
 
         # Build internal Margins session from the plan
