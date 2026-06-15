@@ -32,6 +32,8 @@ def execute_query(
     frozen_cov: Any,
     n_jobs: int = 1,
     progress_bar: bool = False,
+    phi: Any | None = None,
+    phi_inv: Any | None = None,
 ) -> dict:
     """Run one compiled query through the resolved method.
 
@@ -48,6 +50,8 @@ def execute_query(
         n_jobs=n_jobs,
         progress_bar=progress_bar,
         frozen_cov=frozen_cov,
+        phi=phi,
+        phi_inv=phi_inv,
     )
 
     if method == "delta":

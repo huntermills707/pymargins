@@ -64,6 +64,7 @@ class Compiled:
     phi: Any | None
     phi_inv: Any | None
     weights: np.ndarray | None = None
+    at: Any = "overall"
 
 
 _KNOWN_NODE_KINDS = frozenset(
@@ -648,6 +649,7 @@ def compile(
         phi=phi,
         phi_inv=phi_inv,
         weights=weights_arr,
+        at=at,
     )
 
     report.emit_warnings()

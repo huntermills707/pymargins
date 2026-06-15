@@ -15,7 +15,7 @@ from __future__ import annotations
 import numpy as np
 import scipy.stats as st
 
-from pymargins import GComputation, Margins
+from pymargins import GComputation
 
 from ._tolerances import TOL_ANALYTIC
 
@@ -132,8 +132,7 @@ def test_weighted_logit_ame(fit_logit):
     w = np.exp(np.random.default_rng(1).normal(0.0, 0.3, size=len(df)))
     w = w / w.sum()
 
-    # TODO(R6): re-point at GComputation once weights= routing lands.
-    m = Margins(fit_logit, at="overall", method="delta", weights=w)
+    m = GComputation(fit_logit, at="overall", method="delta", weights=w)
     r = m.dydx("x1")
     est = np.asarray(r.estimate).item()
 

@@ -58,7 +58,6 @@ import jax.numpy as jnp
 if TYPE_CHECKING:
     import pandas as pd
 
-    from pymargins.margins import Margins
 import numpy as np
 
 from ._gradients import GradientBackend
@@ -178,7 +177,7 @@ class ModelAdapter(abc.ABC):
     # Session integration
     # -----------------------------------------------------------------------
 
-    def attach(self, session: Margins) -> None:
+    def attach(self, session: Any) -> None:
         """Attach this adapter to a Margins session. Receive the session's
         configuration (scale, vcov_spec, weights, etc.) and validate
         compatibility.
@@ -493,7 +492,7 @@ class GLMAdapter(ModelAdapter):
     in the design docs.
     """
 
-    def attach(self, session: Margins) -> None:
+    def attach(self, session: Any) -> None:
         super().attach(session)
 
     @property

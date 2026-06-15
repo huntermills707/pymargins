@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from pymargins import GComputation, Margins, SurveyDesign
+from pymargins import GComputation, SurveyDesign, steps
 from pymargins._adapters import auto_detect_adapter
 
 from ._tolerances import TOL_VCOV
@@ -142,8 +142,7 @@ def test_logit_contrast_treat_nonrobust(fit_logit):
 def test_logit_ame_x1_weighted_nonrobust(fit_logit, oracle_df):
     g = load_golden("logit_ame_x1_weighted_nonrobust")
     assert_coef_aligned(fit_logit, g)
-    # TODO(R6): re-point at GComputation once weights= routing lands.
-    r = Margins(
+    r = GComputation(
         fit_logit, at="overall", method="delta", weights=oracle_df["w"].values
     ).dydx("x1")
     assert_matches_golden(g, estimate=r.estimate, std_error=r.std_error,
@@ -190,8 +189,9 @@ def test_survey_logit_predict_overall_linearized(fit_logit_weighted, oracle_df):
         psu=oracle_df["psu"].values,
         strata=oracle_df["strata"].values,
     )
-    # TODO(R6): re-point at GComputation once survey_design routing lands.
-    r = Margins(fit_logit_weighted, method="delta", survey_design=design).predict()
+    r = GComputation(
+        steps.input(oracle_df, design=design), outcome=fit_logit_weighted, method="delta"
+    ).predict()
     assert_matches_golden(g, estimate=r.estimate, std_error=r.std_error,
                           conf_low=r.conf_int_lower, conf_high=r.conf_int_upper)
 
@@ -204,7 +204,8 @@ def test_survey_logit_ame_x1_linearized(fit_logit_weighted, oracle_df):
         psu=oracle_df["psu"].values,
         strata=oracle_df["strata"].values,
     )
-    # TODO(R6): re-point at GComputation once survey_design routing lands.
-    r = Margins(fit_logit_weighted, method="delta", survey_design=design).dydx("x1")
+    r = GComputation(
+        steps.input(oracle_df, design=design), outcome=fit_logit_weighted, method="delta"
+    ).dydx("x1")
     assert_matches_golden(g, estimate=r.estimate, std_error=r.std_error,
                           conf_low=r.conf_int_lower, conf_high=r.conf_int_upper)

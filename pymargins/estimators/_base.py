@@ -1,133 +1,125 @@
 """Base estimator noun and GComputation.
 
-Implements the blessed compiler from design §4.2 and req. §4.
+Implements the blessed compiler from design §4.2 and req §4.
+R6: GComputation now sits directly on ``compile → Plan → BankSet → engine → GraphResult``.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+import jax.numpy as jnp
+import numpy as np
+
 from pymargins._adapter import ModelAdapter
 from pymargins._adapters import auto_detect_adapter
+from pymargins._engine._banks import BankSet
+from pymargins._engine._execute import execute_query
+from pymargins._engine._queries import (
+    QueryContext,
+    QuerySpec,
+    compile_query,
+)
 from pymargins._graph._compile import CompileError, compile
 from pymargins._graph._node import Node
 from pymargins._graph._plan import Plan
 from pymargins._result._graphresult import GraphResult
-from pymargins.margins import Margins
 
 
-def _scale_to_phi(scale: str | None):
-    """Return (phi, phi_inv) for a named scale."""
-    import jax.numpy as jnp
+def _resolve_outcome(
+    wiring: Node | None,
+    outcome: Any,
+    adapter: ModelAdapter | None,
+) -> ModelAdapter:
+    """Turn the user's ``outcome=`` into a ``ModelAdapter``.
 
-    if scale is None or scale == "response" or scale == "identity":
-        return None, None
-    if scale == "log":
-        return jnp.exp, jnp.log
-    if scale == "logit":
-        from jax.scipy.special import expit, logit
-
-        return expit, logit
-    if scale == "probit":
-        from jax.scipy.special import ndtr, ndtri
-
-        return ndtr, ndtri
-    raise CompileError(f"Unknown scale: {scale!r}. Supported: response, log, logit, probit.")
-
-
-def _extract_legacy_kwargs(wiring: Node, plan: Plan):
-    """Translate a wiring graph into the kwargs Margins() expects."""
-    kwargs = {}
-
-    # Walk graph to extract stages, matching, and input properties
-    transforms = []
-    matching = None
-    survey_design = None
-    cluster = None
-    block_size = None
-
-    for node in _flatten_graph(wiring):
-        if node.kind == "input":
-            for k, v in node.params:
-                if k == "cluster" and v is not None and v is not True:
-                    cluster = v
-                if k == "block" and v is not None:
-                    block_size = v
-                if k == "design" and v is not None and v is not True:
-                    survey_design = v
-        elif node.kind == "match":
-            matching = node._payload
-        elif node.kind in ("trim", "drop_outliers", "reimpute"):
-            stage = node._payload
-            transforms.append(stage)
-
-    if transforms:
-        # _flatten_graph yields reverse-topological order; reverse to get
-        # the user-specified left-to-right pipeline order.
-        kwargs["transforms"] = list(reversed(transforms))
-    if matching is not None:
-        kwargs["matching"] = matching
-    if survey_design is not None:
-        kwargs["survey_design"] = survey_design
-    if cluster is not None:
-        kwargs["cluster"] = cluster
-    if block_size is not None:
-        kwargs["block_size"] = block_size
-
-    # Scale
-    phi, phi_inv = _scale_to_phi(plan.scale)
-    if phi is not None:
-        kwargs["phi"] = phi
-        kwargs["phi_inv"] = phi_inv
-
-    # Inference params
-    kwargs["method"] = plan.method_resolved
-    kwargs["level"] = plan.level
-    if plan.vcov is not None:
-        kwargs["vcov"] = plan.vcov
-    if plan.B > 0:
-        kwargs["n_boot"] = plan.B
-    if plan.n_sim > 0:
-        kwargs["n_sim"] = plan.n_sim
-    if plan.seed is not None:
-        kwargs["rng_seed"] = plan.seed
-
-    # Bootstrap config from ci
-    if plan.ci not in ("", "wald") and plan.method_resolved == "bootstrap":
-        kwargs["bootstrap_config"] = {"ci_method": plan.ci}
-
-    return kwargs
-
-
-def _flatten_graph(node: Node):
-    """Yield all nodes in topological order."""
-    seen = set()
-    stack = [node]
-    while stack:
-        n = stack.pop()
-        if id(n) in seen:
-            continue
-        seen.add(id(n))
-        for inp in n.inputs:
-            stack.append(inp)
-        yield n
-
-
-def _resolve_model(wiring: Node, outcome: Any, plan: Plan):
-    """Return a model object suitable for Margins()."""
+    Supported forms:
+      - a :class:`ModelAdapter` instance
+      - a fitted model object (auto-detected)
+      - a formula string ``"y ~ x"`` (OLS on the wiring output)
+      - a 2-tuple ``("y ~ x", family)`` (GLM on the wiring output)
+      - ``None`` with an explicit ``adapter=`` (use the provided adapter)
+    """
     if isinstance(outcome, ModelAdapter):
-        return outcome.results if hasattr(outcome, "results") else outcome
+        return outcome
+    if adapter is not None and outcome is None:
+        return adapter
+
     if isinstance(outcome, str):
-        raise CompileError("Spec-form outcome not yet supported.")
-    # Assume fitted model
-    return outcome
+        formula = outcome
+        family = None
+    elif (
+        isinstance(outcome, (tuple, list))
+        and len(outcome) == 2
+        and isinstance(outcome[0], str)
+    ):
+        formula, family = outcome
+    else:
+        # Fitted model object (or explicit adapter with a model outcome)
+        if adapter is not None:
+            return adapter
+        try:
+            return auto_detect_adapter(outcome)
+        except Exception as exc:
+            raise CompileError(
+                f"Could not auto-detect adapter for outcome: {exc}"
+            ) from exc
+
+    # Spec-form outcome: fit on the wiring output.
+    if wiring is None:
+        raise CompileError(
+            "Spec-form outcome requires a wiring node (pass steps.input(data) first)."
+        )
+    import statsmodels.formula.api as smf
+
+    data = wiring.collect()
+    if family is not None:
+        fitted = smf.glm(formula, data=data, family=family).fit(tol=1e-12)
+    else:
+        fitted = smf.ols(formula, data=data).fit()
+    return auto_detect_adapter(fitted, formula=formula, data=data)
+
+
+def _implicit_input(outcome: Any, adapter: ModelAdapter | None) -> Node:
+    """Build an input node from the model's training data."""
+    if isinstance(outcome, ModelAdapter):
+        data = outcome.training_data
+    elif adapter is not None:
+        data = adapter.training_data
+    else:
+        detected = auto_detect_adapter(outcome)
+        data = detected.training_data
+    return Node(kind="input", _payload=data)
+
+
+def _compute_psi_h(
+    compiled_query: Any,
+    adapter: ModelAdapter,
+    frozen_cov: np.ndarray,
+) -> np.ndarray | None:
+    """Tier-1 influence ψ^h = ∇h · ψ^β when the adapter exposes scores."""
+    score_fn = getattr(adapter, "score_obs", None)
+    if score_fn is None:
+        return None
+    try:
+        from pymargins._gradients import gradient
+
+        beta = adapter.coefficients()
+        grad = gradient(compiled_query.h, beta, backend="autodiff", fd_step=1e-6)
+        psi_beta = jnp.asarray(score_fn(beta))
+        if psi_beta.ndim != 2:
+            return None
+        return np.asarray(grad @ psi_beta.T)
+    except Exception:
+        return None
 
 
 class GComputation:
-    """Estimator noun for g-computation (standardization).
+    """Estimator noun for g-computation (standardization) on the new engine.
 
-    This is the v0.4.0 new-surface estimator.  It compiles a wiring graph
-    into a Plan and delegates inference to the existing engine.
+    This is the v0.4.0 new-surface estimator. It compiles a wiring graph into a
+    pre-registered :class:`Plan`, then runs queries through the doctrine engine
+    (R2/R3) and returns :class:`GraphResult` objects (R4).
     """
 
     def __init__(
@@ -135,15 +127,19 @@ class GComputation:
         wiring_or_model=None,
         *,
         outcome=None,
+        adapter: ModelAdapter | None = None,
         at: str = "overall",
         scale: str = "response",
         method: str = "delta",
         vcov=None,
-        ci: str = "wald",
+        ci: str | None = None,
         level: float = 0.95,
         B: int = 1000,
         n_sim: int = 4000,
         seed: int | None = None,
+        weights=None,
+        gradient_backend: str = "autodiff",
+        fd_step: float = 1e-6,
         n_jobs: int = 1,
         progress_bar: bool = False,
     ):
@@ -151,28 +147,21 @@ class GComputation:
         if outcome is None and wiring_or_model is not None:
             if isinstance(wiring_or_model, Node):
                 raise CompileError(
-                    "GComputation requires an outcome= when passed a wiring node."
+                    "GComputation requires outcome= when passed a wiring node."
                 )
             outcome = wiring_or_model
             wiring = None
         else:
             wiring = wiring_or_model
 
+        resolved_outcome = _resolve_outcome(wiring, outcome, adapter)
+
         if wiring is None:
-            # Implicit input from outcome template
-            if isinstance(outcome, ModelAdapter):
-                data = outcome.training_data
-            else:
-                adapter = auto_detect_adapter(outcome)
-                data = adapter.training_data
-            wiring = Node(kind="input", _payload=data)
+            wiring = _implicit_input(resolved_outcome, adapter)
 
-        if outcome is None:
-            raise CompileError("outcome is required.")
-
-        self._plan, self._report, _ = compile(
+        self._plan, self._report, self._compiled = compile(
             wiring,
-            outcome,
+            resolved_outcome,
             at=at,
             scale=scale,
             method=method,
@@ -182,21 +171,14 @@ class GComputation:
             B=B,
             n_sim=n_sim,
             seed=seed,
+            weights=weights,
+            gradient_backend=gradient_backend,
+            fd_step=fd_step,
         )
 
-        # Build internal Margins session from the plan
-        legacy_kwargs = _extract_legacy_kwargs(wiring, self._plan)
-        model = _resolve_model(wiring, outcome, self._plan)
-        # Doctrine mode: disable runtime κ fallback (design §5.2)
-        # Per-query κ is recorded on the result instead.
-        self._session = Margins(
-            model,
-            at=at,
-            **legacy_kwargs,
-            kappa_threshold=float("inf"),
-            n_jobs=n_jobs,
-            progress_bar=progress_bar,
-        )
+        self._banks = BankSet(self._plan.hash, 0, seed)
+        self._n_jobs = n_jobs
+        self._progress_bar = progress_bar
         self._wiring = wiring
         self._outcome = outcome
 
@@ -204,41 +186,199 @@ class GComputation:
     def plan(self) -> Plan:
         return self._plan
 
-    def predict(self, *, atexog=None, over=None, transform=None, label=None, outcome=None):
-        result = self._session.predict(
-            atexog=atexog, over=over, transform=transform, label=label, outcome=outcome
+    @property
+    def report(self):
+        return self._report
+
+    def _query(self, spec: QuerySpec) -> GraphResult:
+        """Run one query spec through the compiled estimator."""
+        ctx = QueryContext(
+            adapter=self._compiled.adapter,
+            base_data=self._compiled.base_data,
+            at=self._compiled.at,
+            weights=self._compiled.weights,
+            phi=self._compiled.phi,
+            phi_inv=self._compiled.phi_inv,
+            fd_step=self._plan.fd_step,
+            gradient_backend=self._plan.gradient_backend,
         )
-        return GraphResult._from_margins_result(result, self._plan)
-
-    def dydx(self, variables=None, *, atexog=None, over=None, transform=None, label=None, outcome=None):
-        result = self._session.dydx(
-            variables=variables, atexog=atexog, over=over, transform=transform, label=label, outcome=outcome
+        compiled_query = compile_query(spec, ctx)
+        result_data = execute_query(
+            compiled_query,
+            adapter=self._compiled.adapter,
+            plan=self._plan,
+            wiring_facts=self._compiled.wiring_facts,
+            banks=self._banks,
+            frozen_cov=self._compiled.frozen_cov,
+            n_jobs=self._n_jobs,
+            progress_bar=self._progress_bar,
+            phi=self._compiled.phi,
+            phi_inv=self._compiled.phi_inv,
         )
-        return GraphResult._from_margins_result(result, self._plan)
+        psi_h = None
+        if self._plan.method_resolved == "delta":
+            psi_h = _compute_psi_h(
+                compiled_query,
+                self._compiled.adapter,
+                self._compiled.frozen_cov,
+            )
+        return GraphResult.from_engine(
+            result_data,
+            plan=self._plan,
+            labels=compiled_query.labels,
+            population_note=self._compiled.wiring_facts.population_note,
+            n_obs=len(self._compiled.base_data),
+            psi_h=psi_h,
+            phi=self._compiled.phi,
+            phi_inv=self._compiled.phi_inv,
+        )
 
-    def eyex(self, variable=None, **kwargs):
-        result = self._session.eyex(variable, **kwargs)
-        return GraphResult._from_margins_result(result, self._plan)
+    def predict(
+        self,
+        *,
+        atexog=None,
+        over=None,
+        transform=None,
+        label=None,
+        outcome=None,
+    ) -> GraphResult:
+        scenario = {}
+        if atexog is not None:
+            scenario["atexog"] = atexog
+        if over is not None:
+            scenario["over"] = over
+        return self._query(
+            QuerySpec(
+                kind="predict",
+                scenario=scenario or None,
+                transform=transform,
+                label=label,
+                outcome=outcome,
+            )
+        )
 
-    def eydx(self, variable=None, **kwargs):
-        result = self._session.eydx(variable, **kwargs)
-        return GraphResult._from_margins_result(result, self._plan)
+    def dydx(
+        self,
+        variables: str | list[str] | None = None,
+        *,
+        atexog=None,
+        over=None,
+        transform=None,
+        label=None,
+        outcome=None,
+    ) -> GraphResult:
+        if variables is None:
+            variables = list(self._compiled.adapter.variable_metadata().keys())
+        if isinstance(variables, str):
+            variables = (variables,)
+        else:
+            variables = tuple(variables)
+        scenario = {}
+        if atexog is not None:
+            scenario["atexog"] = atexog
+        if over is not None:
+            scenario["over"] = over
+        return self._query(
+            QuerySpec(
+                kind="dydx",
+                scenario=scenario or None,
+                variables=variables,
+                transform=transform,
+                label=label,
+                outcome=outcome,
+            )
+        )
 
-    def dyex(self, variable=None, **kwargs):
-        result = self._session.dyex(variable, **kwargs)
-        return GraphResult._from_margins_result(result, self._plan)
+    def contrasts(
+        self,
+        *,
+        scenarios=None,
+        contrasts=None,
+        outcome=None,
+    ) -> GraphResult:
+        return self._query(
+            QuerySpec(
+                kind="contrasts",
+                scenarios=tuple(scenarios) if scenarios is not None else (),
+                contrast_weights=contrasts,
+                outcome=outcome,
+            )
+        )
 
-    def contrasts(self, *, scenarios=None, contrasts=None, outcome=None):
-        result = self._session.contrasts(scenarios=scenarios, contrasts=contrasts, outcome=outcome)
-        return GraphResult._from_margins_result(result, self._plan)
+    def evaluate(
+        self,
+        *,
+        scenarios=None,
+        compose=None,
+        outcome=None,
+    ) -> GraphResult:
+        return self._query(
+            QuerySpec(
+                kind="evaluate",
+                scenarios=tuple(scenarios) if scenarios is not None else (),
+                compose=compose,
+                outcome=outcome,
+            )
+        )
 
-    def evaluate(self, *, scenarios=None, compose=None, outcome=None):
-        result = self._session.evaluate(scenarios=scenarios, compose=compose, outcome=outcome)
-        return GraphResult._from_margins_result(result, self._plan)
+    def wtp(
+        self,
+        attribute: str,
+        price: str,
+        *,
+        atexog=None,
+        over=None,
+        transform=None,
+        label=None,
+        outcome=None,
+    ) -> GraphResult:
+        scenario = {}
+        if atexog is not None:
+            scenario["atexog"] = atexog
+        if over is not None:
+            scenario["over"] = over
+        return self._query(
+            QuerySpec(
+                kind="wtp",
+                scenario=scenario or None,
+                variables=(attribute, price),
+                transform=transform,
+                label=label,
+                outcome=outcome,
+            )
+        )
 
-    def rmst(self, *, horizon=None, atexog=None, over=None, n_grid=80):
-        result = self._session.rmst(horizon=horizon, atexog=atexog, over=over, n_grid=n_grid)
-        return GraphResult._from_margins_result(result, self._plan)
+    def rmst(
+        self,
+        *,
+        horizon: float | None = None,
+        atexog=None,
+        over=None,
+        n_grid: int = 80,
+        outcome=None,
+    ) -> GraphResult:
+        if horizon is None:
+            raise ValueError("rmst() requires horizon=")
+        scenario = {}
+        if atexog is not None:
+            scenario["atexog"] = atexog
+        if over is not None:
+            scenario["over"] = over
+        return self._query(
+            QuerySpec(
+                kind="rmst",
+                scenario=scenario or None,
+                horizon=horizon,
+                n_grid=n_grid,
+                outcome=outcome,
+            )
+        )
 
     def joint(self, *results):
         raise NotImplementedError("joint() lands in 0.5.0")
+
+    def __repr__(self):
+        return (
+            f"GComputation(method={self._plan.method_resolved!r}, "
+            f"at={self._plan.at!r}, scale={self._plan.scale!r})"
+        )
