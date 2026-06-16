@@ -11,6 +11,7 @@ kernelspec:
 ---
 
 # Rossi recidivism — Cox proportional hazards end-to-end
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 The Rossi data tracks 432 male convicts released from Maryland state
 prisons in the 1970s for up to 52 weeks. The outcome is time to
@@ -35,7 +36,7 @@ import pandas as pd
 from lifelines import CoxPHFitter
 from lifelines.datasets import load_rossi
 
-from pymargins import Margins, pairwise
+from pymargins import GComputation, pairwise  # 0.4.0: Margins -> GComputation
 from pymargins.adapters import LifelinesCoxPHAdapter
 
 df = load_rossi()

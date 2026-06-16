@@ -11,6 +11,7 @@ kernelspec:
 ---
 
 # Travel mode choice — the value of travel time (WTP)
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 When a commuter chooses between modes, they trade money against time.
 The rate at which they are willing to substitute one for the other —
@@ -41,7 +42,7 @@ import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 # The TravelMode data ships in long form: one row per (traveller, mode),
 # 210 travellers × 4 modes (air / train / bus / car).

@@ -1,4 +1,5 @@
 # Simultaneous confidence intervals and multiple-testing correction
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 When you ask for `m` margins in one call, the per-margin CIs are
 *pointwise* by default. Family-wise coverage requires a wider

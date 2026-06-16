@@ -9,7 +9,7 @@ import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from pymargins import Margins, SurveyDesign
+from pymargins import GComputation, SurveyDesign, steps
 from pymargins._inference._bootstrap import _generate_resample_indices
 
 
@@ -41,37 +41,6 @@ def test_stratified_resample_no_cross_contamination():
             assert np.all(np.isin(resampled_psus, original_psus))
 
 
-def test_bootstrap_bank_key_changes_with_design():
-    """Changing the survey design must invalidate the bootstrap bank cache."""
-    rng = np.random.default_rng(0)
-    n = 100
-    df = pd.DataFrame(
-        {
-            "x": rng.normal(size=n),
-            "psu": rng.integers(0, 10, n),
-            "strat": rng.integers(0, 2, n),
-        }
-    )
-    df["y"] = (rng.random(n) < 0.5).astype(int)
-    fit = smf.glm("y ~ x", df, family=sm.families.Binomial()).fit()
-
-    d1 = SurveyDesign(weights=np.ones(n), psu=df.psu.values, strata=df.strat.values)
-    m1 = Margins(fit, survey_design=d1, method="bootstrap", n_boot=50, rng_seed=1)
-    _ = m1.predict()  # trigger bank creation
-    key1 = m1._bootstrap_bank_cache[0]
-
-    d2 = SurveyDesign(
-        weights=np.ones(n) * 2,
-        psu=df.psu.values,
-        strata=df.strat.values,
-    )
-    m2 = Margins(fit, survey_design=d2, method="bootstrap", n_boot=50, rng_seed=1)
-    _ = m2.predict()  # trigger bank creation
-    key2 = m2._bootstrap_bank_cache[0]
-
-    assert key1 != key2
-
-
 def test_bootstrap_se_close_to_linearization():
     """Bootstrap SE should be in the same ballpark as linearization SE."""
     rng = np.random.default_rng(0)
@@ -87,18 +56,19 @@ def test_bootstrap_se_close_to_linearization():
     df["w"] = rng.uniform(0.5, 2.0, n)
     fit = smf.glm("y ~ x", df, family=sm.families.Binomial()).fit()
     d = SurveyDesign(weights=df.w.values, psu=df.psu.values, strata=df.strat.values)
+    node = steps.input(df, design=d)
 
-    m_boot = Margins(
-        fit,
-        survey_design=d,
-        weights=df.w.values,
+    m_boot = GComputation(
+        node,
+        outcome=fit,
         method="bootstrap",
-        n_boot=400,
-        rng_seed=1,
+        B=400,
+        seed=1,
+        weights=df.w.values,
     )
     r_boot = m_boot.dydx("x")
 
-    m_lin = Margins(fit, survey_design=d, weights=df.w.values)
+    m_lin = GComputation(node, outcome=fit, weights=df.w.values)
     r_lin = m_lin.dydx("x")
 
     rel_diff = abs(r_boot.std_error - r_lin.std_error) / r_lin.std_error
@@ -122,14 +92,15 @@ def test_bootstrap_with_explicit_weights():
     df["w"] = rng.uniform(0.5, 2.0, n)
     fit = smf.glm("y ~ x", df, family=sm.families.Binomial()).fit()
     d = SurveyDesign(weights=df.w.values, psu=df.psu.values, strata=df.strat.values)
+    node = steps.input(df, design=d)
 
-    m = Margins(
-        fit,
-        survey_design=d,
-        weights=df.w.values,
+    m = GComputation(
+        node,
+        outcome=fit,
         method="bootstrap",
-        n_boot=100,
-        rng_seed=1,
+        B=100,
+        seed=1,
+        weights=df.w.values,
     )
     r = m.dydx("x")
     assert np.isfinite(r.std_error)

@@ -1,4 +1,5 @@
 # The computation graph
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 New in **pymargins 0.4.0**.
 

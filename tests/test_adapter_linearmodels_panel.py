@@ -12,7 +12,7 @@ from linearmodels.panel import (
     RandomEffects,
 )
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins._adapters.linearmodels_panel import LinearmodelsPanelAdapter
 
 
@@ -170,14 +170,14 @@ def test_refit_pooled(panel_data):
 
 
 # ---------------------------------------------------------------------------
-# End-to-end via Margins
+# End-to-end via GComputation
 # ---------------------------------------------------------------------------
 
 
 def test_margins_predict_panelols(panel_data):
     mod = PanelOLS.from_formula("y ~ x1 + x2 + EntityEffects", data=panel_data)
     res = mod.fit()
-    m = Margins(res)
+    m = GComputation(res)
     pred = m.predict()
     assert pred.estimate is not None
     assert pred.std_error is not None
@@ -186,7 +186,7 @@ def test_margins_predict_panelols(panel_data):
 def test_margins_dydx_panelols(panel_data):
     mod = PanelOLS.from_formula("y ~ x1 + x2 + EntityEffects", data=panel_data)
     res = mod.fit()
-    m = Margins(res)
+    m = GComputation(res)
     slope = m.dydx("x1")
     assert slope.estimate is not None
     assert slope.std_error is not None
@@ -195,7 +195,7 @@ def test_margins_dydx_panelols(panel_data):
 def test_margins_predict_pooledols(panel_data):
     mod = PooledOLS.from_formula("y ~ x1 + x2", data=panel_data)
     res = mod.fit()
-    m = Margins(res)
+    m = GComputation(res)
     pred = m.predict()
     assert pred.estimate is not None
     assert pred.std_error is not None
@@ -204,7 +204,7 @@ def test_margins_predict_pooledols(panel_data):
 def test_margins_contrasts_pooledols(panel_data):
     mod = PooledOLS.from_formula("y ~ x1 + x2", data=panel_data)
     res = mod.fit()
-    m = Margins(res)
+    m = GComputation(res)
     c = m.contrasts(
         scenarios=[
             {"atexog": {"x1": panel_data["x1"].quantile(0.25)}},
@@ -299,13 +299,12 @@ def test_dydx_with_formula_panelols(panel_poly_data):
     res = mod.fit()
     # Use a larger fd_step to avoid float32 precision loss in the quadratic
     # finite-difference at age ~ 50 (default 1e-6 is too small for float32).
-    m = Margins.linear_scale(
+    adapter = LinearmodelsPanelAdapter(
         res,
+        training_data=panel_poly_data,
         formula="y ~ 0 + age + I(age**2)",
-        data=panel_poly_data,
-        at="mean",
-        fd_step=1e-4,
     )
+    m = GComputation(adapter, at="mean", fd_step=1e-4)
     slope = m.dydx("age")
     expected = (
         res.params["age"]

@@ -9,7 +9,7 @@ import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from pymargins import Margins, SurveyDesign
+from pymargins import GComputation, SurveyDesign, steps
 
 
 def test_survey_ame_matches_R():
@@ -22,7 +22,7 @@ def test_survey_ame_matches_R():
         psu=df.psu.values,
         strata=df.strat.values,
     )
-    m = Margins(fit, survey_design=d, weights=df.w.values)
+    m = GComputation(steps.input(df, design=d), outcome=fit, weights=df.w.values)
     r = m.dydx("x")
 
     ref = pd.read_csv("tests/survey_reference.csv")

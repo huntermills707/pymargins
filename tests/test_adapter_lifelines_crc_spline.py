@@ -10,7 +10,7 @@ from lifelines import CRCSplineFitter
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins._adapter import auto_detect_adapter
 from pymargins._adapters.lifelines_crc_spline import LifelinesCRCSplineAdapter
 
@@ -84,15 +84,15 @@ def test_supported_inference_methods(crc_fit, df_survival):
 
 def test_bootstrap_end_to_end(crc_fit, df_survival):
     adapter = LifelinesCRCSplineAdapter(crc_fit, training_data=df_survival)
-    m = Margins(
+    est = GComputation(
         crc_fit,
         adapter=adapter,
         at="typical",
         method="bootstrap",
-        n_boot=50,
-        rng_seed=42,
+        B=50,
+        seed=42,
     )
-    rd = m.predict()
+    rd = est.predict()
     assert rd.method == "bootstrap"
     assert np.isfinite(float(rd.estimate))
     assert 0 <= float(rd.estimate) <= 1

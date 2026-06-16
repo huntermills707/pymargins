@@ -11,7 +11,7 @@ from lifelines import LogNormalAFTFitter
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins._adapter import auto_detect_adapter
 from pymargins._adapters.lifelines_lognormal_aft import LifelinesLogNormalAFTAdapter
 
@@ -152,20 +152,20 @@ def test_variable_metadata_is_cached(lognormal_fit, df_survival):
 
 
 # ---------------------------------------------------------------------------
-# End-to-end via Margins session
+# End-to-end via GComputation estimator
 # ---------------------------------------------------------------------------
 
 
 def test_margins_predict(lognormal_fit, df_survival):
     adapter = LifelinesLogNormalAFTAdapter(lognormal_fit, training_data=df_survival)
-    m = Margins(lognormal_fit, adapter=adapter)
+    m = GComputation(lognormal_fit, adapter=adapter)
     res = m.predict()
     assert res.estimate.size == 1
 
 
 def test_margins_dydx(lognormal_fit, df_survival):
     adapter = LifelinesLogNormalAFTAdapter(lognormal_fit, training_data=df_survival)
-    m = Margins(lognormal_fit, adapter=adapter)
+    m = GComputation(lognormal_fit, adapter=adapter)
     res = m.dydx("x1")
     assert res.estimate.size == 1
     assert np.isfinite(float(res.estimate))
@@ -178,13 +178,13 @@ def test_margins_dydx(lognormal_fit, df_survival):
 
 def test_bootstrap_end_to_end(lognormal_fit, df_survival):
     adapter = LifelinesLogNormalAFTAdapter(lognormal_fit, training_data=df_survival)
-    m = Margins(
+    m = GComputation(
         lognormal_fit,
         adapter=adapter,
         at="typical",
         method="bootstrap",
-        n_boot=50,
-        rng_seed=42,
+        B=50,
+        seed=42,
     )
     rd = m.dydx("x1")
     assert rd.method == "bootstrap"
@@ -203,7 +203,7 @@ def test_attach_rejects_unsupported_vcov_string(lognormal_fit, df_survival):
     with pytest.raises(
         ValueError, match="LifelinesLogNormalAFTAdapter only supports vcov=None"
     ):
-        Margins(lognormal_fit, adapter=adapter, vcov="HC0")
+        GComputation(lognormal_fit, adapter=adapter, vcov="HC0")
 
 
 def test_attach_rejects_unsupported_vcov_dict(lognormal_fit, df_survival):
@@ -211,7 +211,7 @@ def test_attach_rejects_unsupported_vcov_dict(lognormal_fit, df_survival):
     with pytest.raises(
         ValueError, match="LifelinesLogNormalAFTAdapter only supports vcov=None"
     ):
-        Margins(
+        GComputation(
             lognormal_fit,
             adapter=adapter,
             vcov={"type": "cluster", "groups": df_survival["E"]},
@@ -221,12 +221,13 @@ def test_attach_rejects_unsupported_vcov_dict(lognormal_fit, df_survival):
 def test_attach_accepts_supported_vcov(lognormal_fit, df_survival):
     adapter = LifelinesLogNormalAFTAdapter(lognormal_fit, training_data=df_survival)
     # default (None)
-    m1 = Margins(lognormal_fit, adapter=adapter)
-    assert m1.vcov_spec is None
+    m1 = GComputation(lognormal_fit, adapter=adapter)
+    assert m1.plan.vcov is None
     # ndarray
     cov = np.eye(4)
-    m2 = Margins(lognormal_fit, adapter=adapter, vcov=cov)
-    assert m2.vcov_spec is cov
+    m2 = GComputation(lognormal_fit, adapter=adapter, vcov=cov)
+    assert isinstance(m2.plan.vcov, dict)
+    assert m2.plan.vcov.get("kind") == "user_ndarray"
 
 
 # ---------------------------------------------------------------------------

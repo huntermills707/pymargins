@@ -11,6 +11,7 @@ kernelspec:
 ---
 
 # Discrete changes for binary / categorical regressors
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 
 ```{code-cell} python
@@ -18,7 +19,7 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(42)
 n = 2000
@@ -50,7 +51,7 @@ the two levels, holding everything else constant.
 Use `contrasts` with the `pairwise` helper:
 
 ```{code-cell} python
-from pymargins import Margins, pairwise
+from pymargins import GComputation, pairwise  # 0.4.0: Margins -> GComputation
 
 m = Margins.linear_scale(fit, at="overall")
 

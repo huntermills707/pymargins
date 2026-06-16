@@ -618,6 +618,18 @@ def compile(
     # Method / adapter compatibility.
     report = check_method_adapter_compatibility(method_resolved, supported, report)
 
+    # Bootstrap-only transform stages (e.g. reimpute) require bootstrap inference.
+    if wiring_facts.transforms:
+        for stage in wiring_facts.transforms:
+            if getattr(stage, "requires_resampling", False) and method_resolved != "bootstrap":
+                report = report.append(
+                    Severity.REFUSE,
+                    "method_unsupported",
+                    f"method='{method_resolved}' is not compatible with bootstrap-only "
+                    "transform stages; use method='bootstrap'.",
+                )
+                break
+
     # CI defaults and compatibility.
     if ci is None or ci == "":
         ci = "percentile" if method_resolved == "bootstrap" else "wald"

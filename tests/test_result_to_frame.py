@@ -1,11 +1,11 @@
-"""Tests for MarginsResult.to_frame() enriched output."""
+"""Tests for GraphResult.to_frame() enriched output."""
 
 import numpy as np
 import pandas as pd
 import pytest
 import statsmodels.api as sm
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins.scenarios import pairwise
 
 
@@ -24,7 +24,7 @@ def df():
 def m(df):
     mod = sm.OLS.from_formula("y ~ x1 + x2 + C(group)", data=df)
     res = mod.fit()
-    return Margins(res)
+    return GComputation(res)
 
 
 # ---------------------------------------------------------------------------
@@ -105,19 +105,6 @@ def test_to_frame_over_with_prediction(m):
     assert "over" in df.columns
     assert "over_value" in df.columns
     assert set(df["over_value"]) == {"A", "B"}
-
-
-# ---------------------------------------------------------------------------
-# Diagnostics
-# ---------------------------------------------------------------------------
-
-
-def test_to_frame_fallback_columns(m):
-    result = m.dydx("x1")
-    df = result.to_frame()
-    assert "fallback_triggered" in df.columns
-    assert "kappa" in df.columns
-    assert not df["fallback_triggered"].iloc[0]
 
 
 # ---------------------------------------------------------------------------

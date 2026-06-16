@@ -11,6 +11,7 @@ kernelspec:
 ---
 
 # Transform pipelines — honest CIs for data-dependent preprocessing
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 Most applied work runs some preprocessing *before* the model: imputing a
 missing covariate, trimming implausible values, dropping outliers by a
@@ -47,7 +48,7 @@ from linearmodels.datasets import wage_panel
 from sklearn.experimental import enable_iterative_imputer  # noqa: F401
 from sklearn.impute import IterativeImputer
 
-from pymargins import Margins, drop_outliers, reimpute, trim
+from pymargins import GComputation, drop_outliers, reimpute, trim  # 0.4.0: Margins -> GComputation
 
 cols = ["lwage", "exper", "educ", "married", "union"]
 df = wage_panel.load().reset_index(drop=True)[cols].copy()

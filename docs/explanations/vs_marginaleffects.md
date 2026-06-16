@@ -1,4 +1,5 @@
 # How `pymargins` differs from `marginaleffects` and `margins`
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 This page is for users coming from the R `marginaleffects` package
 or Stata's `margins` command. The mathematics is the same — the
@@ -47,7 +48,7 @@ once with a `SurveyDesign` (sampling weights, PSUs/clusters, strata, and
 an optional finite-population correction) and pass it to the constructor:
 
 ```python
-from pymargins import Margins, SurveyDesign
+from pymargins import GComputation, SurveyDesign  # 0.4.0: Margins -> GComputation
 d = SurveyDesign(weights=w, psu=psu, strata=strat)
 m = Margins(fit, survey_design=d, weights=w)
 m.dydx("x")   # design-weighted AME with Taylor-linearization SE

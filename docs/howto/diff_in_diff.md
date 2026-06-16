@@ -11,6 +11,7 @@ kernelspec:
 ---
 
 # Difference-in-differences on the response scale
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 
 ```{code-cell} python
@@ -18,7 +19,7 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(42)
 n = 4000
@@ -44,7 +45,7 @@ itself is on the link scale and does *not* answer the question
 (Ai & Norton, 2003).
 
 ```{code-cell} python
-from pymargins import Margins, did
+from pymargins import GComputation, did  # 0.4.0: Margins -> GComputation
 
 m = Margins.linear_scale(fit, vcov="HC3", at="overall")
 

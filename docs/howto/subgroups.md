@@ -11,6 +11,7 @@ kernelspec:
 ---
 
 # Effects by subgroup with `over=`
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 `over=` partitions the sample and computes the estimand *within* each
 group, returning one row per group with a shared covariance. It works
@@ -24,7 +25,7 @@ import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(42)
 n = 4000

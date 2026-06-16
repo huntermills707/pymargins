@@ -11,6 +11,7 @@ kernelspec:
 ---
 
 # Union premium heterogeneity — effects by subgroup
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 An average marginal effect answers "what is the effect on average?".
 Often the research question is sharper: *for whom* is the effect large,
@@ -32,7 +33,7 @@ import pandas as pd
 import statsmodels.formula.api as smf
 from linearmodels.datasets import wage_panel
 
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 df = wage_panel.load().reset_index()
 df["educ_band"] = pd.cut(

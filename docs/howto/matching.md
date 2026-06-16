@@ -1,4 +1,5 @@
 # Matching support
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 `pymargins` integrates with propensity-score and other matching libraries
 through a small protocol.  The matching object is attached at session
@@ -34,7 +35,7 @@ Krinsky–Robb ignore it.
 import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
-from pymargins import Margins, PysmatchClient
+from pymargins import GComputation, PysmatchClient  # 0.4.0: Margins -> GComputation
 from pysmatch.Matcher import Matcher
 
 # 1. Run matching

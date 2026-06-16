@@ -3,6 +3,8 @@
 See IMPLEMENTATION_GUIDE.md §0.3.
 """
 
+import hashlib
+
 import jax
 import numpy as np
 import pandas as pd
@@ -12,7 +14,7 @@ import statsmodels.formula.api as smf
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins._adapter import auto_detect_adapter
 from pymargins._adapters.statsmodels_gee import StatsmodelsGEEAdapter
 
@@ -336,39 +338,42 @@ def test_refit_preserves_cov_struct(fit_gee_logit_formula, df_binary):
 
 def test_attach_rejects_unsupported_vcov_string(fit_gee_logit_formula):
     adapter = StatsmodelsGEEAdapter(fit_gee_logit_formula)
-    with pytest.raises(
-        ValueError, match="StatsmodelsGEEAdapter does not support vcov='HAC'"
-    ):
-        Margins(fit_gee_logit_formula, adapter=adapter, vcov="HAC")
+    with pytest.raises(ValueError, match="Unsupported vcov string: 'HAC'"):
+        GComputation(fit_gee_logit_formula, adapter=adapter, vcov="HAC")
 
 
 def test_attach_rejects_unsupported_vcov_dict(fit_gee_logit_formula):
     adapter = StatsmodelsGEEAdapter(fit_gee_logit_formula)
-    with pytest.raises(
-        ValueError,
-        match="StatsmodelsGEEAdapter does not support vcov dict with type='hac'",
-    ):
-        Margins(fit_gee_logit_formula, adapter=adapter, vcov={"type": "hac"})
+    with pytest.raises(ValueError, match="Unsupported vcov dict type: 'hac'"):
+        GComputation(fit_gee_logit_formula, adapter=adapter, vcov={"type": "hac"})
 
 
 def test_attach_rejects_cluster_without_groups(fit_gee_logit_formula):
     adapter = StatsmodelsGEEAdapter(fit_gee_logit_formula)
-    with pytest.raises(ValueError, match="cluster vcov requires 'groups'"):
-        Margins(fit_gee_logit_formula, adapter=adapter, vcov={"type": "cluster"})
+    with pytest.raises(
+        ValueError, match="cluster vcov requires 'groups' in the spec dict"
+    ):
+        GComputation(fit_gee_logit_formula, adapter=adapter, vcov={"type": "cluster"})
 
 
 def test_attach_accepts_supported_vcov(fit_gee_logit_formula):
     adapter = StatsmodelsGEEAdapter(fit_gee_logit_formula)
     # naive string
-    m = Margins(fit_gee_logit_formula, adapter=adapter, vcov="naive")
-    assert m.vcov_spec == "naive"
+    est = GComputation(fit_gee_logit_formula, adapter=adapter, vcov="naive")
+    assert est.plan.vcov == "naive"
     # robust string
-    m2 = Margins(fit_gee_logit_formula, adapter=adapter, vcov="robust")
-    assert m2.vcov_spec == "robust"
+    est2 = GComputation(fit_gee_logit_formula, adapter=adapter, vcov="robust")
+    assert est2.plan.vcov == "robust"
     # ndarray
     cov = np.eye(len(fit_gee_logit_formula.params))
-    m3 = Margins(fit_gee_logit_formula, adapter=adapter, vcov=cov)
-    assert m3.vcov_spec is cov
+    est3 = GComputation(fit_gee_logit_formula, adapter=adapter, vcov=cov)
+    expected_fp = {
+        "kind": "user_ndarray",
+        "fingerprint": hashlib.sha256(
+            np.asarray(cov, dtype=float).tobytes()
+        ).hexdigest(),
+    }
+    assert est3.plan.vcov == expected_fp
 
 
 # ---------------------------------------------------------------------------

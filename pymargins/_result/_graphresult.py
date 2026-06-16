@@ -517,6 +517,9 @@ class GraphResult:
                 footer += f" | κ = {float(k):.3f}" if k.ndim == 0 else f" | κ = max {float(np.nanmax(k)):.3f}"
         footers.append(footer)
 
+        if self.imputation_diagnostic is not None:
+            footers.append(self.imputation_diagnostic.footer())
+
         if footers:
             out_lines.extend([""] + footers)
 
@@ -754,52 +757,94 @@ class GraphResult:
     # Outcome / composability
     # ------------------------------------------------------------------
 
-    def outcome(self, index: int | str) -> GraphResult:
-        """Slice a multi-outcome result to a single outcome."""
+    def outcome(
+        self, index: int | str | list[int] | tuple[int, ...]
+    ) -> GraphResult:
+        """Slice a multi-outcome result to one or more outcomes."""
         outcome_shape = self.estimand_metadata.get("_outcome_shape")
         labels = self.labels
         est = np.atleast_1d(self.estimate)
 
-        if outcome_shape is not None and est.ndim == 2:
+        if outcome_shape is not None and est.ndim in (1, 2):
             n_atoms = outcome_shape["n_atoms"]
             n_outcomes = outcome_shape["n_outcomes"]
             outcome_labels = outcome_shape["outcome_labels"]
 
-            if isinstance(index, str):
-                if index not in outcome_labels:
-                    raise ValueError(
-                        f"Outcome label {index!r} not found. "
-                        f"Available: {outcome_labels}"
-                    )
-                outcome_idx = outcome_labels.index(index)
+            # Normalize to a list of integer outcome indices.
+            if isinstance(index, (list, tuple)):
+                raw_indices = list(index)
             else:
-                outcome_idx = int(index)
-                if not (0 <= outcome_idx < n_outcomes):
-                    raise ValueError(
-                        f"Outcome index {outcome_idx} out of range "
-                        f"(0..{n_outcomes - 1})."
-                    )
+                raw_indices = [index]
 
-            def _slice(arr):
-                if arr is None:
-                    return None
-                a = np.asarray(arr)
-                if a.ndim == 2 and a.shape == (n_atoms, n_outcomes):
-                    return a[:, outcome_idx]
-                if a.ndim == 3 and a.shape[:2] == (n_atoms, n_outcomes):
-                    return a[:, outcome_idx, :]
-                if a.ndim == 3 and a.shape[1:] == (n_atoms, n_outcomes):
-                    return a[:, :, outcome_idx]
-                if a.ndim == 1 and a.size == n_atoms * n_outcomes:
-                    mask = np.arange(a.size) % n_outcomes == outcome_idx
-                    return a[mask]
-                return arr
+            resolved: list[int] = []
+            for idx in raw_indices:
+                if isinstance(idx, str):
+                    if idx not in outcome_labels:
+                        raise ValueError(
+                            f"Outcome label {idx!r} not found. "
+                            f"Available: {outcome_labels}"
+                        )
+                    resolved.append(outcome_labels.index(idx))
+                else:
+                    idx_int = int(idx)
+                    if not (0 <= idx_int < n_outcomes):
+                        raise ValueError(
+                            f"Outcome index {idx_int} out of range "
+                            f"(0..{n_outcomes - 1})."
+                        )
+                    resolved.append(idx_int)
 
-            new_labels = (
-                [labels[i] for i in range(len(labels)) if i % n_outcomes == outcome_idx]
-                if labels
-                else None
-            )
+            if len(resolved) == 1:
+                outcome_idx = resolved[0]
+
+                def _slice(arr):
+                    if arr is None:
+                        return None
+                    a = np.asarray(arr)
+                    if a.ndim == 2 and a.shape == (n_atoms, n_outcomes):
+                        return a[:, outcome_idx]
+                    if n_atoms == 1 and a.ndim == 2 and a.shape[0] == n_outcomes:
+                        return a[outcome_idx : outcome_idx + 1]
+                    if a.ndim == 3 and a.shape[:2] == (n_atoms, n_outcomes):
+                        return a[:, outcome_idx, :]
+                    if a.ndim == 3 and a.shape[1:] == (n_atoms, n_outcomes):
+                        return a[:, :, outcome_idx]
+                    if a.ndim == 1 and a.size == n_atoms * n_outcomes:
+                        mask = np.arange(a.size) % n_outcomes == outcome_idx
+                        return a[mask]
+                    return arr
+
+                new_labels = (
+                    [labels[i] for i in range(len(labels)) if i % n_outcomes == outcome_idx]
+                    if labels
+                    else None
+                )
+            else:
+                outcome_indices = resolved
+
+                def _slice(arr):
+                    if arr is None:
+                        return None
+                    a = np.asarray(arr)
+                    if a.ndim == 2 and a.shape == (n_atoms, n_outcomes):
+                        return a[:, outcome_indices]
+                    if n_atoms == 1 and a.ndim == 2 and a.shape[0] == n_outcomes:
+                        return a[outcome_indices]
+                    if a.ndim == 3 and a.shape[:2] == (n_atoms, n_outcomes):
+                        return a[:, outcome_indices, :]
+                    if a.ndim == 3 and a.shape[1:] == (n_atoms, n_outcomes):
+                        return a[:, :, outcome_indices]
+                    if a.ndim == 1 and a.size == n_atoms * n_outcomes:
+                        mask = np.isin(np.arange(a.size) % n_outcomes, outcome_indices)
+                        return a[mask]
+                    return arr
+
+                new_labels = (
+                    [labels[i] for i in range(len(labels)) if i % n_outcomes in outcome_indices]
+                    if labels
+                    else None
+                )
+
             new_meta = dict(self.estimand_metadata)
             new_meta["labels"] = new_labels
             new_meta["outcome_sliced"] = True

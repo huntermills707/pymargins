@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 from linearmodels.iv import IV2SLS, IVGMM, IVLIML
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins._adapters.linearmodels_iv import LinearmodelsIVAdapter
 
 
@@ -120,7 +120,7 @@ def test_refit(iv_data):
 
 
 # ---------------------------------------------------------------------------
-# End-to-end via Margins
+# End-to-end via GComputation
 # ---------------------------------------------------------------------------
 
 
@@ -128,8 +128,8 @@ def test_margins_predict_iv2sls(iv_data):
     mod = IV2SLS.from_formula("y ~ 1 + [x ~ z + w]", data=iv_data)
     res = mod.fit()
     adapter = LinearmodelsIVAdapter(res, training_data=iv_data)
-    m = Margins(model=None, adapter=adapter)
-    pred = m.predict()
+    est = GComputation(adapter)
+    pred = est.predict()
     assert pred.estimate is not None
     assert pred.std_error is not None
 
@@ -138,8 +138,8 @@ def test_margins_dydx_iv2sls(iv_data):
     mod = IV2SLS.from_formula("y ~ 1 + [x ~ z + w]", data=iv_data)
     res = mod.fit()
     adapter = LinearmodelsIVAdapter(res, training_data=iv_data)
-    m = Margins(model=None, adapter=adapter)
-    slope = m.dydx("x")
+    est = GComputation(adapter)
+    slope = est.dydx("x")
     assert slope.estimate is not None
     assert slope.std_error is not None
 
@@ -221,14 +221,13 @@ def test_dydx_with_formula_iv2sls(iv_poly_data):
     res = mod.fit()
     # Use a larger fd_step to avoid float32 precision loss in the quadratic
     # finite-difference at age ~ 50 (default 1e-6 is too small for float32).
-    m = Margins.linear_scale(
+    adapter = LinearmodelsIVAdapter(
         res,
+        training_data=iv_poly_data,
         formula="y ~ age + I(age**2) + x",
-        data=iv_poly_data,
-        at="mean",
-        fd_step=1e-4,
     )
-    slope = m.dydx("age")
+    est = GComputation(adapter, at="mean", scale="identity", fd_step=1e-4)
+    slope = est.dydx("age")
     # Expected slope: beta_age + 2 * beta_age_sq * mean(age)
     expected = (
         res.params["age"] + 2 * res.params["I(age ** 2)"] * iv_poly_data["age"].mean()

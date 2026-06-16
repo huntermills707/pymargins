@@ -242,7 +242,7 @@ class GComputation:
                 self._compiled.adapter,
                 self._compiled.frozen_cov,
             )
-        return GraphResult.from_engine(
+        result = GraphResult.from_engine(
             result_data,
             plan=self._plan,
             labels=compiled_query.labels,
@@ -252,6 +252,9 @@ class GComputation:
             phi=self._compiled.phi,
             phi_inv=self._compiled.phi_inv,
         )
+        if spec.outcome is not None:
+            result = result.outcome(spec.outcome)
+        return result
 
     def predict(
         self,

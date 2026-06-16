@@ -11,6 +11,7 @@ kernelspec:
 ---
 
 # GLM — Poisson count
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 A Poisson regression for count data. The natural reporting scale is
 the *rate ratio* (log link → exp); `pymargins` makes that explicit
@@ -22,7 +23,7 @@ import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(7)
 n = 4000

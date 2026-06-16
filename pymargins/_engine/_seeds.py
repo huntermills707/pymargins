@@ -1,7 +1,7 @@
-"""Seed tree and legacy-compatible bank derivations.
+"""Seed tree and bank derivations.
 
 Implements the seed model from design §9.4 and req. §5.
-M=1 paths reuse the existing derivation to keep the anchor byte-identical.
+Added in 0.4.0 (R1); renamed in 0.4.0 (R7).
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from typing import Any
 import numpy as np
 
 
-def legacy_resample_indices(
+def resample_indices(
     seed: int | None,
     n: int,
     B: int,
@@ -20,12 +20,13 @@ def legacy_resample_indices(
     block_type: str = "moving",
     strata: Any | None = None,
 ) -> list[np.ndarray]:
-    """Generate bootstrap resample indices using the v0.3.x derivation.
+    """Generate bootstrap resample indices."""
+    from pymargins._inference._bootstrap import (
+        _generate_resample_indices,
+        _validate_resample_options,
+    )
 
-    This function is frozen: any change breaks the M=1 anchor for
-    stochastic methods.
-    """
-    from pymargins._inference._bootstrap import _generate_resample_indices
+    _validate_resample_options(cluster, block, block_type, n)
 
     return _generate_resample_indices(
         rng_seed=seed,
@@ -38,16 +39,13 @@ def legacy_resample_indices(
     )
 
 
-def legacy_sim_draws(
+def sim_draws(
     seed: int | None,
     n_sim: int,
     beta: np.ndarray,
     cov: np.ndarray,
 ) -> np.ndarray:
-    """Generate simulation draws using the v0.3.x derivation.
-
-    Frozen for anchor compatibility.
-    """
+    """Generate simulation draws."""
     rng = np.random.default_rng([seed, 0] if seed is not None else None)
     from pymargins._inference._simulation import _generate_simulation_draws
 

@@ -1,6 +1,7 @@
 """End-to-end smoke tests for the OLS pipeline.
 
-See IMPLEMENTATION_GUIDE.md §1.1 and §1.2.
+Ported to the R7 ``GComputation`` estimator noun. See
+notes/061126_rewrite_implementation_guide.md §R7.1.
 """
 
 import jax
@@ -12,7 +13,7 @@ import statsmodels.formula.api as smf
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins import Margins
+from pymargins import GComputation
 
 
 @pytest.fixture
@@ -41,22 +42,22 @@ def fit_ols(df_ols):
     return smf.ols("y ~ age + treatment + C(sex)", data=df_ols).fit()
 
 
-def test_margins_construction_linear_scale(fit_ols):
-    m = Margins.linear_scale(fit_ols)
-    assert m.phi is None
-    assert m.phi_inv is None
+def test_gcomputation_construction_linear_scale(fit_ols):
+    est = GComputation(fit_ols, scale="response")
+    assert est._compiled.phi is None
+    assert est._compiled.phi_inv is None
 
 
-def test_margins_log_scale_raises_for_negative_predictions(fit_ols):
+def test_gcomputation_log_scale(fit_ols):
     # OLS predictions can be negative; log scale with negative predictions
     # should still construct but may produce NaNs in practice.
-    m = Margins.log_scale(fit_ols)
-    assert m.phi is jnp.exp
+    est = GComputation(fit_ols, scale="log")
+    assert est._compiled.phi is jnp.exp
 
 
 def test_prediction_at_typical(fit_ols):
-    m = Margins.linear_scale(fit_ols, at="typical")
-    pred = m.predict(atexog={"treatment": [0, 1]})
+    est = GComputation(fit_ols, at="typical", scale="response")
+    pred = est.predict(atexog={"treatment": [0, 1]})
     assert pred.estimate.shape == (2,)
     # Difference should be around the treatment coefficient (~3.0)
     diff = float(pred.estimate[1] - pred.estimate[0])
@@ -64,8 +65,8 @@ def test_prediction_at_typical(fit_ols):
 
 
 def test_ame_continuous(fit_ols):
-    m = Margins.linear_scale(fit_ols, at="overall")
-    ame = m.dydx("age")
+    est = GComputation(fit_ols, at="overall", scale="response")
+    ame = est.dydx("age")
     assert np.isfinite(float(ame.estimate))
     assert np.isfinite(float(ame.std_error))
     # AME of age should be around 0.2
@@ -73,8 +74,8 @@ def test_ame_continuous(fit_ols):
 
 
 def test_contrast_risk_difference(fit_ols):
-    m = Margins.linear_scale(fit_ols, at="typical")
-    rd = m.contrasts(
+    est = GComputation(fit_ols, at="typical", scale="response")
+    rd = est.contrasts(
         scenarios=[
             {"atexog": {"treatment": 1}, "label": "treated"},
             {"atexog": {"treatment": 0}, "label": "control"},
@@ -87,14 +88,14 @@ def test_contrast_risk_difference(fit_ols):
 
 
 def test_prediction_with_over(fit_ols):
-    m = Margins.linear_scale(fit_ols, at="typical")
-    pred = m.predict(atexog={"treatment": 1}, over="sex")
+    est = GComputation(fit_ols, at="typical", scale="response")
+    pred = est.predict(atexog={"treatment": 1}, over="sex")
     assert pred.estimate.shape == (2,)
 
 
 def test_result_test_method(fit_ols):
-    m = Margins.linear_scale(fit_ols, at="typical")
-    rd = m.contrasts(
+    est = GComputation(fit_ols, at="typical", scale="response")
+    rd = est.contrasts(
         scenarios=[
             {"atexog": {"treatment": 1}},
             {"atexog": {"treatment": 0}},
@@ -106,8 +107,8 @@ def test_result_test_method(fit_ols):
 
 
 def test_hc3_vcov(fit_ols):
-    m = Margins.linear_scale(fit_ols, vcov="HC3", at="typical")
-    pred = m.predict(atexog={"treatment": 1})
+    est = GComputation(fit_ols, vcov="HC3", at="typical", scale="response")
+    pred = est.predict(atexog={"treatment": 1})
     assert np.isfinite(float(pred.estimate))
     assert np.isfinite(float(pred.std_error))
 
@@ -119,9 +120,9 @@ def test_hc3_vcov(fit_ols):
 
 def test_evaluate_ratio(fit_ols):
     """Nonlinear composition via evaluate()."""
-    m = Margins.linear_scale(fit_ols, at="typical")
+    est = GComputation(fit_ols, at="typical", scale="response")
 
-    ratio = m.evaluate(
+    ratio = est.evaluate(
         scenarios=[
             {"atexog": {"treatment": 1}},
             {"atexog": {"treatment": 0}},
@@ -134,11 +135,16 @@ def test_evaluate_ratio(fit_ols):
 
 def test_simulation_method(fit_ols):
     """Explicit simulation method for OLS."""
-    m = Margins.linear_scale(
-        fit_ols, at="typical", method="simulation", n_sim=2000, rng_seed=42
+    est = GComputation(
+        fit_ols,
+        at="typical",
+        scale="response",
+        method="simulation",
+        n_sim=2000,
+        seed=42,
     )
 
-    rd = m.contrasts(
+    rd = est.contrasts(
         scenarios=[
             {"atexog": {"treatment": 1}},
             {"atexog": {"treatment": 0}},
@@ -152,11 +158,16 @@ def test_simulation_method(fit_ols):
 
 def test_bootstrap_method(fit_ols):
     """Bootstrap method for OLS."""
-    m = Margins.linear_scale(
-        fit_ols, at="typical", method="bootstrap", n_boot=50, rng_seed=42
+    est = GComputation(
+        fit_ols,
+        at="typical",
+        scale="response",
+        method="bootstrap",
+        B=50,
+        seed=42,
     )
 
-    rd = m.contrasts(
+    rd = est.contrasts(
         scenarios=[
             {"atexog": {"treatment": 1}},
             {"atexog": {"treatment": 0}},
@@ -170,16 +181,16 @@ def test_bootstrap_method(fit_ols):
 
 def test_dydx_on_binary_raises(fit_ols):
     """dydx on a binary variable must raise ValueError."""
-    m = Margins.linear_scale(fit_ols, at="overall")
+    est = GComputation(fit_ols, at="overall", scale="response")
     with pytest.raises(ValueError, match="binary"):
-        m.dydx("treatment")
+        est.dydx("treatment")
 
 
 def test_dydx_on_categorical_raises(fit_ols):
     """dydx on a categorical variable must raise ValueError."""
-    m = Margins.linear_scale(fit_ols, at="overall")
+    est = GComputation(fit_ols, at="overall", scale="response")
     with pytest.raises(ValueError, match="categorical"):
-        m.dydx("sex")
+        est.dydx("sex")
 
 
 # ---------------------------------------------------------------------------
@@ -215,8 +226,8 @@ def test_dydx_includes_interaction_chain_rule():
     b_x1 = beta[fit.model.exog_names.index("x1")]
     b_x1x2 = beta[fit.model.exog_names.index("x1:x2")]
 
-    m = Margins.linear_scale(fit, at="typical")
-    ame = m.dydx("x1")
+    est = GComputation(fit, at="typical", scale="response")
+    ame = est.dydx("x1")
 
     # At "typical", x2 is held at its median ≈ 0 (centered normal). The
     # total ME at that x2 is b_x1 + b_x1x2 * x2_typical.
@@ -225,8 +236,8 @@ def test_dydx_includes_interaction_chain_rule():
     np.testing.assert_allclose(float(ame.estimate), expected, rtol=1e-4)
 
     # AME (averaged over the sample) should equal b_x1 + b_x1x2 * mean(x2).
-    m_overall = Margins.linear_scale(fit, at="overall")
-    ame_overall = m_overall.dydx("x1")
+    est_overall = GComputation(fit, at="overall", scale="response")
+    ame_overall = est_overall.dydx("x1")
     expected_overall = b_x1 + b_x1x2 * df["x2"].mean()
     np.testing.assert_allclose(float(ame_overall.estimate), expected_overall, rtol=1e-4)
 
@@ -243,7 +254,7 @@ def test_dydx_through_polynomial_transform():
     b_x = fit.params.values[names.index("x")]
     b_x2 = fit.params.values[names.index("I(x ** 2)")]
 
-    m = Margins.linear_scale(fit, at="overall")
-    ame = m.dydx("x")
+    est = GComputation(fit, at="overall", scale="response")
+    ame = est.dydx("x")
     expected = b_x + 2.0 * b_x2 * df["x"].mean()
     np.testing.assert_allclose(float(ame.estimate), expected, rtol=1e-3)

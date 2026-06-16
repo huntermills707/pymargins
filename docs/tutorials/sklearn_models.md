@@ -11,6 +11,7 @@ kernelspec:
 ---
 
 # scikit-learn models
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 
 ```{code-cell} python
@@ -19,7 +20,7 @@ import pandas as pd
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import GradientBoostingRegressor
 
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 from pymargins.adapters import SklearnBootstrapAdapter
 
 rng = np.random.default_rng(42)

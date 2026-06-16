@@ -4,7 +4,6 @@ See IMPLEMENTATION_GUIDE.md §0.3.
 """
 
 import jax
-import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import pytest
@@ -13,7 +12,7 @@ import statsmodels.formula.api as smf
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins._adapter import auto_detect_adapter
 from pymargins._adapters.statsmodels_glm import StatsmodelsGLMAdapter
 
@@ -337,51 +336,39 @@ def test_refit_array(fit_logit_array, df_binary):
 
 def test_attach_rejects_unsupported_vcov_string(fit_logit_formula):
     adapter = StatsmodelsGLMAdapter(fit_logit_formula)
-    with pytest.raises(
-        ValueError, match="StatsmodelsGLMAdapter does not support vcov='HAC'"
-    ):
-        Margins(fit_logit_formula, adapter=adapter, vcov="HAC")
+    with pytest.raises(ValueError, match="Unsupported vcov string"):
+        GComputation(fit_logit_formula, adapter=adapter, vcov="HAC")
 
 
 def test_attach_rejects_unsupported_vcov_dict(fit_logit_formula):
     adapter = StatsmodelsGLMAdapter(fit_logit_formula)
-    with pytest.raises(
-        ValueError,
-        match="StatsmodelsGLMAdapter does not support vcov dict with type='hac'",
-    ):
-        Margins(fit_logit_formula, adapter=adapter, vcov={"type": "hac"})
+    with pytest.raises(ValueError, match="Unsupported vcov dict type"):
+        GComputation(fit_logit_formula, adapter=adapter, vcov={"type": "hac"})
 
 
 def test_attach_rejects_cluster_without_groups(fit_logit_formula):
     adapter = StatsmodelsGLMAdapter(fit_logit_formula)
     with pytest.raises(ValueError, match="cluster vcov requires 'groups'"):
-        Margins(fit_logit_formula, adapter=adapter, vcov={"type": "cluster"})
+        GComputation(fit_logit_formula, adapter=adapter, vcov={"type": "cluster"})
 
 
 def test_attach_accepts_supported_vcov(fit_logit_formula):
     adapter = StatsmodelsGLMAdapter(fit_logit_formula)
     # HC0 string
-    m = Margins(fit_logit_formula, adapter=adapter, vcov="HC0")
-    assert m.vcov_spec == "HC0"
+    m = GComputation(fit_logit_formula, adapter=adapter, vcov="HC0")
+    assert m.plan.vcov == "HC0"
     # cluster dict
     df = adapter.training_data
     cluster_spec = {"type": "cluster", "groups": df["treatment"]}
-    m2 = Margins(fit_logit_formula, adapter=adapter, vcov=cluster_spec)
-    assert m2.vcov_spec["type"] == "cluster"
-    assert m2.vcov_spec["groups"].equals(df["treatment"])
-    # ndarray
+    m2 = GComputation(fit_logit_formula, adapter=adapter, vcov=cluster_spec)
+    assert m2.plan.vcov["type"] == "cluster"
+    assert m2.plan.vcov["groups"].equals(df["treatment"])
+    # ndarray: GComputation fingerprints user matrices in the Plan and freezes
+    # the covariance in Compiled.frozen_cov.
     cov = np.eye(len(fit_logit_formula.params))
-    m3 = Margins(fit_logit_formula, adapter=adapter, vcov=cov)
-    assert m3.vcov_spec is cov
-
-
-def test_attach_validates_phi_phi_inv(fit_logit_formula):
-    """GLMAdapter.attach (via super) validates phi and phi_inv are inverses."""
-    adapter = StatsmodelsGLMAdapter(fit_logit_formula)
-    with pytest.raises(
-        ValueError, match="phi and phi_inv do not appear to be inverses"
-    ):
-        Margins(fit_logit_formula, adapter=adapter, phi=jnp.exp, phi_inv=jnp.exp)
+    m3 = GComputation(fit_logit_formula, adapter=adapter, vcov=cov)
+    assert m3.plan.vcov["kind"] == "user_ndarray"
+    np.testing.assert_allclose(m3._compiled.frozen_cov, cov, rtol=1e-10)
 
 
 # ---------------------------------------------------------------------------

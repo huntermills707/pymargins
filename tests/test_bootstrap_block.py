@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 import statsmodels.formula.api as smf
 
-from pymargins import Margins
+from pymargins import GComputation, steps
 from pymargins._adapter import auto_detect_adapter
 from pymargins._inference import InferenceConfig, _run_bootstrap
 
@@ -41,40 +41,55 @@ def ols_fit_formula(df_time_series):
 
 
 def test_block_size_too_large_raises(ols_fit_formula, df_time_series):
+    node = steps.input(df_time_series, block=len(df_time_series) + 1)
+    est = GComputation(
+        node,
+        outcome=ols_fit_formula,
+        method="bootstrap",
+        B=50,
+    )
     with pytest.raises(ValueError, match="block_size"):
-        Margins(
-            ols_fit_formula,
-            method="bootstrap",
-            n_boot=50,
-            block_size=len(df_time_series) + 1,
-        )
+        est.dydx("x")
 
 
-def test_block_size_zero_raises(ols_fit_formula):
+def test_block_size_zero_raises(ols_fit_formula, df_time_series):
+    node = steps.input(df_time_series, block=0)
+    est = GComputation(
+        node,
+        outcome=ols_fit_formula,
+        method="bootstrap",
+        B=50,
+    )
     with pytest.raises(ValueError, match="block_size"):
-        Margins(ols_fit_formula, method="bootstrap", n_boot=50, block_size=0)
+        est.dydx("x")
 
 
-def test_invalid_block_type_raises(ols_fit_formula):
+def test_invalid_block_type_raises(ols_fit_formula, df_time_series):
+    node = steps.input(df_time_series, block=5, block_type="invalid")
+    est = GComputation(
+        node,
+        outcome=ols_fit_formula,
+        method="bootstrap",
+        B=50,
+    )
     with pytest.raises(ValueError, match="block_type"):
-        Margins(
-            ols_fit_formula,
-            method="bootstrap",
-            n_boot=50,
-            block_size=5,
-            bootstrap_config={"block_type": "invalid"},
-        )
+        est.dydx("x")
 
 
 def test_cluster_and_block_size_mutually_exclusive(ols_fit_formula, df_time_series):
+    node = steps.input(
+        df_time_series,
+        cluster=df_time_series.index,
+        block=5,
+    )
+    est = GComputation(
+        node,
+        outcome=ols_fit_formula,
+        method="bootstrap",
+        B=50,
+    )
     with pytest.raises(ValueError, match="mutually exclusive"):
-        Margins(
-            ols_fit_formula,
-            method="bootstrap",
-            n_boot=50,
-            cluster=df_time_series.index,
-            block_size=5,
-        )
+        est.dydx("x")
 
 
 # ---------------------------------------------------------------------------
@@ -83,11 +98,21 @@ def test_cluster_and_block_size_mutually_exclusive(ols_fit_formula, df_time_seri
 
 
 def test_block_bootstrap_reproducible(ols_fit_formula, df_time_series):
-    m1 = Margins(
-        ols_fit_formula, method="bootstrap", n_boot=100, rng_seed=42, block_size=5
+    node1 = steps.input(df_time_series, block=5)
+    node2 = steps.input(df_time_series, block=5)
+    m1 = GComputation(
+        node1,
+        outcome=ols_fit_formula,
+        method="bootstrap",
+        B=100,
+        seed=42,
     )
-    m2 = Margins(
-        ols_fit_formula, method="bootstrap", n_boot=100, rng_seed=42, block_size=5
+    m2 = GComputation(
+        node2,
+        outcome=ols_fit_formula,
+        method="bootstrap",
+        B=100,
+        seed=42,
     )
     res1 = m1.dydx("x")
     res2 = m2.dydx("x")
@@ -102,10 +127,20 @@ def test_block_bootstrap_reproducible(ols_fit_formula, df_time_series):
 
 
 def test_block_bootstrap_differs_from_iid(ols_fit_formula, df_time_series):
-    m_block = Margins(
-        ols_fit_formula, method="bootstrap", n_boot=200, rng_seed=42, block_size=10
+    node_block = steps.input(df_time_series, block=10)
+    m_block = GComputation(
+        node_block,
+        outcome=ols_fit_formula,
+        method="bootstrap",
+        B=200,
+        seed=42,
     )
-    m_iid = Margins(ols_fit_formula, method="bootstrap", n_boot=200, rng_seed=42)
+    m_iid = GComputation(
+        ols_fit_formula,
+        method="bootstrap",
+        B=200,
+        seed=42,
+    )
     res_block = m_block.dydx("x")
     res_iid = m_iid.dydx("x")
     # SEs should differ; for AR data, block bootstrap SE should be larger
@@ -118,21 +153,21 @@ def test_block_bootstrap_differs_from_iid(ols_fit_formula, df_time_series):
 
 
 def test_moving_vs_nonoverlapping_different(ols_fit_formula, df_time_series):
-    m_moving = Margins(
-        ols_fit_formula,
+    node_moving = steps.input(df_time_series, block=10, block_type="moving")
+    node_nonover = steps.input(df_time_series, block=10, block_type="nonoverlapping")
+    m_moving = GComputation(
+        node_moving,
+        outcome=ols_fit_formula,
         method="bootstrap",
-        n_boot=100,
-        rng_seed=42,
-        block_size=10,
-        bootstrap_config={"block_type": "moving"},
+        B=100,
+        seed=42,
     )
-    m_nonover = Margins(
-        ols_fit_formula,
+    m_nonover = GComputation(
+        node_nonover,
+        outcome=ols_fit_formula,
         method="bootstrap",
-        n_boot=100,
-        rng_seed=42,
-        block_size=10,
-        bootstrap_config={"block_type": "nonoverlapping"},
+        B=100,
+        seed=42,
     )
     res_moving = m_moving.dydx("x")
     res_nonover = m_nonover.dydx("x")
@@ -146,13 +181,13 @@ def test_moving_vs_nonoverlapping_different(ols_fit_formula, df_time_series):
 
 
 def test_circular_block_bootstrap(ols_fit_formula, df_time_series):
-    m = Margins(
-        ols_fit_formula,
+    node = steps.input(df_time_series, block=10, block_type="circular")
+    m = GComputation(
+        node,
+        outcome=ols_fit_formula,
         method="bootstrap",
-        n_boot=100,
-        rng_seed=42,
-        block_size=10,
-        bootstrap_config={"block_type": "circular"},
+        B=100,
+        seed=42,
     )
     res = m.dydx("x")
     assert np.isfinite(res.estimate)
@@ -166,12 +201,22 @@ def test_circular_block_bootstrap(ols_fit_formula, df_time_series):
 
 def test_block_bootstrap_se_larger_than_iid(ols_fit_formula, df_time_series):
     """For AR data, block-bootstrap SE should be larger than i.i.d. bootstrap SE."""
-    m_block = Margins(
-        ols_fit_formula, method="bootstrap", n_boot=400, rng_seed=42, block_size=10
+    node_block = steps.input(df_time_series, block=10)
+    m_block = GComputation(
+        node_block,
+        outcome=ols_fit_formula,
+        method="bootstrap",
+        B=400,
+        seed=42,
     )
     res_block = m_block.dydx("x")
 
-    m_iid = Margins(ols_fit_formula, method="bootstrap", n_boot=400, rng_seed=42)
+    m_iid = GComputation(
+        ols_fit_formula,
+        method="bootstrap",
+        B=400,
+        seed=42,
+    )
     res_iid = m_iid.dydx("x")
 
     # Block bootstrap should be more conservative for dependent data
@@ -230,14 +275,21 @@ def test_block_bootstrap_multiplicity(ols_fit_formula):
 
 
 def test_delta_ignores_block_size(ols_fit_formula, df_time_series):
-    m = Margins(ols_fit_formula, method="delta", block_size=5)
+    node = steps.input(df_time_series, block=5)
+    m = GComputation(node, outcome=ols_fit_formula, method="delta")
     res = m.dydx("x")
     assert np.isfinite(res.estimate)
     assert np.isfinite(res.std_error)
 
 
 def test_simulation_ignores_block_size(ols_fit_formula, df_time_series):
-    m = Margins(ols_fit_formula, method="simulation", n_sim=500, block_size=5)
+    node = steps.input(df_time_series, block=5)
+    m = GComputation(
+        node,
+        outcome=ols_fit_formula,
+        method="simulation",
+        n_sim=500,
+    )
     res = m.dydx("x")
     assert np.isfinite(res.estimate)
     assert np.isfinite(res.std_error)
@@ -251,13 +303,13 @@ def test_simulation_ignores_block_size(ols_fit_formula, df_time_series):
 def test_nonoverlapping_block_size_does_not_divide_n(ols_fit_formula, df_time_series):
     """When n is not divisible by block_size, NBB should still work."""
     # n=200, block_size=7 → n_blocks=28, remainder=4 ignored
-    m = Margins(
-        ols_fit_formula,
+    node = steps.input(df_time_series, block=7, block_type="nonoverlapping")
+    m = GComputation(
+        node,
+        outcome=ols_fit_formula,
         method="bootstrap",
-        n_boot=50,
-        rng_seed=42,
-        block_size=7,
-        bootstrap_config={"block_type": "nonoverlapping"},
+        B=50,
+        seed=42,
     )
     res = m.dydx("x")
     assert np.isfinite(res.estimate)

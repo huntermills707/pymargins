@@ -11,6 +11,7 @@ kernelspec:
 ---
 
 # Linear Mixed Effects
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 `statsmodels.MixedLM` fits random-intercept and random-slope models.
 `pymargins` uses the fixed-effects coefficients and their covariance
@@ -23,7 +24,7 @@ import numpy as np
 import pandas as pd
 import statsmodels.formula.api as smf
 
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(42)
 n = 400

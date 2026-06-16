@@ -1,4 +1,5 @@
 # Writing a custom adapter
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 Most users will not need this — `pymargins` ships adapters for
 statsmodels, linearmodels, and lifelines. If you have a model class

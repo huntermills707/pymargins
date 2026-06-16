@@ -272,6 +272,20 @@ def _h_factory_for(spec: QuerySpec, ctx: QueryContext) -> Callable:
 # ---------------------------------------------------------------------------
 
 
+def _set_outcome_shape(meta: dict, n_atoms: int, adapter: ModelAdapter) -> None:
+    """Record multi-outcome layout when the adapter exposes it."""
+    n_outcomes = getattr(adapter, "n_outcomes", 1)
+    if n_outcomes > 1:
+        labels = getattr(adapter, "outcome_labels", None)
+        if labels is None:
+            labels = [str(i) for i in range(n_outcomes)]
+        meta["_outcome_shape"] = {
+            "n_atoms": n_atoms,
+            "n_outcomes": n_outcomes,
+            "outcome_labels": list(labels),
+        }
+
+
 def _build_prediction_query(spec: QuerySpec, ctx: QueryContext) -> CompiledQuery:
     """Construct the prediction estimand for predict() calls."""
     adapter = ctx.adapter
@@ -380,6 +394,7 @@ def _build_prediction_query(spec: QuerySpec, ctx: QueryContext) -> CompiledQuery
         meta["_over_values"] = _over_values
     if spec.outcome is not None:
         meta["outcome"] = spec.outcome
+    _set_outcome_shape(meta, len(atoms), adapter)
 
     return CompiledQuery(
         h=h,
@@ -471,6 +486,7 @@ def _build_slope_query(spec: QuerySpec, ctx: QueryContext) -> CompiledQuery:
         meta["_over_values"] = _over_values
     if spec.outcome is not None:
         meta["outcome"] = spec.outcome
+    _set_outcome_shape(meta, len(atoms), adapter)
 
     return CompiledQuery(
         h=h,
@@ -624,6 +640,8 @@ def _build_contrast_query(spec: QuerySpec, ctx: QueryContext) -> CompiledQuery:
     }
     if spec.outcome is not None:
         meta["outcome"] = spec.outcome
+    n_atoms = len(weights_arg) if isinstance(weights_arg, dict) else 1
+    _set_outcome_shape(meta, n_atoms, adapter)
 
     return CompiledQuery(
         h=h,
@@ -687,6 +705,7 @@ def _build_evaluate_query(spec: QuerySpec, ctx: QueryContext) -> CompiledQuery:
     }
     if spec.outcome is not None:
         meta["outcome"] = spec.outcome
+    _set_outcome_shape(meta, 1, adapter)
 
     return CompiledQuery(
         h=h,

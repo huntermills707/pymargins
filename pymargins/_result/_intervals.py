@@ -286,3 +286,39 @@ def joint_wald(
         null_value=null_value,
     )
     return float(chi2), float(p), int(df)
+
+
+def run_test(
+    estimate: np.ndarray,
+    grad: np.ndarray | None,
+    cov_params: jnp.ndarray | None,
+    draws: np.ndarray | None,
+    *,
+    null_value: float = 0.0,
+    alternative: str = "two-sided",
+    method: str = "wald",
+) -> tuple[np.ndarray, np.ndarray]:
+    """Hypothesis test dispatcher kept for legacy test compatibility.
+
+    New code should call :func:`wald_test` or :func:`draws_test` directly.
+    """
+    if method != "wald":
+        raise NotImplementedError(f"Test method {method!r} is not implemented.")
+
+    if grad is not None and cov_params is not None:
+        return wald_test(
+            estimate,
+            grad,
+            cov_params,
+            null_value=null_value,
+            alternative=alternative,
+        )
+    elif draws is not None:
+        return draws_test(
+            estimate,
+            draws,
+            null_value=null_value,
+            alternative=alternative,
+        )
+    else:
+        raise ValueError("Cannot run test: result has neither gradient nor draws.")

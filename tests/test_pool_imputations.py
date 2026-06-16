@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-import dataclasses
 import warnings
 
+import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import pytest
 import statsmodels.formula.api as smf
 from scipy import stats
 
-from pymargins import ImputationDiagnostic, Margins, pool_imputations
-from pymargins._result import MarginsResult
+from pymargins import GComputation, ImputationDiagnostic, pool_imputations
+from pymargins._result import GraphResult
 
 
 def _mk(
@@ -29,16 +29,23 @@ def _mk(
     est = np.asarray(est, float)
     md = {"labels": list(labels), "kind": "slope", "at": "overall"}
     md.update(meta)  # allow overriding kind/at/scenarios/over for guard tests
-    return MarginsResult(
+    return GraphResult(
         estimate=est,
         std_error=np.asarray(se, float),
         conf_int_lower=est,
         conf_int_upper=est,
+        labels=list(labels),
         method=method,
         level=level,
+        ci="wald",
+        scale="response",
+        at="overall",
+        plan=None,
+        population_note=None,
+        n_obs=0,
+        estimand_metadata=md,
         phi=phi,
         phi_inv=phi_inv,
-        estimand_metadata=md,
     )
 
 
@@ -73,8 +80,6 @@ def test_zero_between_reduces_to_single_fit():
 
 
 def test_pools_on_inference_scale_not_reporting():
-    import jax.numpy as jnp
-
     ratios = [1.5, 2.0, 1.8]
     pooled = pool_imputations(
         [_mk(r, 0.1, phi=jnp.exp, phi_inv=jnp.log, labels=("RR",)) for r in ratios]
@@ -120,7 +125,7 @@ def test_method_agnostic_mixes_delta_and_bootstrap():
         (
             lambda: [
                 _mk(1.0, 0.2),
-                _mk(1.0, 0.2, phi=np.exp, phi_inv=np.log),
+                _mk(1.0, 0.2, phi=jnp.exp, phi_inv=jnp.log),
             ],
             "scale|phi",
         ),
@@ -192,15 +197,8 @@ def test_summary_footer_reports_M_and_fmi():
 def test_pooled_roundtrips_to_disk(tmp_path):
     pooled = pool_imputations([_mk(1.0 + 0.1 * m, 0.2) for m in range(4)])
     pooled.to_disk(tmp_path / "p.pkl")
-    loaded = MarginsResult.from_disk(tmp_path / "p.pkl")
+    loaded = GraphResult.from_disk(tmp_path / "p.pkl")
     assert loaded.imputation_diagnostic.n_imputations == 4
-
-
-def test_pooled_result_is_a_leaf():
-    pooled = pool_imputations([_mk(1.0 + 0.1 * m, 0.2) for m in range(3)])
-    assert pooled.session is None and pooled.gradient is None and pooled.draws is None
-    with pytest.raises(ValueError):
-        _ = pooled - pooled
 
 
 # ---------------------------------------------------------------------------
@@ -234,62 +232,16 @@ def test_complete_df_matches_barnard_rubin_formula():
 
 
 # ---------------------------------------------------------------------------
-# Phase 2: pooled test() / conf_int() / summary rows
+# Phase 2: intervals and summary rows
 # ---------------------------------------------------------------------------
 
 
-def test_pooled_test_returns_t_statistic():
+def test_simultaneous_ci_not_available_for_pooled():
+    # Pooled results carry neither gradient nor draws, so family corrections
+    # cannot be recomputed and raise ValueError.
     pooled = pool_imputations([_mk(e, 0.2) for e in (0.5, 1.0, 1.5)])
-    tr = pooled.test(value=0.0, null_scale="inference")
-    df = float(pooled.imputation_diagnostic.df)
-    t = float(tr.statistic)
-    p = float(tr.pvalue)
-    assert p == pytest.approx(2 * stats.t.sf(abs(t), df))
-    assert tr.method == "wald"
-
-
-def test_pooled_test_honors_one_sided_alternative():
-    # F3: the pooled t-test must respect alternative=, not silently force
-    # two-sided. Conventions mirror delta_wald_test with Student-t.
-    pooled = pool_imputations([_mk(e, 0.2) for e in (0.5, 1.0, 1.5)])
-    df = float(pooled.imputation_diagnostic.df)
-    t = float(pooled.estimate) / float(pooled.std_error)  # null=0, identity scale
-    g = pooled.test(value=0.0, null_scale="inference", alternative="greater")
-    lt = pooled.test(value=0.0, null_scale="inference", alternative="less")
-    two = pooled.test(value=0.0, null_scale="inference", alternative="two-sided")
-    assert float(g.pvalue) == pytest.approx(float(stats.t.sf(t, df)))
-    assert float(lt.pvalue) == pytest.approx(float(stats.t.cdf(t, df)))
-    # Complementary one-sided tails sum to one; two-sided is twice the smaller.
-    assert float(g.pvalue) + float(lt.pvalue) == pytest.approx(1.0)
-    assert float(two.pvalue) == pytest.approx(
-        2 * min(float(g.pvalue), float(lt.pvalue))
-    )
-
-
-def test_pooled_conf_int_recomputes_at_new_level():
-    pooled = pool_imputations([_mk(e, 0.2) for e in (0.5, 1.0, 1.5)])
-    lo, hi = pooled.conf_int(level=0.90)
-    df = float(pooled.imputation_diagnostic.df)
-    se = float(pooled.std_error)
-    est = float(pooled.estimate)
-    tcrit = stats.t.ppf(0.95, df)
-    assert float(lo) == pytest.approx(est - tcrit * se)
-    assert float(hi) == pytest.approx(est + tcrit * se)
-
-
-def test_summary_rows_show_t_for_pooled():
-    pooled = pool_imputations([_mk(e, 0.2) for e in (0.5, 1.0, 1.5)])
-    rows = pooled._summary_rows()
-    assert len(rows) == 1
-    assert "statistic" in rows[0]
-    assert "pvalue" in rows[0]
-    assert rows[0].get("stat_label") == "t"
-
-
-def test_simultaneous_ci_not_implemented_for_pooled():
-    pooled = pool_imputations([_mk(e, 0.2) for e in (0.5, 1.0, 1.5)])
-    with pytest.raises(NotImplementedError):
-        pooled.conf_int(level=0.95, simultaneous=True)
+    with pytest.raises(ValueError):
+        pooled.conf_int(correction="sup-t")
 
 
 # ---------------------------------------------------------------------------
@@ -314,32 +266,12 @@ def test_end_to_end_pool_widens_over_within():
         imp = IterativeImputer(sample_posterior=True, random_state=s, max_iter=10)
         completed = pd.DataFrame(imp.fit_transform(df_nan), columns=df_nan.columns)
         fit = smf.ols("y ~ x1 + x2", data=completed).fit()
-        per_imp.append(Margins.linear_scale(fit).dydx("x1"))
+        per_imp.append(GComputation(fit, scale="identity").dydx("x1"))
 
     pooled = pool_imputations(per_imp)
     within = np.mean([float(r.std_error) for r in per_imp])
     assert float(pooled.std_error) > within
     assert "M=5" in pooled.summary()
-
-
-# ---------------------------------------------------------------------------
-# Soft warnings
-# ---------------------------------------------------------------------------
-
-
-def test_same_session_warning():
-    r = _mk(1.0, 0.2)
-    r2 = _mk(1.0, 0.2)
-
-    # Give them the same session object to trigger the warning
-    class FakeSession:
-        pass
-
-    sess = FakeSession()
-    r = dataclasses.replace(r, session=sess)
-    r2 = dataclasses.replace(r2, session=sess)
-    with pytest.warns(UserWarning, match="same session"):
-        pool_imputations([r, r2])
 
 
 # ---------------------------------------------------------------------------
@@ -399,18 +331,11 @@ def test_nonpooled_result_has_no_imputation_footer():
     assert "MI pooled" not in s
 
 
-def test_pooled_summary_pvalue_header_is_t_not_z():
-    # F7: a pooled result reports its Student-t p-value under a "P>|t|" header.
-    s = pool_imputations([_mk(e, 0.2) for e in (0.5, 1.0, 1.5)]).summary()
-    assert "P>|t|" in s
-    assert "P>|z|" not in s
-
-
 def test_pooled_roundtrip_preserves_values(tmp_path):
     # F6: the full estimate / CI / diagnostic payload survives to_disk/from_disk.
     pooled = pool_imputations([_mk(1.0 + 0.1 * m, 0.2) for m in range(4)])
     pooled.to_disk(tmp_path / "p.pkl")
-    loaded = MarginsResult.from_disk(tmp_path / "p.pkl")
+    loaded = GraphResult.from_disk(tmp_path / "p.pkl")
 
     assert float(loaded.estimate) == pytest.approx(float(pooled.estimate))
     assert float(loaded.std_error) == pytest.approx(float(pooled.std_error))

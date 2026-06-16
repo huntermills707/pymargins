@@ -11,6 +11,7 @@ kernelspec:
 ---
 
 # Instrumental variables (2SLS / LIML / GMM)
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 `linearmodels.IV2SLS`, `IVLIML`, `IVGMM`, and friends are supported
 through the linearmodels IV adapter. The fitted second-stage
@@ -22,7 +23,7 @@ import numpy as np
 import pandas as pd
 from linearmodels.iv import IV2SLS
 
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(2)
 n = 2000

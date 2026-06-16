@@ -11,6 +11,7 @@ kernelspec:
 ---
 
 # Robust and clustered standard errors
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 
 ```{code-cell} python
@@ -18,7 +19,7 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(42)
 n = 2000
@@ -42,7 +43,7 @@ treats `vcov=` as a session-level commitment — every subsequent call
 inherits it.
 
 ```{code-cell} python
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 # Heteroskedastic-robust HC3
 m_hc3 = Margins.log_scale(fit, vcov="HC3")

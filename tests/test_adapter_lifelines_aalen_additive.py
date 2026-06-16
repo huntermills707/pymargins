@@ -10,7 +10,7 @@ from lifelines import AalenAdditiveFitter
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins._adapter import auto_detect_adapter
 from pymargins._adapters.lifelines_aalen_additive import LifelinesAalenAdditiveAdapter
 
@@ -82,13 +82,13 @@ def test_supported_inference_methods(aaf_fit, df_survival):
 
 def test_bootstrap_end_to_end(aaf_fit, df_survival):
     adapter = LifelinesAalenAdditiveAdapter(aaf_fit, training_data=df_survival)
-    m = Margins(
+    m = GComputation(
         aaf_fit,
         adapter=adapter,
         at="typical",
         method="bootstrap",
-        n_boot=50,
-        rng_seed=42,
+        B=50,
+        seed=42,
     )
     rd = m.predict()
     assert rd.method == "bootstrap"

@@ -11,6 +11,7 @@ kernelspec:
 ---
 
 # Fair (1978) — Extramarital affairs, two ways
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 The Fair affairs survey records the *number* of extramarital
 encounters reported by 6,366 respondents, alongside age, years
@@ -32,7 +33,7 @@ import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from pymargins import Margins, pairwise
+from pymargins import GComputation, pairwise  # 0.4.0: Margins -> GComputation
 
 raw = sm.datasets.fair.load_pandas().data.copy()
 raw["had_affair"] = (raw["affairs"] > 0).astype(int)

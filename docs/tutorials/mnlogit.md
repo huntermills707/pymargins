@@ -11,6 +11,7 @@ kernelspec:
 ---
 
 # Multinomial logit
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 Multi-outcome models return one estimate per outcome category. The
 session API is unchanged; results carry an outcome axis you can slice
@@ -21,7 +22,7 @@ import numpy as np
 import pandas as pd
 import statsmodels.formula.api as smf
 
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(3)
 n = 4000

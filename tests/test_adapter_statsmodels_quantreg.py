@@ -10,7 +10,7 @@ import statsmodels.formula.api as smf
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins._adapter import auto_detect_adapter
 from pymargins._adapters.statsmodels_quantreg import StatsmodelsQuantRegAdapter
 
@@ -141,15 +141,19 @@ def test_variable_metadata(quantreg_fit_formula):
 
 def test_margins_predict_aap(quantreg_fit_formula):
     adapter = StatsmodelsQuantRegAdapter(quantreg_fit_formula)
-    m = Margins.linear_scale(quantreg_fit_formula, adapter=adapter)
-    res = m.predict()
+    est = GComputation(
+        quantreg_fit_formula, adapter=adapter, scale="identity", method="delta"
+    )
+    res = est.predict()
     assert res.estimate.size == 1
 
 
 def test_margins_dydx(quantreg_fit_formula):
     adapter = StatsmodelsQuantRegAdapter(quantreg_fit_formula)
-    m = Margins.linear_scale(quantreg_fit_formula, adapter=adapter)
-    res = m.dydx("x1")
+    est = GComputation(
+        quantreg_fit_formula, adapter=adapter, scale="identity", method="delta"
+    )
+    res = est.dydx("x1")
     assert res.estimate.size == 1
     assert np.isfinite(float(res.estimate))
 

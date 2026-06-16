@@ -38,7 +38,7 @@ pytest.importorskip("lifelines")
 from lifelines import CoxPHFitter, WeibullAFTFitter
 from statsmodels.duration.hazard_regression import PHReg
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins._adapters.lifelines_coxph import LifelinesCoxPHAdapter
 from pymargins._adapters.lifelines_weibull_aft import LifelinesWeibullAFTAdapter
 from pymargins._adapters.statsmodels_phreg import StatsmodelsPHRegAdapter
@@ -153,7 +153,7 @@ def test_phreg_ame_matches_analytical(df_survival):
     ).fit()
     adapter = StatsmodelsPHRegAdapter(fit, training_data=df_survival)
     # Use identity scale for dydx (marginal effects can be negative)
-    m = Margins(fit, adapter=adapter)
+    m = GComputation(fit, adapter=adapter, method="delta")
 
     res_x1 = m.dydx("x1")
     res_x2 = m.dydx("x2")
@@ -202,7 +202,7 @@ def test_coxph_ame_matches_marginaleffects(df_survival):
     fit.fit(df_survival, duration_col="time", event_col="status", formula="x1 + x2")
     adapter = LifelinesCoxPHAdapter(fit, training_data=df_survival)
     # Use identity scale for dydx (marginal effects can be negative)
-    m = Margins(fit, adapter=adapter)
+    m = GComputation(fit, adapter=adapter, method="delta")
 
     res_x1 = m.dydx("x1")
     res_x2 = m.dydx("x2")
@@ -216,7 +216,7 @@ def test_coxph_ame_matches_analytical(df_survival):
     fit = CoxPHFitter()
     fit.fit(df_survival, duration_col="time", event_col="status", formula="x1 + x2")
     adapter = LifelinesCoxPHAdapter(fit, training_data=df_survival)
-    m = Margins(fit, adapter=adapter)
+    m = GComputation(fit, adapter=adapter, method="delta")
 
     res_x1 = m.dydx("x1")
     res_x2 = m.dydx("x2")
@@ -278,7 +278,7 @@ def test_weibull_ame_matches_analytical(df_survival):
     fit.fit(df_survival, duration_col="time", event_col="status")
     adapter = LifelinesWeibullAFTAdapter(fit, training_data=df_survival)
     # Identity scale is appropriate for survival probabilities (bounded [0,1])
-    m = Margins(fit, adapter=adapter)
+    m = GComputation(fit, adapter=adapter, method="delta")
 
     res_x1 = m.dydx("x1")
     res_x2 = m.dydx("x2")
@@ -706,7 +706,7 @@ def test_cox_timevarying_ame_matches_analytical():
     fit = CoxTimeVaryingFitter(penalizer=0.1)
     fit.fit(df, id_col="id", start_col="start", stop_col="stop", event_col="E")
     adapter = LifelinesCoxTimeVaryingAdapter(fit, training_data=df)
-    m = Margins(fit, adapter=adapter, at="overall", method="delta")
+    m = GComputation(fit, adapter=adapter, at="overall", method="delta")
 
     res_x1 = m.dydx("x1")
     res_x2 = m.dydx("x2")

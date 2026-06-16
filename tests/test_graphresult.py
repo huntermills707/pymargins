@@ -511,6 +511,7 @@ def test_from_engine_with_executor_roundtrip():
     )
     fit = smf.ols("y ~ x1 + x2", data=df).fit()
 
+    from pymargins import GComputation
     from pymargins._engine._banks import BankSet
     from pymargins._engine._execute import execute_query
     from pymargins._engine._queries import (
@@ -520,12 +521,11 @@ def test_from_engine_with_executor_roundtrip():
         build_inference_config,
         compile_query,
     )
-    from pymargins.margins import Margins
 
-    m = Margins(fit, at="overall", method="delta")
+    est = GComputation(fit, at="overall", method="delta")
     ctx = QueryContext(
-        adapter=m.adapter,
-        base_data=m._base_data,
+        adapter=est._compiled.adapter,
+        base_data=est._compiled.base_data,
         at="overall",
         weights=None,
         phi=None,

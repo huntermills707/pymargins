@@ -10,7 +10,7 @@ from lifelines import CRCSplineFitter
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins._adapters.lifelines_crc_spline_hr import LifelinesCRCSplineHRAdapter
 
 
@@ -80,8 +80,8 @@ def test_supported_inference_methods(crc_fit, df_survival):
 
 def test_delta_end_to_end(crc_fit, df_survival):
     adapter = LifelinesCRCSplineHRAdapter(crc_fit, training_data=df_survival)
-    m = Margins(crc_fit, adapter=adapter, at="typical", method="delta")
-    rd = m.predict()
+    est = GComputation(crc_fit, adapter=adapter, at="typical", method="delta")
+    rd = est.predict()
     # High curvature may trigger fallback to simulation; both are valid
     assert rd.method in ("delta", "simulation")
     assert np.isfinite(float(rd.estimate))

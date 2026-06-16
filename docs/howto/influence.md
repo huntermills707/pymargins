@@ -11,6 +11,7 @@ kernelspec:
 ---
 
 # Per-observation influence
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 `MarginsResult.influence()` returns, for each training observation, how much
 that observation contributes to the estimate — the leave-one-out *deletion
@@ -25,7 +26,7 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(1)
 n = 180

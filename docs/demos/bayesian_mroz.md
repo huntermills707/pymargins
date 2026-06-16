@@ -11,6 +11,7 @@ kernelspec:
 ---
 
 # Bayesian marginal effects — posterior draws via `from_posterior`
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 Every inference path in `pymargins` ultimately needs a distribution
 over the parameter vector β. The delta method assumes that
@@ -47,7 +48,7 @@ import statsmodels.api as sm
 import statsmodels.formula.api as smf
 from linearmodels.datasets import mroz
 
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 cols = ["inlf", "nwifeinc", "educ", "exper", "age", "kidslt6", "kidsge6"]
 df = mroz.load()[cols].dropna().copy()

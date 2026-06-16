@@ -11,6 +11,7 @@ kernelspec:
 ---
 
 # OLS — linear regression
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 For OLS the response scale and the linear predictor scale coincide;
 the natural session is `Margins.linear_scale(...)`.
@@ -20,7 +21,7 @@ import numpy as np
 import pandas as pd
 import statsmodels.formula.api as smf
 
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(11)
 n = 3000

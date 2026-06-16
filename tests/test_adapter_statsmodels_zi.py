@@ -9,7 +9,7 @@ from statsmodels.discrete.count_model import (
     ZeroInflatedPoisson,
 )
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins._adapter import auto_detect_adapter
 from pymargins._adapters.statsmodels_zi import StatsmodelsZIAdapter
 
@@ -60,8 +60,8 @@ def test_auto_detect_zip(zi_data):
         "y ~ x", exog_infl=zi_data[["z"]], data=zi_data
     )
     res = mod.fit(disp=False)
-    m = Margins(res)
-    assert isinstance(m.adapter, StatsmodelsZIAdapter)
+    est = GComputation(res)
+    assert isinstance(est._compiled.adapter, StatsmodelsZIAdapter)
 
 
 def test_auto_detect_zinb(zinb_data):
@@ -71,8 +71,8 @@ def test_auto_detect_zinb(zinb_data):
         data=zinb_data,
     )
     res = mod.fit(disp=False)
-    m = Margins(res)
-    assert isinstance(m.adapter, StatsmodelsZIAdapter)
+    est = GComputation(res)
+    assert isinstance(est._compiled.adapter, StatsmodelsZIAdapter)
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +161,7 @@ def test_jax_differentiability(zi_data):
 
 
 # ---------------------------------------------------------------------------
-# End-to-end via Margins session
+# End-to-end via GComputation
 # ---------------------------------------------------------------------------
 
 
@@ -170,9 +170,9 @@ def test_margins_predict_zip(zi_data):
         "y ~ x", exog_infl=zi_data[["z"]], data=zi_data
     )
     res = mod.fit(disp=False)
-    m = Margins(res)
+    est = GComputation(res)
 
-    pred = m.predict()
+    pred = est.predict()
     native_pred = res.predict()
     assert np.isclose(float(pred.estimate), float(native_pred.mean()), rtol=1e-3)
 
@@ -182,15 +182,15 @@ def test_margins_dydx_zip(zi_data):
         "y ~ x", exog_infl=zi_data[["z"]], data=zi_data
     )
     res = mod.fit(disp=False)
-    m = Margins(res)
+    est = GComputation(res)
 
     # dydx on count variable x
-    slope = m.dydx("x")
+    slope = est.dydx("x")
     assert np.isfinite(float(slope.estimate))
     assert np.isfinite(float(slope.std_error))
 
     # dydx on inflation variable z
-    slope_z = m.dydx("z")
+    slope_z = est.dydx("z")
     assert np.isfinite(float(slope_z.estimate))
     assert np.isfinite(float(slope_z.std_error))
 
@@ -270,8 +270,8 @@ def test_attach_invalid_vcov(zi_data):
         "y ~ x", exog_infl=zi_data[["z"]], data=zi_data
     )
     res = mod.fit(disp=False)
-    with pytest.raises(ValueError, match="does not support vcov"):
-        Margins(res, vcov="HAC")
+    with pytest.raises(ValueError, match="Unsupported vcov"):
+        GComputation(res, vcov="HAC")
 
 
 # ---------------------------------------------------------------------------

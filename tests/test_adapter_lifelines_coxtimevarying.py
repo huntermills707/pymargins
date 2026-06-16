@@ -10,7 +10,7 @@ from lifelines import CoxTimeVaryingFitter
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins._adapters.lifelines_coxtimevarying import LifelinesCoxTimeVaryingAdapter
 
 
@@ -77,7 +77,7 @@ def test_supported_inference_methods(ctv_fit, df_survival_tv):
 
 def test_delta_end_to_end(ctv_fit, df_survival_tv):
     adapter = LifelinesCoxTimeVaryingAdapter(ctv_fit, training_data=df_survival_tv)
-    m = Margins(ctv_fit, adapter=adapter, at="typical", method="delta")
+    m = GComputation(ctv_fit, adapter=adapter, at="typical", method="delta")
     rd = m.predict()
     assert rd.method == "delta"
     assert np.isfinite(float(rd.estimate))

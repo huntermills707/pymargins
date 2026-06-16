@@ -9,9 +9,9 @@ import numpy as np
 import pytest
 
 from pymargins._engine._seeds import (
-    legacy_resample_indices,
-    legacy_sim_draws,
+    resample_indices,
     seed_sequence_for_branch,
+    sim_draws,
 )
 from pymargins._inference._bootstrap import _generate_resample_indices
 from pymargins._inference._simulation import _generate_simulation_draws
@@ -50,8 +50,8 @@ def test_resample_indices_deterministic(seed, kind):
     B = 4
     kwargs = _make_kwargs(kind, n)
 
-    a = legacy_resample_indices(seed=seed, n=n, B=B, **kwargs)
-    b = legacy_resample_indices(seed=seed, n=n, B=B, **kwargs)
+    a = resample_indices(seed=seed, n=n, B=B, **kwargs)
+    b = resample_indices(seed=seed, n=n, B=B, **kwargs)
     assert len(a) == len(b) == B
     for aa, bb in zip(a, b, strict=True):
         assert np.array_equal(aa, bb)
@@ -60,7 +60,7 @@ def test_resample_indices_deterministic(seed, kind):
 def test_resample_indices_regression_golden():
     """Layer-4 regression golden: pasted literal arrays from a verified run.
 
-    Generated 2026-06-12 with legacy_resample_indices(n=12, B=4) across the
+    Generated 2026-06-12 with resample_indices(n=12, B=4) across the
     full {iid, cluster, block-moving, block-circular, stratified} matrix and
     seeds {0, 7, 20260611}. Regeneration requires a ledger entry.
     """
@@ -158,7 +158,7 @@ def test_resample_indices_regression_golden():
     }
 
     for (seed, kind), exp in expected.items():
-        got = legacy_resample_indices(seed=seed, n=12, B=4, **_make_kwargs(kind, 12))
+        got = resample_indices(seed=seed, n=12, B=4, **_make_kwargs(kind, 12))
         assert len(got) == len(exp), (seed, kind)
         for g, e in zip(got, exp, strict=True):
             np.testing.assert_array_equal(g, e)
@@ -168,7 +168,7 @@ def test_sim_draws_regression_golden():
     """Layer-4 regression golden for simulation draws."""
     beta = np.array([0.5, -0.2])
     cov = np.array([[0.04, 0.01], [0.01, 0.09]])
-    got = legacy_sim_draws(seed=0, n_sim=5, beta=beta, cov=cov)
+    got = sim_draws(seed=0, n_sim=5, beta=beta, cov=cov)
     expected = np.array(
         [
             [4.81896882557240780e-01, -1.57692700358071147e-01],
@@ -188,7 +188,7 @@ def test_sim_draws_regression_golden():
 
 def test_resample_indices_wrapper_matches_direct():
     """The indices wrapper uses [seed, 1] internally."""
-    got = legacy_resample_indices(seed=7, n=8, B=2)
+    got = resample_indices(seed=7, n=8, B=2)
     direct = _generate_resample_indices(
         rng_seed=7,
         n_boot=2,

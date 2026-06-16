@@ -11,6 +11,7 @@ kernelspec:
 ---
 
 # Cox proportional hazards
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 `lifelines.CoxPHFitter` is supported through a dedicated adapter that
 exposes hazard ratios on the log-scale (`Margins.log_scale`) and
@@ -21,7 +22,7 @@ import numpy as np
 import pandas as pd
 from lifelines import CoxPHFitter
 
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(0)
 n = 2000

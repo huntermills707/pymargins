@@ -1,4 +1,5 @@
 # Contrasts vs `evaluate` — choosing the right tool
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 `pymargins` offers two ways to combine scenario predictions:
 

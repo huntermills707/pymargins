@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 from linearmodels.iv import AbsorbingLS
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins._adapters.linearmodels_absorbing import LinearmodelsAbsorbingAdapter
 
 
@@ -145,7 +145,7 @@ def test_margins_predict(absorb_data):
     )
     res = mod.fit()
     adapter = LinearmodelsAbsorbingAdapter(res)
-    m = Margins(model=None, adapter=adapter)
+    m = GComputation(adapter=adapter)
     pred = m.predict()
     assert pred.estimate is not None
     assert pred.std_error is not None
@@ -159,7 +159,7 @@ def test_margins_dydx(absorb_data):
     )
     res = mod.fit()
     adapter = LinearmodelsAbsorbingAdapter(res)
-    m = Margins(model=None, adapter=adapter)
+    m = GComputation(adapter=adapter)
     slope = m.dydx("x1")
     assert slope.estimate is not None
     assert slope.std_error is not None

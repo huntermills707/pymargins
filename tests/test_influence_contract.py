@@ -2,7 +2,7 @@
 
 These tests validate:
 1.  Tier-1 adapters produce ψ that reproduces the survey linearization path.
-2.  Adapter-level ψ fed through a delta gradient matches MarginsResult.influence().
+2.  Adapter-level ψ fed through a delta gradient matches GraphResult.influence().
 3.  Tier-2/3 adapters return None for influence().
 4.  ψ row count aligns to training_data length.
 """
@@ -15,7 +15,7 @@ import pytest
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from pymargins import Margins, SurveyDesign
+from pymargins import GComputation, SurveyDesign
 from pymargins._adapters.statsmodels_glm import StatsmodelsGLMAdapter
 from pymargins._adapters.statsmodels_ols import StatsmodelsOLSAdapter
 from pymargins._inference._linearization import linearization_meat
@@ -90,7 +90,7 @@ def test_influence_matches_survey_linearization(adapter_factory, df, design):
 
 
 # ---------------------------------------------------------------------------
-# Test 2: Adapter ψ @ gradient matches MarginsResult.influence()
+# Test 2: Adapter ψ @ gradient matches GraphResult.influence()
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize(
@@ -107,8 +107,8 @@ def test_influence_matches_result_influence(fit_factory, df):
     fit = fit_factory(df)
     from pymargins._adapters import auto_detect_adapter
     adapter = auto_detect_adapter(fit)
-    m = Margins(fit, at="overall", method="delta")
-    result = m.predict()
+    est = GComputation(fit, at="overall", method="delta")
+    result = est.predict()
 
     psi_beta = np.asarray(adapter.influence())  # (n, p)
     g = np.asarray(result.gradient)  # (p,) or (k, p)

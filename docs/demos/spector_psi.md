@@ -11,6 +11,7 @@ kernelspec:
 ---
 
 # Spector & Mazzeo (1980) — Did PSI work?
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 Thirty-two economics students. Three covariates: incoming GPA, a
 diagnostic test score (`TUCE`), and a binary indicator `PSI` for
@@ -29,7 +30,7 @@ import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from pymargins import Margins, pairwise
+from pymargins import GComputation, pairwise  # 0.4.0: Margins -> GComputation
 
 data = sm.datasets.spector.load_pandas()
 df = data.exog.copy()

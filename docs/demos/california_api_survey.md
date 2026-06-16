@@ -11,6 +11,7 @@ kernelspec:
 ---
 
 # California API — stratified survey design
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 The California Academic Performance Index (API) measures school achievement.
 The California Department of Education publishes the full population (`apipop`,
@@ -39,7 +40,7 @@ import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from pymargins import Margins, SurveyDesign
+from pymargins import GComputation, SurveyDesign  # 0.4.0: Margins -> GComputation
 
 # Load the stratified sample generated from R's survey package
 apistrat = pd.read_csv("data/apistrat.csv")

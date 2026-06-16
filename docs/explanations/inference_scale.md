@@ -1,4 +1,5 @@
 # Inference scale (`phi` / `phi_inv`)
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 The session-level pair `(phi, phi_inv)` picks the *inference scale* —
 the scale on which the delta method and the κ diagnostic are

@@ -11,6 +11,7 @@ kernelspec:
 ---
 
 # Survey designs — weights, strata, and clusters
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 Complex surveys sample with **unequal probabilities**, **stratification**, and
 **clustering**. Ignore them and you get two distinct failures:
@@ -48,7 +49,7 @@ import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from pymargins import Margins, SurveyDesign
+from pymargins import GComputation, SurveyDesign  # 0.4.0: Margins -> GComputation
 
 DATA = "../demos/data"
 pop = pd.read_csv(f"{DATA}/apipop.csv")

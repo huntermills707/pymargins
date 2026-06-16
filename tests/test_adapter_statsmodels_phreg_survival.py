@@ -8,7 +8,7 @@ from statsmodels.duration.hazard_regression import PHReg
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins._adapters.statsmodels_phreg_survival import (
     StatsmodelsPHRegSurvivalAdapter,
 )
@@ -130,15 +130,14 @@ def test_supported_inference_methods(phreg_fit, df_survival):
 
 def test_bootstrap_end_to_end(phreg_fit, df_survival):
     adapter = StatsmodelsPHRegSurvivalAdapter(phreg_fit, training_data=df_survival)
-    m = Margins(
-        phreg_fit,
+    est = GComputation(
         adapter=adapter,
         at="typical",
         method="bootstrap",
-        n_boot=50,
-        rng_seed=42,
+        B=50,
+        seed=42,
     )
-    rd = m.predict()
+    rd = est.predict()
     assert rd.method == "bootstrap"
     assert np.isfinite(float(rd.estimate))
     assert 0 <= float(rd.estimate) <= 1
@@ -148,15 +147,14 @@ def test_bootstrap_end_to_end(phreg_fit, df_survival):
 
 def test_bootstrap_dydx(phreg_fit, df_survival):
     adapter = StatsmodelsPHRegSurvivalAdapter(phreg_fit, training_data=df_survival)
-    m = Margins(
-        phreg_fit,
+    est = GComputation(
         adapter=adapter,
         at="typical",
         method="bootstrap",
-        n_boot=50,
-        rng_seed=42,
+        B=50,
+        seed=42,
     )
-    rd = m.dydx("x1")
+    rd = est.dydx("x1")
     assert rd.method == "bootstrap"
     assert np.isfinite(float(rd.estimate))
     assert float(rd.conf_int_lower) < float(rd.conf_int_upper)

@@ -11,6 +11,7 @@ kernelspec:
 ---
 
 # Inference — delta, simulation, bootstrap
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 `pymargins` exposes three inference paths behind one session keyword,
 `method=`. Picking the right one is a function of curvature (κ) and
@@ -22,7 +23,7 @@ import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(0)
 n = 1500

@@ -1,4 +1,5 @@
 # Multiple imputation via ``reimpute``
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 The ``reimpute`` stage implements bootstrap-then-impute: one imputation per
 bootstrap replicate, with the imputer re-fit from scratch each time.  This
@@ -23,7 +24,7 @@ import statsmodels.formula.api as smf
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import IterativeImputer
 
-from pymargins import Margins, reimpute
+from pymargins import GComputation, reimpute  # 0.4.0: Margins -> GComputation
 
 # 1. Build data with MAR missingness
 rng = np.random.default_rng(42)

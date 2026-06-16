@@ -11,6 +11,7 @@ kernelspec:
 ---
 
 # Wage panel — union premium with entity fixed effects
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 The `wage_panel` data from `linearmodels` follows 545 young men
 across 1980–1987 with annual observations on log wages, education,
@@ -32,7 +33,7 @@ import pandas as pd
 from linearmodels.panel import PanelOLS
 from linearmodels.datasets import wage_panel
 
-from pymargins import Margins, pairwise
+from pymargins import GComputation, pairwise  # 0.4.0: Margins -> GComputation
 
 raw = wage_panel.load()
 df = raw.set_index(["nr", "year"]).copy()

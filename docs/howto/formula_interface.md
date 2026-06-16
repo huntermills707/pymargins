@@ -1,4 +1,5 @@
 # Formula interface for array-fit models
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 statsmodels formula API (`smf.glm(...)`) handles interactions, polynomials,
 and splines automatically — the fitted result carries a `design_info`
@@ -28,7 +29,7 @@ argument that builds a frozen `FormulaSpec` at session construction.
 
 ```python
 import statsmodels.api as sm
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 # Array-fit OLS with a quadratic
 X = pd.DataFrame({

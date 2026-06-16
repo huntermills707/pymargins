@@ -13,6 +13,7 @@ import pytest
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
+from pymargins import GComputation, steps
 from pymargins._engine._banks import BankSet
 from pymargins._engine._execute import execute_query
 from pymargins._engine._queries import (
@@ -23,10 +24,7 @@ from pymargins._engine._queries import (
     compile_query,
 )
 from pymargins._graph._plan import Plan
-from pymargins._inference._config import InferenceConfig
-from pymargins._inference._dispatch import run_inference
 from pymargins._soundness._predicates import CompileError, SoundnessWarning
-from pymargins.margins import Margins
 from pymargins.survey import SurveyDesign
 
 
@@ -60,10 +58,10 @@ def separated_logit():
 
 def ctx_from_fit(fit, base_data=None, **overrides) -> QueryContext:
     """Build a QueryContext from a statsmodels fit result."""
-    m = Margins(fit, at="overall", method="delta")
+    est = GComputation(fit, at="overall", method="delta", B=1, n_sim=1)
     return QueryContext(
-        adapter=m.adapter,
-        base_data=base_data if base_data is not None else m._base_data,
+        adapter=est._compiled.adapter,
+        base_data=base_data if base_data is not None else est._compiled.base_data,
         at=overrides.get("at", "overall"),
         weights=overrides.get("weights", None),
         phi=overrides.get("phi", None),
@@ -244,14 +242,13 @@ def test_nondifferentiable_delta_no_warning(fit_logit):
 
 
 def test_kappa_recorded_not_steering(separated_logit):
-    """New engine keeps method='delta' and records κ; legacy flips."""
+    """New engine keeps method='delta' and records κ; it never flips."""
     ctx = ctx_from_fit(separated_logit)
     compiled = compile_query(
         QuerySpec(kind="predict", scenario={"atexog": {"x1": 2.5, "x2": -1.5}}),
         ctx,
     )
 
-    # New path: method='delta', κ recorded.
     plan_new = plan_for("delta")
     banks_new = BankSet(plan_new.plan_hash, 0, plan_new.seed)
     facts = WiringFacts()
@@ -265,30 +262,10 @@ def test_kappa_recorded_not_steering(separated_logit):
         frozen_cov=config_new.cov_params,
     )
     assert result_new["method"] == "delta"
+    assert result_new["fallback_triggered"] is False
+    assert result_new["fallback_reason"] is None
     assert result_new["kappa"] is not None
-
-    # Legacy path with default threshold flips.
-    m = Margins(ctx.adapter.results, at="overall", method="delta")
-    h_old, _, _ = m._build_prediction_estimand({"atexog": {"x1": 2.5, "x2": -1.5}}, None)
-
-    legacy_config = InferenceConfig(
-        method="delta",
-        level=0.95,
-        n_sim=4000,
-        kappa_threshold=0.3,
-        cov_params=ctx.adapter.covariance(),
-    )
-    with warnings.catch_warnings(record=True):
-        warnings.simplefilter("always")
-        legacy_result = run_inference(h_old, ctx.adapter, legacy_config)
-    assert legacy_result["method"] == "simulation"
-    assert legacy_result["fallback_triggered"] is True
-    # κ should be identical (both computed at the same beta/h).
-    np.testing.assert_allclose(
-        np.asarray(result_new["kappa"]),
-        np.asarray(legacy_result["kappa"]),
-        rtol=1e-10,
-    )
+    assert np.all(np.isfinite(result_new["kappa"]))
 
 
 # ---------------------------------------------------------------------------
@@ -427,21 +404,21 @@ def test_banks_replayed_across_queries(fit_logit, monkeypatch):
     from pymargins._engine import _seeds
 
     idx_calls = []
-    orig_idx = _seeds.legacy_resample_indices
+    orig_idx = _seeds.resample_indices
 
     def spy_idx(*args, **kwargs):
         idx_calls.append((args, kwargs))
         return orig_idx(*args, **kwargs)
 
     draw_calls = []
-    orig_draws = _seeds.legacy_sim_draws
+    orig_draws = _seeds.sim_draws
 
     def spy_draws(*args, **kwargs):
         draw_calls.append((args, kwargs))
         return orig_draws(*args, **kwargs)
 
-    monkeypatch.setattr(_seeds, "legacy_resample_indices", spy_idx)
-    monkeypatch.setattr(_seeds, "legacy_sim_draws", spy_draws)
+    monkeypatch.setattr(_seeds, "resample_indices", spy_idx)
+    monkeypatch.setattr(_seeds, "sim_draws", spy_draws)
 
     execute_query(
         compiled,
@@ -639,7 +616,6 @@ def test_bootstrap_default_ci_executes_end_to_end():
     (what R5 wires) to lock the fix.
     """
     from pymargins._graph._compile import compile as compile_plan
-    from pymargins._graph._node import Node
 
     rng = np.random.default_rng(0)
     n = 80
@@ -647,35 +623,34 @@ def test_bootstrap_default_ci_executes_end_to_end():
         {"y": rng.binomial(1, 0.5, n).astype(float), "x1": rng.normal(size=n)}
     )
     fit = smf.glm("y ~ x1", data=d, family=sm.families.Binomial()).fit()
-    wiring = Node(kind="input", _payload=d)
-
-    # Default ci ("wald") + small B; compile must resolve ci to a bootstrap method.
-    plan, _, _ = compile_plan(wiring, fit, method="bootstrap", B=15)
-    assert plan.ci == "percentile"
-
-    m = Margins(fit, at="overall", method="delta")
-    ctx = QueryContext(
-        adapter=m.adapter,
-        base_data=m._base_data,
-        at="overall",
-        weights=None,
-        phi=None,
-        phi_inv=None,
-        fd_step=1e-6,
-        gradient_backend="autodiff",
-    )
-    compiled = compile_query(QuerySpec(kind="predict"), ctx)
-    banks = BankSet(plan.plan_hash, 0, plan.seed)
+    wiring = steps.input(d)
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
+        # Default ci ("wald") + small B; compile must resolve ci to a bootstrap method.
+        plan, _, compiled = compile_plan(wiring, fit, method="bootstrap", B=15)
+        assert plan.ci == "percentile"
+
+        ctx = QueryContext(
+            adapter=compiled.adapter,
+            base_data=compiled.base_data,
+            at="overall",
+            weights=None,
+            phi=compiled.phi,
+            phi_inv=compiled.phi_inv,
+            fd_step=1e-6,
+            gradient_backend="autodiff",
+        )
+        compiled_query = compile_query(QuerySpec(kind="predict"), ctx)
+        banks = BankSet(plan.plan_hash, 0, plan.seed)
+
         result = execute_query(
-            compiled,
+            compiled_query,
             adapter=ctx.adapter,
             plan=plan,
             wiring_facts=WiringFacts(),
             banks=banks,
-            frozen_cov=ctx.adapter.covariance(),
+            frozen_cov=compiled.frozen_cov,
         )
 
     assert result["method"] == "bootstrap"

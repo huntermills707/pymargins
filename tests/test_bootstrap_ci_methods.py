@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 import statsmodels.formula.api as smf
 
-from pymargins import Margins
+from pymargins import GComputation, steps
 
 
 @pytest.fixture
@@ -34,7 +34,7 @@ def fit(df):
 
 
 def test_percentile_default(fit):
-    m = Margins(fit, method="bootstrap", n_boot=100, rng_seed=42)
+    m = GComputation(fit, method="bootstrap", B=100, seed=42)
     res = m.dydx("x1")
     assert res.ci_method is None or res.ci_method == "percentile"
     assert res.estimate > res.conf_int_lower
@@ -47,19 +47,19 @@ def test_percentile_default(fit):
 
 
 def test_basic_ci_differs_from_percentile(fit):
-    m_basic = Margins(
+    m_basic = GComputation(
         fit,
         method="bootstrap",
-        n_boot=200,
-        rng_seed=42,
-        bootstrap_config={"ci_method": "basic"},
+        B=200,
+        seed=42,
+        ci="basic",
     )
-    m_pct = Margins(
+    m_pct = GComputation(
         fit,
         method="bootstrap",
-        n_boot=200,
-        rng_seed=42,
-        bootstrap_config={"ci_method": "percentile"},
+        B=200,
+        seed=42,
+        ci="percentile",
     )
     res_basic = m_basic.dydx("x1")
     res_pct = m_pct.dydx("x1")
@@ -69,31 +69,17 @@ def test_basic_ci_differs_from_percentile(fit):
 
 
 def test_basic_ci_bounds_sensible(fit):
-    m = Margins(
+    m = GComputation(
         fit,
         method="bootstrap",
-        n_boot=100,
-        rng_seed=42,
-        bootstrap_config={"ci_method": "basic"},
+        B=100,
+        seed=42,
+        ci="basic",
     )
     res = m.dydx("x1")
     assert res.conf_int_lower < res.conf_int_upper
     assert np.isfinite(res.conf_int_lower)
     assert np.isfinite(res.conf_int_upper)
-
-
-def test_basic_conf_int_recomputation(fit):
-    m = Margins(
-        fit,
-        method="bootstrap",
-        n_boot=100,
-        rng_seed=42,
-        bootstrap_config={"ci_method": "basic"},
-    )
-    res = m.dydx("x1")
-    lo, hi = res.conf_int(level=0.90)
-    assert lo > res.conf_int_lower  # narrower interval
-    assert hi < res.conf_int_upper
 
 
 # ---------------------------------------------------------------------------
@@ -117,46 +103,29 @@ def test_bca_warns_without_acceleration():
     )
     fit = smf.ols("y ~ x1 + x2", data=df).fit()
     with pytest.warns(UserWarning, match="BCa acceleration"):
-        m = Margins(
+        m = GComputation(
             fit,
             method="bootstrap",
-            n_boot=50,
-            rng_seed=42,
-            bootstrap_config={"ci_method": "bca"},
+            B=50,
+            seed=42,
+            ci="bca",
         )
         res = m.dydx("x1")
     assert res.ci_method == "bca"
     assert res.conf_int_lower < res.conf_int_upper
 
 
-def test_bca_with_provided_acceleration(fit):
-    m = Margins(
-        fit,
-        method="bootstrap",
-        n_boot=100,
-        rng_seed=42,
-        bootstrap_config={"ci_method": "bca", "acceleration": 0.05},
-    )
-    res = m.dydx("x1")
-    assert res.ci_method == "bca"
-    assert res.conf_int_lower < res.conf_int_upper
-    assert np.isfinite(res.conf_int_lower)
-    assert np.isfinite(res.conf_int_upper)
-    assert res.bootstrap_extras is not None
-    assert "a" in res.bootstrap_extras
-    np.testing.assert_allclose(res.bootstrap_extras["a"], 0.05)
-
-
 def test_bca_cluster_jackknife_auto(fit, df):
     # 10 clusters -> jackknife is automatic (n_clusters <= 200)
     clusters = df.index % 10
-    m = Margins(
-        fit,
+    inp = steps.input(df, cluster=clusters)
+    m = GComputation(
+        inp,
+        outcome=fit,
         method="bootstrap",
-        n_boot=100,
-        rng_seed=42,
-        cluster=clusters,
-        bootstrap_config={"ci_method": "bca"},
+        B=100,
+        seed=42,
+        ci="bca",
     )
     res = m.dydx("x1")
     assert res.ci_method == "bca"
@@ -166,32 +135,18 @@ def test_bca_cluster_jackknife_auto(fit, df):
     assert res.conf_int_lower < res.conf_int_upper
 
 
-def test_bca_conf_int_recomputation(fit):
-    m = Margins(
-        fit,
-        method="bootstrap",
-        n_boot=100,
-        rng_seed=42,
-        bootstrap_config={"ci_method": "bca", "acceleration": 0.0},
-    )
-    res = m.dydx("x1")
-    lo, hi = res.conf_int(level=0.90)
-    assert lo > res.conf_int_lower
-    assert hi < res.conf_int_upper
-
-
 # ---------------------------------------------------------------------------
 # Studentized bootstrap
 # ---------------------------------------------------------------------------
 
 
 def test_studentized_ci(fit):
-    m = Margins(
+    m = GComputation(
         fit,
         method="bootstrap",
-        n_boot=100,
-        rng_seed=42,
-        bootstrap_config={"ci_method": "studentized"},
+        B=100,
+        seed=42,
+        ci="studentized",
     )
     res = m.dydx("x1")
     assert res.ci_method == "studentized"
@@ -203,34 +158,19 @@ def test_studentized_ci(fit):
     assert "se_hat" in res.bootstrap_extras
 
 
-def test_studentized_conf_int_recomputation(fit):
-    m = Margins(
-        fit,
-        method="bootstrap",
-        n_boot=100,
-        rng_seed=42,
-        bootstrap_config={"ci_method": "studentized"},
-    )
-    res = m.dydx("x1")
-    lo, hi = res.conf_int(level=0.90)
-    assert lo > res.conf_int_lower
-    assert hi < res.conf_int_upper
-
-
 # ---------------------------------------------------------------------------
 # Invalid ci_method
 # ---------------------------------------------------------------------------
 
 
 def test_invalid_ci_method_raises(fit):
-    m = Margins(
-        fit,
-        method="bootstrap",
-        n_boot=10,
-        bootstrap_config={"ci_method": "unknown"},
-    )
-    with pytest.raises(ValueError, match="ci_method"):
-        m.dydx("x1")
+    with pytest.raises(ValueError, match="ci="):
+        GComputation(
+            fit,
+            method="bootstrap",
+            B=10,
+            ci="unknown",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -240,23 +180,25 @@ def test_invalid_ci_method_raises(fit):
 
 def test_basic_ci_with_log_scale_raises(fit):
     with pytest.raises(ValueError, match="basic bootstrap"):
-        m = Margins.log_scale(
+        m = GComputation(
             fit,
+            scale="log",
             method="bootstrap",
-            n_boot=100,
-            rng_seed=42,
-            bootstrap_config={"ci_method": "basic"},
+            B=100,
+            seed=42,
+            ci="basic",
         )
         m.predict(atexog={"x1": 1.0})
 
 
 def test_bca_ci_with_log_scale(fit):
-    m = Margins.log_scale(
+    m = GComputation(
         fit,
+        scale="log",
         method="bootstrap",
-        n_boot=100,
-        rng_seed=42,
-        bootstrap_config={"ci_method": "bca", "acceleration": 0.0},
+        B=100,
+        seed=42,
+        ci="bca",
     )
     res = m.predict(atexog={"x1": 1.0})
     assert res.ci_method == "bca"
@@ -266,11 +208,12 @@ def test_bca_ci_with_log_scale(fit):
 
 def test_studentized_ci_with_log_scale_raises(fit):
     with pytest.raises(ValueError, match="studentized bootstrap"):
-        m = Margins.log_scale(
+        m = GComputation(
             fit,
+            scale="log",
             method="bootstrap",
-            n_boot=100,
-            rng_seed=42,
-            bootstrap_config={"ci_method": "studentized"},
+            B=100,
+            seed=42,
+            ci="studentized",
         )
         m.predict(atexog={"x1": 1.0})

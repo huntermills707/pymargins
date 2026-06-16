@@ -406,7 +406,7 @@ Example: Wrapping a fitted statsmodels GLM
 ------------------------------------------
 
     import statsmodels.formula.api as smf
-    from pymargins import Margins
+    from pymargins import GComputation
     from pymargins._adapters.statsmodels_glm import StatsmodelsGLMAdapter
 
     fit = smf.glm(
@@ -417,7 +417,7 @@ Example: Wrapping a fitted statsmodels GLM
 
     # Auto-detection should find this adapter; for now pass explicitly:
     adapter = StatsmodelsGLMAdapter(fit, training_data=df)
-    m = Margins.log_scale(fit, vcov="HC3", adapter=adapter)
+    m = GComputation(fit, vcov="HC3", scale="log", adapter=adapter)
 
     rr = m.contrasts(
         scenarios=[

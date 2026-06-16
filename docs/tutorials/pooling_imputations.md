@@ -1,4 +1,5 @@
 # Pooling precomputed imputations (``pool_imputations``)
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 ``pool_imputations`` combines **M finished analyses** — one per completed
 dataset — into a single result using **Rubin's rules**.  It is the
@@ -37,7 +38,7 @@ import statsmodels.formula.api as smf
 from sklearn.experimental import enable_iterative_imputer  # noqa: F401
 from sklearn.impute import IterativeImputer
 
-from pymargins import Margins, pool_imputations
+from pymargins import GComputation, pool_imputations  # 0.4.0: Margins -> GComputation
 
 # 1. Data with MAR missingness in x1
 rng = np.random.default_rng(0)

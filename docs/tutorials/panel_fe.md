@@ -11,6 +11,7 @@ kernelspec:
 ---
 
 # Panel data — fixed effects
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 `linearmodels.PanelOLS` (entity, time, or two-way fixed effects),
 `RandomEffects`, `BetweenOLS`, `AbsorbingLS`, and `FamaMacBeth` are
@@ -21,7 +22,7 @@ import numpy as np
 import pandas as pd
 from linearmodels.panel import PanelOLS
 
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(13)
 n_entities, n_periods = 200, 6

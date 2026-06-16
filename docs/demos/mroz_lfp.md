@@ -11,6 +11,7 @@ kernelspec:
 ---
 
 # Mroz (1987) — Female labor force participation
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 The Mroz data is the canonical textbook example for a binary-choice
 labor model: 753 married women observed in 1975, with a binary
@@ -37,7 +38,7 @@ import statsmodels.api as sm
 import statsmodels.formula.api as smf
 from linearmodels.datasets import mroz
 
-from pymargins import Margins, pairwise
+from pymargins import GComputation, pairwise  # 0.4.0: Margins -> GComputation
 
 cols = ["inlf", "nwifeinc", "educ", "exper", "age", "kidslt6", "kidsge6"]
 df = mroz.load()[cols].dropna().copy()

@@ -11,6 +11,7 @@ kernelspec:
 ---
 
 # Accelerated failure time models
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 Parametric AFTs (Weibull, log-logistic, log-normal,
 generalized-gamma, piecewise exponential) report on the *time* scale
@@ -23,7 +24,7 @@ import numpy as np
 import pandas as pd
 from lifelines import WeibullAFTFitter
 
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(5)
 n = 1500

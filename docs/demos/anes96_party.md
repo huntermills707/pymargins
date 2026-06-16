@@ -11,6 +11,7 @@ kernelspec:
 ---
 
 # ANES96 — Multinomial logit on party identification
+> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
 
 The 1996 American National Election Study records party
 identification (`PID`) on a 7-point scale from strong Democrat (0)
@@ -40,7 +41,7 @@ import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 raw = sm.datasets.anes96.load_pandas().data.copy()
 # 7-point PID coded 0..6. Keep covariates compact for the demo.

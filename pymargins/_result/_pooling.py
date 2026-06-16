@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import warnings
 from dataclasses import dataclass
 
 import numpy as np
 from scipy import stats
 
 from ._graphresult import GraphResult
-from ._margins import MarginsResult
 from ._scales import _phi_to_name
 
 # ---------------------------------------------------------------------------
@@ -186,46 +184,22 @@ def _meta_equal(a: object, b: object) -> bool:
             return False
 
 
-def _validate_commensurable(results: list) -> type:
+def _validate_commensurable(results: list) -> None:
     """Validate that all results can be pooled together.
 
     Duck-typed: accepts any object exposing ``estimate/std_error/phi/phi_inv/
-    level/method/estimand_metadata``. Returns the input result class so the
-    pooled object matches the input type.
+    level/method/estimand_metadata``.
     """
     if len(results) < 2:
         raise ValueError("pool_imputations requires at least two results.")
 
     ref = results[0]
-    ref_cls = type(ref)
     ref_shape = np.asarray(ref.estimate).shape
     ref_level = ref.level
     ref_phi_name = _phi_to_name(ref.phi)
     ref_phi_inv_name = _phi_to_name(ref.phi_inv)
 
-    # Soft warning: same session reused (only legacy MarginsResult carries session)
-    first_session = getattr(ref, "session", None)
-    if first_session is not None:
-        same_session = True
-        for r in results[1:]:
-            if getattr(r, "session", None) is not first_session:
-                same_session = False
-                break
-        if same_session:
-            warnings.warn(
-                "All results appear to come from the same session. "
-                "Pooling re-uses of one fit yields B≈0 and no MI value.",
-                UserWarning,
-                stacklevel=3,
-            )
-
     for i, r in enumerate(results):
-        if type(r) is not ref_cls:
-            raise ValueError(
-                f"pool_imputations: result {i} is {type(r).__name__}, expected "
-                f"{ref_cls.__name__}. All results must have the same type."
-            )
-
         # Shape
         shape = np.asarray(r.estimate).shape
         if shape != ref_shape:
@@ -283,7 +257,7 @@ def _validate_commensurable(results: list) -> type:
                 f"pool_imputations: result {i} has negative standard errors."
             )
 
-    return ref_cls
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -301,9 +275,8 @@ def pool_imputations(results, *, label="pooled", complete_df=None):
     Parameters
     ----------
     results : list
-        One result per imputation. During the R4-R6 window both
-        ``MarginsResult`` and ``GraphResult`` are accepted; the returned type
-        matches the input type.
+        One ``GraphResult`` per imputation. The returned object is a
+        ``GraphResult``.
     label : str, default "pooled"
         Provenance tag for the pooled estimand, stored on the result as
         ``estimand_metadata["pooled_label"]`` for downstream bookkeeping. It
@@ -315,10 +288,10 @@ def pool_imputations(results, *, label="pooled", complete_df=None):
 
     Returns
     -------
-    MarginsResult or GraphResult
+    GraphResult
         A leaf result with ``method="pooled"`` and ``imputation_diagnostic`` set.
     """
-    ref_cls = _validate_commensurable(results)
+    _validate_commensurable(results)
     ref = results[0]
     phi, phi_inv, level = ref.phi, ref.phi_inv, ref.level
 
@@ -371,14 +344,12 @@ def pool_imputations(results, *, label="pooled", complete_df=None):
         imputation_diagnostic=diag,
     )
 
-    if ref_cls is GraphResult:
-        return GraphResult(
-            **kwargs,
-            labels=meta.get("labels"),
-            ci="wald",
-            scale=ref.scale if hasattr(ref, "scale") else "response",
-            at=ref.at if hasattr(ref, "at") else "overall",
-            plan=ref.plan if hasattr(ref, "plan") else None,
-            population_note=ref.population_note if hasattr(ref, "population_note") else None,
-        )
-    return MarginsResult(**kwargs, session=None)
+    return GraphResult(
+        **kwargs,
+        labels=meta.get("labels"),
+        ci="wald",
+        scale=ref.scale if hasattr(ref, "scale") else "response",
+        at=ref.at if hasattr(ref, "at") else "overall",
+        plan=ref.plan if hasattr(ref, "plan") else None,
+        population_note=ref.population_note if hasattr(ref, "population_note") else None,
+    )

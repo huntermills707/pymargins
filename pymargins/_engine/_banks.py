@@ -65,7 +65,7 @@ class BankSet:
         strata: Any | None = None,
     ) -> list[np.ndarray]:
         """Return bootstrap resample indices, building once per key."""
-        from ._seeds import legacy_resample_indices
+        from ._seeds import resample_indices
 
         key = self._index_key(
             n_obs=n_obs,
@@ -76,7 +76,7 @@ class BankSet:
             strata=strata,
         )
         if key not in self._index_bank:
-            self._index_bank[key] = legacy_resample_indices(
+            self._index_bank[key] = resample_indices(
                 seed=self.seed,
                 n=n_obs,
                 B=B,
@@ -135,11 +135,11 @@ class BankSet:
         n_sim: int,
     ) -> np.ndarray:
         """Return simulation beta draws, building once per key."""
-        from ._seeds import legacy_sim_draws
+        from ._seeds import sim_draws
 
         key = self._draws_key(beta, cov, n_sim)
         if key not in self._draws_bank:
-            self._draws_bank[key] = legacy_sim_draws(
+            self._draws_bank[key] = sim_draws(
                 seed=self.seed,
                 n_sim=n_sim,
                 beta=beta,

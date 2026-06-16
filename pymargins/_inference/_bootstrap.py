@@ -127,6 +127,46 @@ def _generate_resample_indices(
     return all_idx
 
 
+def _validate_resample_options(cluster_ids, block_size, block_type, n_obs):
+    """Validate cluster vs block resampling options shared by seed and execution paths.
+
+    Returns the validated ``cluster_ids`` (as an ndarray when provided) or ``None``.
+    """
+    if cluster_ids is not None and block_size is not None:
+        raise ValueError(
+            "cluster and block_size are mutually exclusive. "
+            "Use cluster for cluster bootstrap or block_size for block bootstrap, not both."
+        )
+
+    if cluster_ids is not None:
+        cluster_ids = np.asarray(cluster_ids)
+        if len(cluster_ids) != n_obs:
+            raise ValueError(
+                f"cluster IDs length ({len(cluster_ids)}) must match "
+                f"training data length ({n_obs})."
+            )
+        if np.any(pd.isna(cluster_ids)):
+            raise ValueError("cluster IDs must not contain NaN values.")
+        unique_clusters = np.unique(cluster_ids)
+        if len(unique_clusters) == 0:
+            raise ValueError("cluster IDs must not be empty.")
+
+    if block_size is not None:
+        if not isinstance(block_size, int) or block_size < 1:
+            raise ValueError("block_size must be a positive integer.")
+        if block_size > n_obs:
+            raise ValueError(
+                f"block_size ({block_size}) cannot exceed training data length ({n_obs})."
+            )
+        if block_type not in ("moving", "nonoverlapping", "circular"):
+            raise ValueError(
+                f"Unsupported block_type: {block_type!r}. "
+                f"Supported: 'moving', 'nonoverlapping', 'circular'."
+            )
+
+    return cluster_ids
+
+
 # ---------------------------------------------------------------------------
 # BCa helpers
 # ---------------------------------------------------------------------------
@@ -994,38 +1034,9 @@ def _run_bootstrap(
             f"Supported: 'percentile', 'basic', 'bca', 'studentized'."
         )
 
-    if cluster_ids is not None and block_size is not None:
-        raise ValueError(
-            "cluster and block_size are mutually exclusive. "
-            "Use cluster for cluster bootstrap or block_size for block bootstrap, not both."
-        )
-
-    if cluster_ids is not None:
-        cluster_ids = np.asarray(cluster_ids)
-        if len(cluster_ids) != n_obs:
-            raise ValueError(
-                f"cluster IDs length ({len(cluster_ids)}) must match "
-                f"training data length ({n_obs})."
-            )
-        if np.any(pd.isna(cluster_ids)):
-            raise ValueError("cluster IDs must not contain NaN values.")
-        unique_clusters = np.unique(cluster_ids)
-        n_clusters = len(unique_clusters)
-        if n_clusters == 0:
-            raise ValueError("cluster IDs must not be empty.")
-
-    if block_size is not None:
-        if not isinstance(block_size, int) or block_size < 1:
-            raise ValueError("block_size must be a positive integer.")
-        if block_size > n_obs:
-            raise ValueError(
-                f"block_size ({block_size}) cannot exceed training data length ({n_obs})."
-            )
-        if block_type not in ("moving", "nonoverlapping", "circular"):
-            raise ValueError(
-                f"Unsupported block_type: {block_type!r}. "
-                f"Supported: 'moving', 'nonoverlapping', 'circular'."
-            )
+    cluster_ids = _validate_resample_options(
+        cluster_ids, block_size, block_type, n_obs
+    )
 
     # Use pre-generated resample bank if provided (session-level composition support)
     if config.all_idx is not None:
