@@ -1,7 +1,7 @@
 """
 pymargins.adapters — public access to concrete model adapters.
 
-You rarely need anything here. ``Margins(model)`` auto-detects the right
+You rarely need anything here. ``GComputation(model)`` auto-detects the right
 adapter for standard statsmodels / linearmodels / lifelines results. Import
 a concrete adapter only when:
 

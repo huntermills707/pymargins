@@ -11,7 +11,7 @@ class SurveyDesign:
 
     Declares the sampling design so pymargins can compute design-based
     standard errors (Taylor linearization) and design-correct bootstrap
-    resampling. Attach to a session via ``Margins(..., survey_design=...)``.
+    resampling. Attach to a session via ``GComputation(..., survey_design=...)``.
 
     Parameters
     ----------
@@ -42,9 +42,9 @@ class SurveyDesign:
     The three weight concepts in pymargins are distinct and must not be
     confused:
       * ``SurveyDesign.weights`` — design weights; drive the linearization
-        variance and may be passed explicitly to ``Margins(weights=...)``
+        variance and may be passed explicitly to ``GComputation(weights=...)``
         to obtain a population-weighted point estimate.
-      * ``Margins(weights=...)`` — aggregation weights for AME averaging.
+      * ``GComputation(weights=...)`` — aggregation weights for AME averaging.
         When ``survey_design`` is given, the user must explicitly set this
         to the design weights if a weighted point estimate is desired.
       * model-fit ``freq_weights``/``var_weights`` — passed to the estimator

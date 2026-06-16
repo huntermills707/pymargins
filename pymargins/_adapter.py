@@ -675,7 +675,7 @@ class BootstrapOnlyAdapter(ModelAdapter):
 def auto_detect_adapter(model, formula=None, data=None) -> ModelAdapter:
     """Inspect a fitted model and return an appropriate adapter.
 
-    Used by Margins() when no adapter is explicitly provided. Delegates to
+    Used by GComputation() when no adapter is explicitly provided. Delegates to
     the concrete dispatch table in _adapters to keep framework imports lazy.
 
     Parameters
