@@ -19,8 +19,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import jax
+import jaxlib
 import numpy as np
 import pandas as pd
+import scipy
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
@@ -31,6 +33,20 @@ REPO_ROOT = Path(__file__).parent.parent
 GOLDEN_DIR = REPO_ROOT / "tests" / "golden"
 PACKAGE_VERSION = "0.4.0"
 SEED = 12345
+
+
+def _env_versions() -> dict:
+    """Float-environment fingerprint. Layer-4 goldens are byte-exact, so
+    transcendental (expit) and reduction-order bits drift across jaxlib/XLA
+    and numpy upgrades. Pinning these makes a future byte mismatch
+    diagnosable as environment drift rather than a logic regression."""
+    return {
+        "jax": jax.__version__,
+        "jaxlib": jaxlib.__version__,
+        "numpy": np.__version__,
+        "scipy": scipy.__version__,
+        "statsmodels": sm.__version__,
+    }
 
 
 def _make_df() -> pd.DataFrame:
@@ -237,6 +253,7 @@ def main(argv: list[str] | None = None) -> int:
     manifest = {
         "package_version": PACKAGE_VERSION,
         "recorded": datetime.now(timezone.utc).isoformat(),
+        "environment": _env_versions(),
         "cells": manifest_entries,
     }
     manifest_path = GOLDEN_DIR / "manifest.json"

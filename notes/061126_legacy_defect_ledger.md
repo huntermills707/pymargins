@@ -463,3 +463,33 @@ the previously-dead `frozen_cov`, consistent with the frozen-Σ̂ doctrine).
 Regression guard: `test_psi_h_includes_bread_scale_equivariance`.
 
 Status: fixed (R6 audit follow-up)
+
+## D20 — regression goldens regenerated for float-environment drift (R7)
+
+Where: `tests/golden/*.npz` + `tests/golden/manifest.json`; recorder
+`tools/record_goldens.py`.
+
+Claim: the layer-4 byte-exact regression goldens recorded 2026-06-16 did not
+reproduce under `np.array_equal` (9 cells red on the full gate). Investigation:
+the divergence is in the *point estimate* `h(β̂)` (method-independent — the same
+`9.279e-13` dydx / `5.551e-17` predict gap appears under delta, simulation, and
+bootstrap), confined to the GLM/logit `expit` path and the OLS simulation
+(MVN-sampling) path; every pure-linear-deterministic cell (OLS delta, OLS and
+cluster bootstrap) stayed byte-identical. The goldens fail even against the
+engine code at their own recording commit `413738d` (verified in a worktree),
+and run-to-run is byte-deterministic in the current env — so this is not a
+logic regression but `jaxlib`/XLA + `numpy` transcendental/reduction-order drift
+between the recording environment (unpinned) and the current one
+(`jax 0.10.0`, `numpy 2.4.4`).
+
+Oracle: the numbers remain oracle-correct — the gap (~1e-13) is far inside
+`TOL_EST=1e-6`/`TOL_SE=1e-5`, and the analytic + R-golden suites (layers 1–2,
+the correctness authority for layer 4 per plan rev. 2 §4) are green.
+
+Disposition: re-record from the validated engine with `--force` (sanctioned for
+self-recorded layer-4 goldens). Recorder now writes an `environment` block
+(jax/jaxlib/numpy/scipy/statsmodels versions) into `manifest.json` so a future
+byte mismatch is diagnosable as environment drift vs a logic regression.
+Changed cells: all 8 GLM + `ols_simulation_dydx` + manifest.
+
+Status: fixed (R7) — regenerated, suite green (24 passed).

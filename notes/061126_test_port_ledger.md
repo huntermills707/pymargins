@@ -286,6 +286,11 @@ R7 audit expansion: added cluster-bootstrap predict/dydx cells for both OLS and
 GLM (`steps.input(df, cluster=cluster_ids), outcome=fit`), bringing the matrix
 to 22 cells. Determinism is enforced by a fixed seed and verified byte-exact.
 
+R7 regeneration (see defect ledger D20): byte-exact `np.array_equal` does not
+survive a `jaxlib`/`numpy` upgrade on transcendental (`expit`) / MVN-sampling
+paths. Goldens re-recorded from the validated engine; `manifest.json` now pins
+the float-environment versions so a future mismatch is diagnosable.
+
 ## P16 — Bulk mechanical port summary (R7)
 
 Category: (a) mechanical translation.

@@ -5,156 +5,163 @@
       "constructor": "GComputation(fit_ols, at='overall', method='delta', seed=12345)",
       "file": "tests/golden/ols_delta_predict.npz",
       "package_version": "0.4.0",
-      "recorded": "2026-06-16T18:46:24.619300+00:00"
+      "recorded": "2026-06-18T04:36:48.789355+00:00"
     },
     {
       "cell_id": "ols_delta_dydx",
       "constructor": "GComputation(fit_ols, at='overall', method='delta', seed=12345)",
       "file": "tests/golden/ols_delta_dydx.npz",
       "package_version": "0.4.0",
-      "recorded": "2026-06-16T18:46:25.274173+00:00"
+      "recorded": "2026-06-18T04:36:49.417678+00:00"
     },
     {
       "cell_id": "ols_simulation_predict",
       "constructor": "GComputation(fit_ols, at='overall', method='simulation', seed=12345)",
       "file": "tests/golden/ols_simulation_predict.npz",
       "package_version": "0.4.0",
-      "recorded": "2026-06-16T18:46:25.365705+00:00"
+      "recorded": "2026-06-18T04:36:49.495347+00:00"
     },
     {
       "cell_id": "ols_simulation_dydx",
       "constructor": "GComputation(fit_ols, at='overall', method='simulation', seed=12345)",
       "file": "tests/golden/ols_simulation_dydx.npz",
       "package_version": "0.4.0",
-      "recorded": "2026-06-16T18:46:25.513428+00:00"
+      "recorded": "2026-06-18T04:36:49.632836+00:00"
     },
     {
       "cell_id": "glm_delta_predict",
       "constructor": "GComputation(fit_glm, at='overall', method='delta', seed=12345)",
       "file": "tests/golden/glm_delta_predict.npz",
       "package_version": "0.4.0",
-      "recorded": "2026-06-16T18:46:26.521885+00:00"
+      "recorded": "2026-06-18T04:36:50.574398+00:00"
     },
     {
       "cell_id": "glm_delta_dydx",
       "constructor": "GComputation(fit_glm, at='overall', method='delta', seed=12345)",
       "file": "tests/golden/glm_delta_dydx.npz",
       "package_version": "0.4.0",
-      "recorded": "2026-06-16T18:46:26.695391+00:00"
+      "recorded": "2026-06-18T04:36:50.735519+00:00"
     },
     {
       "cell_id": "glm_simulation_predict",
       "constructor": "GComputation(fit_glm, at='overall', method='simulation', seed=12345)",
       "file": "tests/golden/glm_simulation_predict.npz",
       "package_version": "0.4.0",
-      "recorded": "2026-06-16T18:46:26.848261+00:00"
+      "recorded": "2026-06-18T04:36:50.880371+00:00"
     },
     {
       "cell_id": "glm_simulation_dydx",
       "constructor": "GComputation(fit_glm, at='overall', method='simulation', seed=12345)",
       "file": "tests/golden/glm_simulation_dydx.npz",
       "package_version": "0.4.0",
-      "recorded": "2026-06-16T18:46:26.926846+00:00"
+      "recorded": "2026-06-18T04:36:50.952335+00:00"
     },
     {
       "cell_id": "ols_bootstrap_predict",
       "constructor": "GComputation(fit_ols, at='overall', method='bootstrap', B=200, seed=12345)",
       "file": "tests/golden/ols_bootstrap_predict.npz",
       "package_version": "0.4.0",
-      "recorded": "2026-06-16T18:46:29.047469+00:00"
+      "recorded": "2026-06-18T04:36:52.539526+00:00"
     },
     {
       "cell_id": "ols_bootstrap_dydx",
       "constructor": "GComputation(fit_ols, at='overall', method='bootstrap', B=200, seed=12345)",
       "file": "tests/golden/ols_bootstrap_dydx.npz",
       "package_version": "0.4.0",
-      "recorded": "2026-06-16T18:46:30.392686+00:00"
+      "recorded": "2026-06-18T04:36:53.614422+00:00"
     },
     {
       "cell_id": "glm_bootstrap_predict",
       "constructor": "GComputation(fit_glm, at='overall', method='bootstrap', B=200, seed=12345)",
       "file": "tests/golden/glm_bootstrap_predict.npz",
       "package_version": "0.4.0",
-      "recorded": "2026-06-16T18:46:32.674492+00:00"
+      "recorded": "2026-06-18T04:36:55.262362+00:00"
     },
     {
       "cell_id": "glm_bootstrap_dydx",
       "constructor": "GComputation(fit_glm, at='overall', method='bootstrap', B=200, seed=12345)",
       "file": "tests/golden/glm_bootstrap_dydx.npz",
       "package_version": "0.4.0",
-      "recorded": "2026-06-16T18:46:34.188756+00:00"
+      "recorded": "2026-06-18T04:36:56.475714+00:00"
     },
     {
       "cell_id": "ols_cluster_bootstrap_predict",
       "constructor": "GComputation(steps.input(df, cluster=cluster_ids), outcome=fit_ols, at='overall', method='bootstrap', B=200, seed=12345)",
       "file": "tests/golden/ols_cluster_bootstrap_predict.npz",
       "package_version": "0.4.0",
-      "recorded": "2026-06-16T18:46:36.217960+00:00"
+      "recorded": "2026-06-18T04:36:57.975465+00:00"
     },
     {
       "cell_id": "ols_cluster_bootstrap_dydx",
       "constructor": "GComputation(steps.input(df, cluster=cluster_ids), outcome=fit_ols, at='overall', method='bootstrap', B=200, seed=12345)",
       "file": "tests/golden/ols_cluster_bootstrap_dydx.npz",
       "package_version": "0.4.0",
-      "recorded": "2026-06-16T18:46:37.546799+00:00"
+      "recorded": "2026-06-18T04:36:59.081126+00:00"
     },
     {
       "cell_id": "glm_cluster_bootstrap_predict",
       "constructor": "GComputation(steps.input(df, cluster=cluster_ids), outcome=fit_glm, at='overall', method='bootstrap', B=200, seed=12345)",
       "file": "tests/golden/glm_cluster_bootstrap_predict.npz",
       "package_version": "0.4.0",
-      "recorded": "2026-06-16T18:46:39.776745+00:00"
+      "recorded": "2026-06-18T04:37:00.837194+00:00"
     },
     {
       "cell_id": "glm_cluster_bootstrap_dydx",
       "constructor": "GComputation(steps.input(df, cluster=cluster_ids), outcome=fit_glm, at='overall', method='bootstrap', B=200, seed=12345)",
       "file": "tests/golden/glm_cluster_bootstrap_dydx.npz",
       "package_version": "0.4.0",
-      "recorded": "2026-06-16T18:46:41.403137+00:00"
+      "recorded": "2026-06-18T04:37:02.053015+00:00"
     },
     {
       "cell_id": "ols_delta_contrasts",
       "constructor": "GComputation(fit_ols, at='overall', method='delta', seed=SEED)",
       "file": "tests/golden/ols_delta_contrasts.npz",
       "package_version": "0.4.0",
-      "recorded": "2026-06-16T18:46:41.937691+00:00"
+      "recorded": "2026-06-18T04:37:02.618900+00:00"
     },
     {
       "cell_id": "ols_delta_evaluate",
       "constructor": "GComputation(fit_ols, at='overall', method='delta', seed=SEED)",
       "file": "tests/golden/ols_delta_evaluate.npz",
       "package_version": "0.4.0",
-      "recorded": "2026-06-16T18:46:42.404183+00:00"
+      "recorded": "2026-06-18T04:37:03.051650+00:00"
     },
     {
       "cell_id": "ols_delta_weights_predict",
       "constructor": "GComputation(fit_ols, at='overall', method='delta', weights=w, seed=SEED)",
       "file": "tests/golden/ols_delta_weights_predict.npz",
       "package_version": "0.4.0",
-      "recorded": "2026-06-16T18:46:42.922781+00:00"
+      "recorded": "2026-06-18T04:37:03.559881+00:00"
     },
     {
       "cell_id": "ols_delta_elasticity_eyex",
       "constructor": "GComputation(fit_ols, at='overall', method='delta', seed=SEED)",
       "file": "tests/golden/ols_delta_elasticity_eyex.npz",
       "package_version": "0.4.0",
-      "recorded": "2026-06-16T18:46:43.991482+00:00"
+      "recorded": "2026-06-18T04:37:04.611628+00:00"
     },
     {
       "cell_id": "ols_delta_elasticity_eydx",
       "constructor": "GComputation(fit_ols, at='overall', method='delta', seed=SEED)",
       "file": "tests/golden/ols_delta_elasticity_eydx.npz",
       "package_version": "0.4.0",
-      "recorded": "2026-06-16T18:46:44.053638+00:00"
+      "recorded": "2026-06-18T04:37:04.673821+00:00"
     },
     {
       "cell_id": "ols_delta_elasticity_dyex",
       "constructor": "GComputation(fit_ols, at='overall', method='delta', seed=SEED)",
       "file": "tests/golden/ols_delta_elasticity_dyex.npz",
       "package_version": "0.4.0",
-      "recorded": "2026-06-16T18:46:44.100525+00:00"
+      "recorded": "2026-06-18T04:37:04.718552+00:00"
     }
   ],
+  "environment": {
+    "jax": "0.10.0",
+    "jaxlib": "0.10.0",
+    "numpy": "2.4.4",
+    "scipy": "1.17.1",
+    "statsmodels": "0.14.6"
+  },
   "package_version": "0.4.0",
-  "recorded": "2026-06-16T18:46:44.100584+00:00"
+  "recorded": "2026-06-18T04:37:04.718577+00:00"
 }
