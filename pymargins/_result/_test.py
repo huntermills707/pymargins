@@ -20,7 +20,7 @@ from ._text import SummaryString
 
 @dataclass
 class TestResult:
-    """Output of a hypothesis test on a MarginsResult.
+    """Output of a hypothesis test on a GraphResult.
 
     Attributes
     ----------
@@ -44,7 +44,7 @@ class TestResult:
         Test type ("wald", "joint_wald", "empirical").
 
     estimand_metadata : dict
-        Carried over from the source MarginsResult for output formatting.
+        Carried over from the source GraphResult for output formatting.
     """
 
     statistic: np.ndarray
@@ -97,7 +97,7 @@ class AdjustedResults:
 
     Attributes
     ----------
-    results : MarginsResult or list/dict thereof
+    results : GraphResult or list/dict thereof
         The original result(s) passed to ``adjust()``.
     p_raw : array
         Raw p-values concatenated across all input results.
@@ -156,7 +156,7 @@ def adjust(
 
     Parameters
     ----------
-    results : MarginsResult, dict, or list
+    results : GraphResult, dict, or list
         Result object(s) carrying test statistics. ``pvalue`` arrays are
         extracted via ``result.test()``.
     method : str, default "holm"

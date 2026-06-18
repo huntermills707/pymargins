@@ -6,8 +6,8 @@ the inference engine differentiates and evaluates. This module builds these
 functions from user-facing arguments (variables, scenarios, contrasts, etc.).
 
 This layer is internal — users do not construct estimand functions directly.
-The Margins entry-point methods (predict, dydx, contrasts, evaluate) call
-into this module to assemble the appropriate h(β) for the inference engine.
+The ``GComputation`` entry-point methods (predict, dydx, contrasts, evaluate)
+call into this module to assemble the appropriate h(β) for the inference engine.
 
 Design
 ------

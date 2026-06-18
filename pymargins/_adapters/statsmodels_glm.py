@@ -86,7 +86,7 @@ class StatsmodelsGLMAdapter(GLMAdapter):
     def score_obs(self) -> np.ndarray:
         """Per-observation score ∂ℓ_i/∂β, shape (n_obs, p).
 
-        Used by :meth:`MarginsResult.influence` to form the analytical
+        Used by :meth:`GraphResult.influence` to form the analytical
         empirical influence function of an estimand. Statsmodels GLM
         exposes this directly; columns sum to ~0 at the MLE (the FOC).
         """

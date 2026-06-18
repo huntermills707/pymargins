@@ -294,9 +294,8 @@ def session_kappa(
 ) -> dict:
     """Session-level κ summary across the design space.
 
-    Used by Margins.diagnose() to give an upfront sense of whether delta
-    is reliable for the configured analytical posture, before computing
-    specific estimands. Samples representative covariate vectors from the
+    Gives an upfront sense of whether delta is reliable for the configured
+    analytical posture, before computing specific estimands. Samples representative covariate vectors from the
     design and computes κ at each, summarizing the resulting distribution.
 
     The verdict is conservative: it reports the worst κ across samples,

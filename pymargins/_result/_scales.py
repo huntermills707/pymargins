@@ -1,7 +1,7 @@
 """Scale serialization helpers for result disk persistence.
 
-Moved from ``pymargins._result._margins`` in the R6 audit so that
-``GraphResult`` can avoid importing the legacy ``MarginsResult`` module.
+Moved out of the legacy result module in the R6 audit so that
+``GraphResult`` owns scale serialization without a legacy dependency.
 """
 
 from __future__ import annotations

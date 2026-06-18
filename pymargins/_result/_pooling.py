@@ -20,7 +20,7 @@ class ImputationDiagnostic:
     """Diagnostic information from Rubin pooling.
 
     Each per-component field is a Python ``float`` for a scalar estimand and an
-    ``np.ndarray`` (shaped like ``MarginsResult.estimate``) for a vector one.
+    ``np.ndarray`` (shaped like ``GraphResult.estimate``) for a vector one.
 
     Attributes
     ----------

@@ -12,11 +12,11 @@ from .._gradients import GradientBackend
 
 @dataclass
 class InferenceConfig:
-    """Bundles inference-related configuration extracted from the session.
+    """Bundles inference-related configuration extracted from the estimator.
 
     Passed through the engine so individual functions don't each take a long
-    parameter list. Constructed by Margins from the session's attributes
-    when invoking the engine.
+    parameter list. Constructed by the engine from the estimator's
+    configuration when invoking the kernels.
 
     Attributes
     ----------

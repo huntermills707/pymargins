@@ -112,7 +112,7 @@ class ModelAdapter(abc.ABC):
 
     Concrete subclasses target specific frameworks (statsmodels,
     linearmodels, sklearn) and possibly specific model classes within them.
-    The Margins session calls only the methods defined here; all framework-
+    The engine calls only the methods defined here; all framework-
     specific knowledge is encapsulated in the adapter.
 
     Subclassing contract
@@ -178,14 +178,13 @@ class ModelAdapter(abc.ABC):
     # -----------------------------------------------------------------------
 
     def attach(self, session: Any) -> None:
-        """Attach this adapter to a Margins session. Receive the session's
-        configuration (scale, vcov_spec, weights, etc.) and validate
-        compatibility.
+        """Attach this adapter to an estimator. Receive its configuration
+        (scale, vcov_spec, weights, etc.) and validate compatibility.
 
         Subclasses should raise ValueError or NotImplementedError with
-        a clear message if the session's configuration is not supportable.
+        a clear message if the configuration is not supportable.
         For example, a survival adapter that doesn't support log scale
-        would refuse a session with phi=exp.
+        would refuse a configuration with phi=exp.
 
         Base implementation validates that ``phi`` and ``phi_inv`` are
         approximate inverses when both are provided. Subclasses that
@@ -194,8 +193,8 @@ class ModelAdapter(abc.ABC):
 
         Parameters
         ----------
-        session : Margins
-            The session attaching this adapter.
+        session : object
+            The estimator configuration attaching this adapter.
         """
         phi = getattr(session, "phi", None)
         phi_inv = getattr(session, "phi_inv", None)
@@ -336,9 +335,8 @@ class ModelAdapter(abc.ABC):
     def training_data(self):
         """The training data used to fit the model.
 
-        Required for diagnose() and for scenario expansion when the session's
-        `at` setting is "overall". Adapters should expose this attribute
-        or override Margins._base_data.
+        Required for scenario expansion when the estimator's `at` setting is
+        "overall". Adapters should set this attribute in ``__init__``.
 
         Returns
         -------
@@ -347,8 +345,7 @@ class ModelAdapter(abc.ABC):
         """
         raise NotImplementedError(
             f"{type(self).__name__} does not expose training_data. "
-            "Either set self.training_data in __init__, or override "
-            "Margins._base_data."
+            "Set self.training_data in __init__."
         )
 
     @property
@@ -369,7 +366,7 @@ class ModelAdapter(abc.ABC):
         continuous variables that map to a single design column. For
         categorical or factor-expanded variables this should raise
         ``ValueError`` — slope is undefined for such variables, and
-        ``Margins.dydx`` validates ``var_type`` before calling this.
+        ``GComputation.dydx`` validates ``var_type`` before calling this.
 
         Parameters
         ----------
