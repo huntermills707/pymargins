@@ -15,7 +15,7 @@ jobs:
       # (v1.2.3rc1, v1.2.3a1, v1.2.3b2, ...) is treated as a pre-release.
       prerelease: ${{ steps.classify.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
