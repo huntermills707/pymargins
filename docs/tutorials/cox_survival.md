@@ -93,9 +93,15 @@ rmst_control = m_surv.rmst(horizon=1095, atexog={"treated": 0}, n_grid=40)
 print(rmst_treat.summary())
 print(rmst_control.summary())
 
-# Difference with joint inference
-rmst_diff = rmst_treat - rmst_control
-print(rmst_diff.summary())
+# Both RMSTs come from the same estimator, so their bootstrap draws are paired
+# per replicate; the difference is a valid bootstrap estimand taken directly
+# from the aligned draws.  (Post-hoc result arithmetic was removed in 0.4.0;
+# cross-query joint composition returns with GComputation.joint in 0.5.0.)
+diff_draws = np.asarray(rmst_treat.draws_inf) - np.asarray(rmst_control.draws_inf)
+point = float(rmst_treat.estimate) - float(rmst_control.estimate)
+lo, hi = np.percentile(diff_draws, [2.5, 97.5])
+print(f"RMST difference (treated - control): {point:.1f} days, "
+      f"95% CI [{lo:.1f}, {hi:.1f}]")
 ```
 
 The default grid is `n_grid=80`. Increase it for a more accurate
