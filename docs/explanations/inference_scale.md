@@ -18,11 +18,16 @@ Two reasons.
 scale. Fixing `(phi, phi_inv)` at estimator level makes results on the
 same scale comparable across calls.
 
-**Inter-call composability requires a shared scale.** Two results
-from the same estimator can be subtracted, added, scaled, and combined
-through `GraphResult.__sub__` etc., and the combined object
-inherits the joint covariance. That arithmetic is only meaningful if
-the operands live on the same inference scale.
+**Composition operates on a shared scale.** Within an estimator,
+`contrasts()` and `evaluate()` combine several scenario estimands — a
+linear combination, or a custom `compose` — on the inference scale
+before back-transforming to the reporting scale, and `scaled()` rescales
+a single result on that scale. Because `(phi, phi_inv)` is fixed at
+estimator level, every estimand in such a composition is guaranteed to
+share it, so the combination — and the joint covariance it carries — is
+well defined. That is only meaningful when all operands live on the same
+inference scale. (Composing results from *separate* estimators is
+deferred to a future release; see `GComputation.joint`.)
 
 ## Picking a scale
 
