@@ -11,13 +11,10 @@ kernelspec:
 ---
 
 # Accelerated failure time models
-> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
-
 Parametric AFTs (Weibull, log-logistic, log-normal,
 generalized-gamma, piecewise exponential) report on the *time* scale
-rather than the *hazard* scale. The session helper of choice is
-`Margins.log_scale` for time ratios, or `Margins.linear_scale` for
-expected survival time itself.
+rather than the *hazard* scale. Use `scale="log"` for time ratios, or
+`scale="identity"` for expected survival time itself.
 
 ```{code-cell} python
 import numpy as np
@@ -49,7 +46,7 @@ we pass the training data explicitly to the adapter:
 from pymargins.adapters import LifelinesWeibullAFTAdapter
 
 _adapter = LifelinesWeibullAFTAdapter(aft, training_data=df)
-m = Margins.log_scale(aft, adapter=_adapter, at="overall")
+m = GComputation(aft, adapter=_adapter, at="overall", scale="log")
 print(m.contrasts(
     scenarios=[
         {"atexog": {"treated": 1}, "label": "treated"},
@@ -64,7 +61,7 @@ print(m.contrasts(
 On the linear scale, predictions are expected survival times:
 
 ```{code-cell} python
-print(Margins.linear_scale(aft, adapter=_adapter, at="overall").predict(
+print(GComputation(aft, adapter=_adapter, at="overall", scale="identity").predict(
     atexog={"treated": [0, 1]}
 ).summary())
 ```
@@ -72,7 +69,7 @@ print(Margins.linear_scale(aft, adapter=_adapter, at="overall").predict(
 ## Marginal effect of age on expected duration
 
 ```{code-cell} python
-print(Margins.linear_scale(aft, adapter=_adapter, at="overall").dydx("age").summary())
+print(GComputation(aft, adapter=_adapter, at="overall", scale="identity").dydx("age").summary())
 ```
 
 ## Plot: predicted median survival time by treatment
@@ -80,7 +77,7 @@ print(Margins.linear_scale(aft, adapter=_adapter, at="overall").dydx("age").summ
 ```{code-cell} python
 import matplotlib.pyplot as plt
 
-res = Margins.linear_scale(aft, adapter=_adapter, at="overall").predict(
+res = GComputation(aft, adapter=_adapter, at="overall", scale="identity").predict(
     atexog={"treated": [0, 1]}
 )
 df_plot = res.to_frame()

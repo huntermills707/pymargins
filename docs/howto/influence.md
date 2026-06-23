@@ -11,9 +11,7 @@ kernelspec:
 ---
 
 # Per-observation influence
-> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
-
-`MarginsResult.influence()` returns, for each training observation, how much
+`GraphResult.influence()` returns, for each training observation, how much
 that observation contributes to the estimate — the leave-one-out *deletion
 influence* `θ̂ − θ_{(-i)}`. Unlike statsmodels' built-in influence diagnostics
 (which describe the coefficients `β`), this works for the **estimand you
@@ -38,7 +36,7 @@ lp = -0.5 + 0.8 * df["x"] - 0.4 * df["z"]
 df["y"] = rng.binomial(1, 1 / (1 + np.exp(-lp)))
 
 fit = smf.glm("y ~ x + z", data=df, family=sm.families.Binomial()).fit()
-m = Margins.linear_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="identity")
 
 ame = m.dydx("x")
 print(ame.summary())
@@ -79,7 +77,7 @@ sandwich "meat":
 ```{code-cell} python
 se_from_influence = np.sqrt(np.sum(infl ** 2))
 
-m_hc0 = Margins.linear_scale(fit, at="overall", vcov="HC0")
+m_hc0 = GComputation(fit, at="overall", vcov="HC0", scale="identity")
 se_hc0 = float(np.atleast_1d(m_hc0.dydx("x").std_error)[0])
 
 print(f"sqrt(Σ influence²) = {se_from_influence:.6f}")
@@ -101,11 +99,9 @@ A **BCa bootstrap** result returns the *exact* leave-one-out refits that were
 already computed for the acceleration constant — no extra work:
 
 ```{code-cell} python
-m_boot = Margins.linear_scale(
-    fit, at="overall", method="bootstrap",
-    n_boot=200, rng_seed=0,
-    bootstrap_config={"ci_method": "bca"},
-)
+m_boot = GComputation(fit, at="overall", method="bootstrap",
+    B=200, seed=0,
+    ci="bca", scale="identity")
 infl_jack = m_boot.dydx("x").influence()
 
 corr = np.corrcoef(infl, infl_jack)[0, 1]
@@ -154,18 +150,18 @@ bootstrap route works for any bootstrappable model.
 
 ## Pitfalls
 
-* **Keep the session alive.** The delta route reads scores from the live
-  adapter, so the `Margins` session must still be in scope:
-  `m.dydx("x").influence()` works, but `Margins.linear_scale(fit).dydx("x").influence()`
-  may fail if the session is garbage-collected first. Materialized results
-  (which drop the session) cannot use the delta route.
+* **Keep the estimator alive.** The delta route reads scores from the live
+  adapter, so the `GComputation` estimator must still be in scope:
+  `m.dydx("x").influence()` works, but `GComputation(fit, scale="identity").dydx("x").influence()`
+  may fail if the estimator is garbage-collected first. Materialized results
+  (which drop the estimator reference) cannot use the delta route.
 
 * **Jackknife size cap.** The BCa leave-one-out refits are skipped when
   `n_obs` (or the number of clusters) exceeds 200, and for block bootstrap
   where leave-one-out is not well defined. In those cases use the delta route,
   which has no size limit.
 
-* **`vcov` changes the meaning.** Influence is formed with the session's frozen
+* **`vcov` changes the meaning.** Influence is formed with the estimator's frozen
   `Σ̂`. Under a robust or cluster `vcov` it becomes the corresponding sandwich
   influence rather than the model-based one — usually what you want, but worth
   stating in a write-up.

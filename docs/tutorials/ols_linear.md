@@ -11,10 +11,8 @@ kernelspec:
 ---
 
 # OLS — linear regression
-> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
-
 For OLS the response scale and the linear predictor scale coincide;
-the natural session is `Margins.linear_scale(...)`.
+the natural choice is `GComputation(..., scale="identity")`.
 
 ```{code-cell} python
 import numpy as np
@@ -43,7 +41,7 @@ fit = smf.ols("wage ~ age + C(female) + C(education) + age:C(female)",
 ## AME of `age` overall
 
 ```{code-cell} python
-m = Margins.linear_scale(fit, vcov="HC2", at="overall")
+m = GComputation(fit, vcov="HC2", at="overall", scale="identity")
 print(m.dydx("age").summary())
 ```
 

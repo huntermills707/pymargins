@@ -11,8 +11,8 @@ differences as a last resort.
 | `wrapped_fd`  | black-box predict, but `η = X β` is accessible  | exact gradient outside the boundary | one FD call per parameter at the boundary     |
 | `fd`          | full black box                                  | works on anything                   | Hessian quality compounds poorly (bad for κ)  |
 
-The session argument `gradient_backend="auto"` picks the best
-available path per adapter; the choice is sticky for the session.
+The estimator argument `gradient_backend="auto"` picks the best
+available path per adapter; the choice is sticky for the estimator.
 
 ## The custom-JVP bridge
 
@@ -37,7 +37,7 @@ backend differentiates the entire estimand through the model's
 predict function. Gradient quality is acceptable; *Hessian* quality
 is poor, which means κ is noisier and the fallback decision becomes
 less reliable. In these cases, prefer a bootstrap or simulation
-session — and consider whether you want to expose the linear
+estimator — and consider whether you want to expose the linear
 predictor to upgrade the adapter to `wrapped_fd`.
 
 See [](adapter_pattern.md) for the adapter contract that decides the

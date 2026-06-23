@@ -11,8 +11,6 @@ kernelspec:
 ---
 
 # Instrumental variables (2SLS / LIML / GMM)
-> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
-
 `linearmodels.IV2SLS`, `IVLIML`, `IVGMM`, and friends are supported
 through the linearmodels IV adapter. The fitted second-stage
 coefficients enter `pymargins` just like an OLS fit, with the IV
@@ -41,7 +39,7 @@ fit = IV2SLS(df["y"], df[["const"]], df[["x"]], df[["z"]]).fit()
 ## AME of the endogenous regressor
 
 ```{code-cell} python
-m = Margins.linear_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="identity")
 print(m.dydx("x").summary())
 ```
 

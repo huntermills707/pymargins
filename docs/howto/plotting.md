@@ -11,8 +11,6 @@ kernelspec:
 ---
 
 # Plotting predictions and effects
-> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
-
 
 ```{code-cell} python
 import numpy as np
@@ -36,11 +34,11 @@ df["y"] = rng.binomial(1, 1 / (1 + np.exp(-lp)))
 
 fit = smf.glm("y ~ age + female + treated + C(region)", data=df,
               family=sm.families.Binomial()).fit()
-m = Margins.log_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="log")
 ```
 
 
-`MarginsResult.to_frame()` returns a plot-ready table. Combine with
+`GraphResult.to_frame()` returns a plot-ready table. Combine with
 matplotlib for prediction curves and forest plots.
 
 ## Prediction curve over a continuous variable

@@ -11,9 +11,7 @@ kernelspec:
 ---
 
 # Inference — delta, simulation, bootstrap
-> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
-
-`pymargins` exposes three inference paths behind one session keyword,
+`pymargins` exposes three inference paths behind one keyword,
 `method=`. Picking the right one is a function of curvature (κ) and
 the resampling structure of your data.
 
@@ -23,7 +21,7 @@ import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from pymargins import GComputation  # 0.4.0: Margins -> GComputation
+from pymargins import GComputation, steps  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(0)
 n = 1500
@@ -40,7 +38,7 @@ fit = smf.glm("y ~ x", data=df, family=sm.families.Binomial()).fit()
 ## Delta — the default
 
 ```{code-cell} python
-m = Margins.log_scale(fit, at="overall", method="delta")
+m = GComputation(fit, at="overall", method="delta", scale="log")
 print(m.predict(atexog={"x": [-2, 0, 2]}).summary())
 ```
 
@@ -50,29 +48,31 @@ Useful when a probability sits near 0 or 1 and the symmetric Wald CI
 would cross the boundary.
 
 ```{code-cell} python
-m_sim = Margins.log_scale(fit, at="overall", method="simulation", n_sim=2000)
+m_sim = GComputation(fit, at="overall", method="simulation", n_sim=2000, scale="log")
 print(m_sim.predict(atexog={"x": [-2, 0, 2]}).summary())
 ```
 
 ## Pairs bootstrap
 
 ```{code-cell} python
-m_boot = Margins.log_scale(
-    fit, at="overall", method="bootstrap", n_boot=200
-)
+m_boot = GComputation(fit, at="overall", method="bootstrap", B=200, scale="log")
 print(m_boot.predict(atexog={"x": [-2, 0, 2]}).summary())
 ```
 
 ## Cluster bootstrap
 
-Pass cluster IDs at session construction to switch from pairs to
+Pass cluster IDs through `steps.input` to switch from pairs to
 cluster resampling — required when within-cluster correlation
 matters.
 
 ```{code-cell} python
-m_clust = Margins.log_scale(
-    fit, at="overall", method="bootstrap",
-    n_boot=500, cluster=df["g"].values,
+m_clust = GComputation(
+    steps.input(df, cluster=df["g"].values),
+    outcome=fit,
+    at="overall",
+    method="bootstrap",
+    B=500,
+    scale="log",
 )
 print(m_clust.predict(atexog={"x": [-2, 0, 2]}).summary())
 ```

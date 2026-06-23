@@ -11,12 +11,10 @@ kernelspec:
 ---
 
 # Generalised Estimating Equations (GEE)
-> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
-
 `statsmodels.GEE` handles correlated outcomes through a working
 correlation structure and sandwich covariance.  `pymargins` consumes the
 GEE fit directly — the robust (sandwich) covariance is the default, and
-the session API is identical to GLM.
+the estimator API is identical to GLM.
 
 ```{code-cell} python
 import numpy as np
@@ -52,7 +50,7 @@ fit = smf.gee(
 The default covariance is the GEE sandwich (robust) estimator:
 
 ```{code-cell} python
-m = Margins.linear_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="identity")
 print(m.dydx("age").summary())
 ```
 
@@ -117,17 +115,17 @@ ax.invert_yaxis()
 
 ## Alternative vcov flavours
 
-GEE fits carry three built-in covariances.  You can switch at session
+GEE fits carry three built-in covariances.  You can switch at estimator
 construction:
 
 ```{code-cell} python
 # Naive (model-based) covariance
-m_naive = Margins.linear_scale(fit, vcov="naive", at="overall")
+m_naive = GComputation(fit, vcov="naive", at="overall", scale="identity")
 print(m_naive.dydx("age").summary())
 
 # Bias-corrected robust sandwich (if available)
 try:
-    m_bc = Margins.linear_scale(fit, vcov="robust_bc", at="overall")
+    m_bc = GComputation(fit, vcov="robust_bc", at="overall", scale="identity")
     print(m_bc.dydx("age").summary())
 except ValueError as exc:
     print("robust_bc not available:", exc)
@@ -143,5 +141,5 @@ design matrix:
 from pymargins.adapters import StatsmodelsGEEAdapter
 
 adapter = StatsmodelsGEEAdapter(fit_array, training_data=df)
-m = Margins.linear_scale(fit_array, adapter=adapter, at="overall")
+m = GComputation(fit_array, adapter=adapter, at="overall", scale="identity")
 ```

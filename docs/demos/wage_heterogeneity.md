@@ -11,8 +11,6 @@ kernelspec:
 ---
 
 # Union premium heterogeneity — effects by subgroup
-> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
-
 An average marginal effect answers "what is the effect on average?".
 Often the research question is sharper: *for whom* is the effect large,
 and *for whom* is it small? The union wage premium is the textbook
@@ -59,11 +57,9 @@ fit = smf.ols(
     "lwage ~ union * educ_band + exper * educ_band + expersq + married + C(year)",
     data=df,
 ).fit()
-m = Margins.linear_scale(
-    fit,
+m = GComputation(fit,
     vcov={"type": "cluster", "groups": df["nr"]},  # cluster by worker
-    at="overall",
-)
+    at="overall", scale="identity")
 ```
 
 We cluster the standard errors by worker (`nr`) because the same man is

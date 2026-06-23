@@ -115,21 +115,19 @@ def test_linear_combination_empty_offsets():
 
 
 def test_linear_combination_zero_scenario_weights_raises():
-    """Zero-sum scenario_weights must raise ValueError."""
+    """Zero-sum scenario_weights must raise ValueError at construction."""
     adapter = DummyAdapter()
     X1 = jnp.array([[1.0, 0.0]])
     X2 = jnp.array([[0.0, 1.0]])
     weights = jnp.array([1.0, -1.0])
-    h = make_linear_combination_estimand(
-        adapter,
-        [X1, X2],
-        weights,
-        scenario_aggregate="weighted",
-        scenario_weights=[jnp.array([0.0, 0.0]), jnp.array([1.0, 1.0])],
-    )
-    beta = jnp.array([0.5, -0.3])
     with pytest.raises(ValueError, match="scenario_weights must not sum to zero"):
-        h(beta)
+        make_linear_combination_estimand(
+            adapter,
+            [X1, X2],
+            weights,
+            scenario_aggregate="weighted",
+            scenario_weights=[jnp.array([0.0, 0.0]), jnp.array([1.0, 1.0])],
+        )
 
 
 # ---------------------------------------------------------------------------

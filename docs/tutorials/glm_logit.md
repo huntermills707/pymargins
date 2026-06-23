@@ -11,8 +11,6 @@ kernelspec:
 ---
 
 # GLM — Binomial logit
-> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
-
 A logit with factor variables and an interaction, every Stata
 `margins` analysis side-by-side with the `pymargins` call that
 produces it.
@@ -53,11 +51,11 @@ fit = smf.glm(
 Stata: `margins agegrp, atmeans`.
 
 For predicted probabilities the natural reporting scale is the
-probability scale itself, so `linear_scale` is the default that
+probability scale itself, so `scale="identity"` is the default that
 matches Stata:
 
 ```{code-cell} python
-print(Margins.linear_scale(fit, at="typical").predict(
+print(GComputation(fit, at="typical", scale="identity").predict(
     atexog={"agegrp": list(range(1, 7))}
 ).summary())
 ```
@@ -67,7 +65,7 @@ print(Margins.linear_scale(fit, at="typical").predict(
 Stata: `margins agegrp`.
 
 ```{code-cell} python
-print(Margins.linear_scale(fit, at="overall").predict(
+print(GComputation(fit, at="overall", scale="identity").predict(
     atexog={"agegrp": list(range(1, 7))}
 ).summary())
 ```
@@ -77,7 +75,7 @@ print(Margins.linear_scale(fit, at="overall").predict(
 Stata: `margins, at(age=(20 50 70)) atmeans`.
 
 ```{code-cell} python
-print(Margins.linear_scale(fit, at="typical").predict(
+print(GComputation(fit, at="typical", scale="identity").predict(
     atexog={"age": [20, 50, 70]}
 ).summary())
 ```
@@ -87,8 +85,8 @@ print(Margins.linear_scale(fit, at="typical").predict(
 Stata: `margins, dydx(age) atmeans` and `margins, dydx(age)`.
 
 ```{code-cell} python
-Margins.linear_scale(fit, at="typical").dydx("age").summary()
-print(Margins.linear_scale(fit, at="overall").dydx("age").summary())
+GComputation(fit, at="typical", scale="identity").dydx("age").summary()
+print(GComputation(fit, at="overall", scale="identity").dydx("age").summary())
 ```
 
 ## Discrete change
@@ -100,7 +98,7 @@ on the response scale is a contrast across the two levels:
 from pymargins import pairwise
 
 scen, w = pairwise("black", [1, 0])
-print(Margins.linear_scale(fit, at="overall").contrasts(
+print(GComputation(fit, at="overall", scale="identity").contrasts(
     scenarios=scen, contrasts=w
 ).summary())
 ```
@@ -110,7 +108,7 @@ print(Margins.linear_scale(fit, at="overall").contrasts(
 ```{code-cell} python
 import matplotlib.pyplot as plt
 
-res = Margins.linear_scale(fit, at="overall").predict(
+res = GComputation(fit, at="overall", scale="identity").predict(
     atexog={"agegrp": list(range(1, 7))}
 )
 df_plot = res.to_frame()
@@ -126,5 +124,5 @@ ax.set(xlabel="Age group", ylabel="P(diabetes=1)")
 ## Robust SEs
 
 ```{code-cell} python
-print(Margins.linear_scale(fit, vcov="HC3", at="overall").dydx("age").summary())
+print(GComputation(fit, vcov="HC3", at="overall", scale="identity").dydx("age").summary())
 ```

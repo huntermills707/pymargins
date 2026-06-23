@@ -49,13 +49,14 @@ def test_match_population_note():
 
 
 
-def test_reimpute_collect_returns_parent_unchanged():
+def test_reimpute_collect_returns_imputed_parent():
     df = pd.DataFrame({"x": [1.0, None, 3.0]})
     n = steps.input(df)
     r = steps.reimpute(n, imputer=lambda d: d.fillna(0))
     out = r.collect()
-    # prepare() on reimpute is a no-op; imputation happens only under resampling
-    assert out["x"].isna().sum() == 1
+    # prepare() applies the imputer to the point-execution output so the
+    # template model can be fit on an imputed frame.
+    assert out["x"].isna().sum() == 0
 
 
 def test_impute_raises():

@@ -1,6 +1,4 @@
 # The adapter pattern
-> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
-
 `pymargins` separates "what does the model do" from "what statistic
 do I want". The adapter is the seam: it answers, for one model
 class, the four questions the inference engine needs.
@@ -32,7 +30,7 @@ model admits.
 
 ## What's included
 
-Available from `pymargins.adapters` (auto-detected by `Margins(model)`;
+Available from `pymargins.adapters` (auto-detected by `GComputation(model)`;
 import explicitly only to override detection or select a non-default
 scale):
 

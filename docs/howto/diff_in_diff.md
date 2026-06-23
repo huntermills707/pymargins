@@ -11,8 +11,6 @@ kernelspec:
 ---
 
 # Difference-in-differences on the response scale
-> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
-
 
 ```{code-cell} python
 import numpy as np
@@ -35,7 +33,7 @@ df["condX"] = rng.binomial(1, 1 / (1 + np.exp(-lp)))
 
 fit = smf.glm("condX ~ C(group) * C(preexist) + age", data=df,
               family=sm.families.Binomial()).fit()
-m = Margins.linear_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="identity")
 ```
 
 
@@ -47,7 +45,7 @@ itself is on the link scale and does *not* answer the question
 ```{code-cell} python
 from pymargins import GComputation, did  # 0.4.0: Margins -> GComputation
 
-m = Margins.linear_scale(fit, vcov="HC3", at="overall")
+m = GComputation(fit, vcov="HC3", at="overall", scale="identity")
 
 scen, w = did(
     "group", "preexist",

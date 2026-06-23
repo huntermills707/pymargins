@@ -1,6 +1,4 @@
 # Contrasts vs `evaluate` — choosing the right tool
-> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
-
 `pymargins` offers two ways to combine scenario predictions:
 
 | Tool | What it does | When to use |
@@ -52,7 +50,7 @@ Is the estimand a weighted sum of predictions?
 ### Preferred: ratio via `contrasts` on log scale
 
 ```python
-m = Margins.log_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="log")
 scen, w = pairwise("treated", [1, 0])
 
 res = m.contrasts(scenarios=scen, contrasts=w)
@@ -67,7 +65,7 @@ res = m.contrasts(scenarios=scen, contrasts=w)
 ### Fallback: ratio via `evaluate` on linear scale
 
 ```python
-m = Margins.linear_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="identity")
 
 res = m.evaluate(
     scenarios=scen,
@@ -88,11 +86,11 @@ inference on the **raw ratio scale** rather than the log-ratio scale.
 
 | Estimand | Scale | Why `contrasts` wins |
 |----------|-------|----------------------|
-| Risk difference | `linear_scale` | `w = [+1, −1]` is exact; no curvature from a ratio |
-| Risk ratio | `log_scale` | `log(p₁) − log(p₀)` is linear; delta is exact |
-| Odds ratio | `logit_scale` | `logit(p₁) − logit(p₀)` is linear |
-| Lift (RR − 1) | `log_scale` | Compute RR with `contrasts`, subtract 1 |
-| DiD | `linear_scale` | Four-cell `[+1, −1, −1, +1]` is linear |
+| Risk difference | `scale="identity"` | `w = [+1, −1]` is exact; no curvature from a ratio |
+| Risk ratio | `scale="log"` | `log(p₁) − log(p₀)` is linear; delta is exact |
+| Odds ratio | `scale="logit"` | `logit(p₁) − logit(p₀)` is linear |
+| Lift (RR − 1) | `scale="log"` | Compute RR with `contrasts`, subtract 1 |
+| DiD | `scale="identity"` | Four-cell `[+1, −1, −1, +1]` is linear |
 | Reference contrasts | any | Weight matrix is linear |
 
 ## When `evaluate` is required

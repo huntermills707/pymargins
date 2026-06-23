@@ -11,8 +11,6 @@ kernelspec:
 ---
 
 # Linear contrasts with `contrasts`
-> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
-
 
 ```{code-cell} python
 import numpy as np
@@ -39,11 +37,11 @@ df["y"] = rng.binomial(1, 1 / (1 + np.exp(-lp)))
 
 fit = smf.glm("y ~ age + female + treated + C(region) + C(group) + preexist", data=df,
               family=sm.families.Binomial()).fit()
-m = Margins.log_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="log")
 ```
 
 
-`Margins.contrasts` forms a **weighted sum of scenario predictions on the
+`GComputation.contrasts` forms a **weighted sum of scenario predictions on the
 inference scale**.  It is the workhorse for risk differences, risk
 ratios, odds ratios, lift, reference-level comparisons, and
 difference-in-differences — any estimand that is a linear combination
@@ -61,7 +59,7 @@ matrix).  The engine:
 1. Computes the inference-scale prediction for each scenario:
    `hᵢ = φ⁻¹( mean_predict(beta, scenario_i) )`.
 2. Forms the weighted sum: `Σᵢ wᵢ · hᵢ`.
-3. Runs delta-method inference (or simulation/bootstrap if κ is high).
+3. Runs delta-method inference (or simulation/bootstrap).
 4. Back-transforms CI endpoints with `phi` for reporting.
 
 Mathematically:
@@ -74,8 +72,7 @@ where `pᵢ` is the aggregated response-scale prediction for scenario `i`.
 
 Because the inference is on a **linear combination** of `φ⁻¹(pᵢ)`, the
 delta method is exact to the extent that the individual `hᵢ` are
-locally linear.  This is why simple contrasts usually have smaller κ
-than `evaluate` calls.
+locally linear.
 
 ## Risk difference (linear scale)
 
@@ -85,7 +82,7 @@ probabilities.
 ```{code-cell} python
 from pymargins import GComputation, pairwise  # 0.4.0: Margins -> GComputation
 
-m = Margins.linear_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="identity")
 
 scen, w = pairwise("treated", [1, 0])
 res = m.contrasts(scenarios=scen, contrasts=w)
@@ -101,7 +98,7 @@ A ratio is a difference on the log scale.  The back-transform turns the
 log-ratio into a ratio with an asymmetric CI.
 
 ```{code-cell} python
-m = Margins.log_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="log")
 
 scen, w = pairwise("treated", [1, 0])
 res = m.contrasts(scenarios=scen, contrasts=w)
@@ -109,8 +106,7 @@ print(res.summary())
 ```
 
 The point estimate is `exp(log(p₁) − log(p₀)) = p₁ / p₀`.  Because the
-inference is on the log scale, the delta method is exact and κ is
-small.
+inference is on the log scale, the delta method is exact.
 
 ## Odds ratio (logit scale)
 
@@ -118,7 +114,7 @@ For probabilities near 0 or 1, the logit scale keeps the CI inside
 (0, 1) for each arm before forming the odds ratio.
 
 ```{code-cell} python
-m = Margins.logit_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="logit")
 
 scen, w = pairwise("treated", [1, 0])
 res = m.contrasts(scenarios=scen, contrasts=w)
@@ -134,7 +130,7 @@ Lift is a risk ratio minus one.  The easiest path is `log_scale` for
 the ratio, then subtract one from the estimate and CI endpoints:
 
 ```{code-cell} python
-m = Margins.log_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="log")
 res = m.contrasts(scenarios=scen, contrasts=w)
 
 lift_est = float(res.estimate) - 1.0
@@ -174,7 +170,9 @@ print(res.summary())
 ```{code-cell} python
 # Test whether the risk ratio exceeds 1.5
 scen_test, w_test = pairwise("treated", [1, 0])
-print(m.log_scale(fit, at="overall").contrasts(scenarios=scen_test, contrasts=w_test).test(value=1.5).summary())
+print(GComputation(fit, at="overall", scale="log").contrasts(
+    scenarios=scen_test, contrasts=w_test
+).test(value=1.5).summary())
 ```
 
 The `null` value is interpreted on the **reporting scale** and lifted

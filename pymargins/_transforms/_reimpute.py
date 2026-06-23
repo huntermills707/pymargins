@@ -76,7 +76,10 @@ class _ReimputeStage:
         ).hexdigest()[:16]
 
     def prepare(self, data: pd.DataFrame) -> pd.DataFrame:
-        return data
+        # The template fit needs an imputed frame. Use the same imputer on the
+        # point-execution output so the adapter's training data matches the
+        # wiring output fingerprint.
+        return self._imputer(data)
 
     def prepare_resample(self, data: pd.DataFrame) -> pd.DataFrame:
         seed = getattr(self, "_pymargins_replicate_seed", None)

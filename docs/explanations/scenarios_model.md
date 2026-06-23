@@ -11,8 +11,6 @@ kernelspec:
 ---
 
 # The scenarios model — `at` vs `atexog`
-> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
-
 
 ```{code-cell} python
 import numpy as np
@@ -33,16 +31,16 @@ df["y"] = rng.binomial(1, 1 / (1 + np.exp(-lp)))
 
 fit = smf.glm("y ~ age + female + treated", data=df,
               family=sm.families.Binomial()).fit()
-m = Margins.log_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="log")
 ```
 
 
 Two knobs control *where in covariate space* a margin is evaluated.
 They live at different levels of the API.
 
-## `at` — session-level aggregation rule
+## `at` — estimator-level aggregation rule
 
-`at=` is set at session construction. It controls the default
+`at=` is set at estimator construction. It controls the default
 evaluation rule for variables *not* otherwise pinned:
 
 | Value          | Per-variable behavior                                     |
@@ -64,16 +62,16 @@ continuous models and gives APM / MEM.
 `atexog=` is a per-call dict (or a list of dicts wrapped as
 `scenarios=`) that pins specific variables to specific values. A
 list-valued entry produces a Cartesian product (a grid). Variables
-not mentioned in `atexog` follow the session's `at=` rule.
+not mentioned in `atexog` follow the estimator's `at=` rule.
 
 ```{code-cell} python
 # AAP at age=25, 45, 65, averaging the rest over the sample
-print(Margins.log_scale(fit, at="overall").predict(
+print(GComputation(fit, at="overall", scale="log").predict(
     atexog={"age": [25, 45, 65]}
 ).summary())
 
 # APR at age=25, 45, 65, others held at typical profile
-print(Margins.log_scale(fit, at="typical").predict(
+print(GComputation(fit, at="typical", scale="log").predict(
     atexog={"age": [25, 45, 65]}
 ).summary())
 ```
@@ -86,7 +84,7 @@ should show it) but the counterfactual pins are not (you genuinely
 do want to evaluate the same AME at several age points).
 
 This is the same logic behind keeping `phi`, `vcov`, `level`, and
-`method` session-level: the analytical *posture* belongs in the
+`method` estimator-level: the analytical *posture* belongs in the
 constructor; the analytical *question* belongs in the method call.
 
 See [](session_precommitment.md).

@@ -1,6 +1,6 @@
 # Delta vs simulation vs bootstrap
 
-Three inference paths, one session knob (`method=`). Picking is a
+Three inference paths, one estimator knob (`method=`). Picking is a
 function of curvature, sample structure, and refit cost.
 
 ## Delta
@@ -45,4 +45,4 @@ function of curvature, sample structure, and refit cost.
 ```
 
 `pymargins` automates the first row through the κ fallback. The
-others are user-decisions encoded at session construction.
+others are user-decisions encoded at estimator construction.

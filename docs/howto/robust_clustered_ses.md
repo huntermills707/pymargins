@@ -11,8 +11,6 @@ kernelspec:
 ---
 
 # Robust and clustered standard errors
-> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
-
 
 ```{code-cell} python
 import numpy as np
@@ -34,23 +32,23 @@ df["y"] = rng.binomial(1, 1 / (1 + np.exp(-lp)))
 
 fit = smf.glm("y ~ age + female + treated", data=df,
               family=sm.families.Binomial()).fit()
-m = Margins.log_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="log")
 ```
 
 
-Pass the variance estimator at session construction. The session
-treats `vcov=` as a session-level commitment — every subsequent call
+Pass the variance estimator at estimator construction. The estimator
+treats `vcov=` as a estimator-level commitment — every subsequent call
 inherits it.
 
 ```{code-cell} python
 from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 # Heteroskedastic-robust HC3
-m_hc3 = Margins.log_scale(fit, vcov="HC3")
+m_hc3 = GComputation(fit, vcov="HC3", scale="log")
 print(m_hc3.dydx("age").summary())
 
 # Cluster-robust
-m_cl = Margins.log_scale(fit, vcov={"type": "cluster", "groups": df["firm"]})
+m_cl = GComputation(fit, vcov={"type": "cluster", "groups": df["firm"]}, scale="log")
 print(m_cl.dydx("age").summary())
 ```
 
@@ -59,7 +57,7 @@ print(m_cl.dydx("age").summary())
 ```{code-cell} python
 import matplotlib.pyplot as plt
 
-res_ols = Margins.log_scale(fit, at="overall").dydx("age").to_frame()
+res_ols = GComputation(fit, at="overall", scale="log").dydx("age").to_frame()
 res_hc3 = m_hc3.dydx("age").to_frame()
 res_cl = m_cl.dydx("age").to_frame()
 

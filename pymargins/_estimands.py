@@ -389,6 +389,7 @@ def make_linear_combination_estimand(
         if scenario_predict_fns is not None
         else [adapter.predict] * n_scenarios
     )
+    _validate_scenario_weights(sw)
 
     return partial(
         linear_combination_kernel,
@@ -402,18 +403,37 @@ def make_linear_combination_estimand(
     )
 
 
+def _validate_scenario_weights(sw: list[jnp.ndarray | None] | None) -> None:
+    """Eager validation of per-scenario aggregation weights.
+
+    Weight value checks are performed before the kernel is traced, because
+    Python conditionals on traced values (even lifted constants) raise
+    ``TracerBoolConversionError`` under ``jax.jit``.
+    """
+    if sw is None:
+        return
+    for w in sw:
+        if w is None:
+            continue
+        w_arr = np.asarray(w)
+        if not np.all(np.isfinite(w_arr)):
+            raise ValueError("scenario_weights must be finite (no NaN or Inf)")
+        if np.any(w_arr < 0):
+            raise ValueError("scenario_weights must be non-negative")
+        if np.sum(w_arr) == 0:
+            raise ValueError("scenario_weights must not sum to zero")
+
+
 def per_scenario_kernel(beta, predict_fn, X, offset, w, scenario_aggregate):
-    """Module-level kernel for a single scenario's aggregated prediction."""
+    """Module-level kernel for a single scenario's aggregated prediction.
+
+    ``w`` is validated eagerly by the estimand constructor so that no Python
+    conditionals on traced values are needed inside the jitted kernel.
+    """
     mu = predict_fn(beta, X, offset=offset)
     if scenario_aggregate in ("overall", "weighted"):
         if w is None:
             return jnp.mean(mu, axis=0) if mu.ndim > 1 else jnp.mean(mu)
-        if not jnp.all(jnp.isfinite(w)):
-            raise ValueError("scenario_weights must be finite (no NaN or Inf)")
-        if jnp.any(w < 0):
-            raise ValueError("scenario_weights must be non-negative")
-        if jnp.sum(w) == 0:
-            raise ValueError("scenario_weights must not sum to zero")
         return (
             jnp.sum(w * mu, axis=0) / jnp.sum(w)
             if mu.ndim > 1
@@ -527,6 +547,7 @@ def make_evaluate_estimand(
         if scenario_predict_fns is not None
         else [adapter.predict] * n_scenarios
     )
+    _validate_scenario_weights(sw)
 
     return partial(
         evaluate_kernel,

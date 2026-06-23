@@ -11,8 +11,6 @@ kernelspec:
 ---
 
 # Transform pipelines — honest CIs for data-dependent preprocessing
-> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
-
 Most applied work runs some preprocessing *before* the model: imputing a
 missing covariate, trimming implausible values, dropping outliers by a
 data-driven rule. The estimate then carries the fingerprints of that
@@ -21,8 +19,8 @@ handed down from on high. If the imputation model, the trim bounds, or the
 outlier flags would have come out differently on a different sample, your
 confidence interval is too narrow.
 
-A `pymargins` **transform pipeline** closes that gap. You pass
-`transforms=[...]` to a bootstrap session; each stage is a `frame → frame`
+A `pymargins` **transform pipeline** closes that gap. You chain
+`steps.*` nodes in front of the estimator; each stage is a `frame → frame`
 transform that the bootstrap **re-derives on every replicate**, exactly the
 way [`matching`](../howto/matching.md) re-matches. The imputer re-fits, the
 trim bounds recompute, the outlier rule re-runs — so the resample
@@ -35,7 +33,7 @@ This demo runs three stages end-to-end on the Wage panel:
 2. Composition — chaining `reimpute` with a `trim` stage in one pipeline.
 3. `drop_outliers` — a data-driven outlier rule re-derived per replicate.
 
-It closes with the **structural guards**: the combinations the session
+It closes with the **structural guards**: the combinations the estimator
 rejects at construction, and why.
 
 ```{code-cell} python
@@ -48,7 +46,7 @@ from linearmodels.datasets import wage_panel
 from sklearn.experimental import enable_iterative_imputer  # noqa: F401
 from sklearn.impute import IterativeImputer
 
-from pymargins import GComputation, drop_outliers, reimpute, trim  # 0.4.0: Margins -> GComputation
+from pymargins import GComputation, steps  # 0.4.0: Margins -> GComputation
 
 cols = ["lwage", "exper", "educ", "married", "union"]
 df = wage_panel.load().reset_index(drop=True)[cols].copy()
@@ -69,16 +67,6 @@ miss = rng.uniform(size=len(df)) < 0.30 * p_miss
 df_nan = df.copy()
 df_nan.loc[miss, "educ"] = np.nan
 print(f"missing educ: {int(miss.sum())} rows ({miss.mean():.1%})")
-```
-
-The **point estimate** comes from a single, cheap mean-fill imputation —
-this matches how the package already treats bootstrap (the estimate is from
-the original fit, the CI from the resample distribution).
-
-```{code-cell} python
-df_init = df_nan.fillna(df_nan.mean(numeric_only=True))
-fit = smf.ols("lwage ~ exper + educ + married + union", data=df_init).fit()
-print(fit.params.round(4))
 ```
 
 For the bootstrap we need a **stochastic, runnable** imputer: a callable
@@ -103,32 +91,35 @@ sees only sampling variability — not the uncertainty about what the missing
 education values actually were.
 
 ```{code-cell} python
-m_naive = Margins.linear_scale(fit, method="bootstrap", n_boot=500, rng_seed=3)
+df_init = df_nan.fillna(df_nan.mean(numeric_only=True))
+fit = smf.ols("lwage ~ exper + educ + married + union", data=df_init).fit()
+m_naive = GComputation(fit, method="bootstrap", B=500, seed=3, scale="identity")
 print(m_naive.dydx("educ").summary())
 ```
 
 ### Bootstrap-then-impute
 
-Now the pipeline. `reimpute(imputer, incomplete=df_nan)` tells the bootstrap
-to resample the *incomplete* frame and re-impute it fresh on every
-replicate. The session per-replicate seed flows into the imputer's
-`random_state`, so the run is reproducible.
+Now the pipeline. `steps.reimpute(steps.input(df_nan), imputer)` tells
+the bootstrap to resample the *incomplete* frame and re-impute it fresh
+on every replicate. We use the spec-form `outcome=` so the model template
+is fit on the once-imputed point-execution output.
 
 ```{code-cell} python
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")  # silence the imputer's convergence chatter
-    m_mi = Margins.linear_scale(
-        fit,
-        transforms=[reimpute(imputer, incomplete=df_nan)],
+    m_mi = GComputation(
+        steps.reimpute(steps.input(df_nan), imputer),
+        outcome="lwage ~ exper + educ + married + union",
         method="bootstrap",
-        n_boot=500,
-        rng_seed=3,
+        B=500,
+        seed=3,
+        scale="identity",
     )
 print(m_mi.dydx("educ").summary())
 ```
 
-The point estimate is identical — both sessions report the slope from the
-same `fit`. But the **standard error is larger** and the interval is wider:
+Both estimators report a slope from a single imputation, but the **standard
+error is larger** and the interval is wider under bootstrap-then-impute:
 that extra width is the imputation-model uncertainty the naive bootstrap
 threw away. Because the missingness lands on `educ`, the `educ` slope is
 exactly the coefficient that should pay for it; a covariate with no
@@ -148,15 +139,17 @@ not a real observation). Both steps re-run on every replicate.
 ```{code-cell} python
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
-    m_compose = Margins.linear_scale(
-        fit,
-        transforms=[
-            reimpute(imputer, incomplete=df_nan),
-            trim(lower=2.0, columns=["educ"]),
-        ],
+    m_compose = GComputation(
+        steps.trim(
+            steps.reimpute(steps.input(df_nan), imputer),
+            lower=2.0,
+            columns=["educ"],
+        ),
+        outcome="lwage ~ exper + educ + married + union",
         method="bootstrap",
-        n_boot=400,
-        rng_seed=3,
+        B=400,
+        seed=3,
+        scale="identity",
     )
 print(m_compose.dydx("educ").summary())
 ```
@@ -185,12 +178,13 @@ print(f"flagged on the full sample: {int(far_below(df).sum())} rows")
 df_clean = df[~far_below(df)].reset_index(drop=True)
 fit_clean = smf.ols("lwage ~ exper + educ + married + union", data=df_clean).fit()
 
-m_out = Margins.linear_scale(
-    fit_clean,
-    transforms=[drop_outliers(far_below)],
+m_out = GComputation(
+    steps.drop_outliers(steps.input(df), far_below),
+    outcome=fit_clean,
     method="bootstrap",
-    n_boot=500,
-    rng_seed=0,
+    B=500,
+    seed=0,
+    scale="identity",
 )
 print(m_out.dydx("educ").summary())
 ```
@@ -205,7 +199,8 @@ interval.
 ## 4. Structural guards
 
 The pipeline rejects combinations that would silently produce wrong numbers,
-and it does so at session construction — not three minutes into a bootstrap.
+and it does so at estimator construction — not three minutes into a
+bootstrap.
 
 A stage that declares `requires_resampling=True` (like `reimpute`) is
 bootstrap-only; there is no resample distribution under the delta method to
@@ -213,37 +208,39 @@ re-derive it over:
 
 ```{code-cell} python
 try:
-    Margins.linear_scale(
-        fit,
-        transforms=[reimpute(imputer, incomplete=df_nan, warn_on_deterministic=False)],
+    GComputation(
+        steps.reimpute(steps.input(df_nan), imputer),
+        outcome="lwage ~ exper + educ + married + union",
         method="delta",
+        scale="identity",
     )
 except ValueError as exc:
     print(exc)
 ```
 
 A row-altering stage (`drop_outliers`, `trim`) cannot be combined with
-session `weights=`: the stage thins the rows but the weight vector is not
+estimator `weights=`: the stage thins the rows but the weight vector is not
 thinned with it, so the weighted aggregation would misalign.
 
 ```{code-cell} python
 try:
-    Margins.linear_scale(
-        fit,
-        transforms=[drop_outliers(far_below)],
+    GComputation(
+        steps.drop_outliers(steps.input(df), far_below),
+        outcome=fit,
         weights=np.ones(len(df)),
         method="bootstrap",
+        scale="identity",
     )
 except ValueError as exc:
     print(exc)
 ```
 
-The same spirit covers the rest of the contract: `survey_design` rejects
-row-altering and source-overriding stages (a fixed survey design cannot have
-its rows or source frame changed underneath it), `matching=` and
-`transforms=` are mutually exclusive, and `ci_method="bca"` is rejected
-because the BCa jackknife would operate on the raw frame without running the
-pipeline.
+The same spirit covers the rest of the contract: a fixed `design=` in
+`steps.input` rejects row-altering and source-overriding stages (a fixed
+survey design cannot have its rows or source frame changed underneath it),
+`steps.match` and transform stages are mutually exclusive, and BCa
+(`ci="bca"`) is rejected because the BCa jackknife would operate on the raw
+frame without running the pipeline.
 
 ## Where to next
 
@@ -251,5 +248,5 @@ pipeline.
   stochastic-imputer requirement, seeding, and limitations.
 - [](../howto/matching.md) — the re-derive-per-replicate pattern that the
   pipeline generalizes.
-- [](../explanations/session_precommitment.md) — why the session freezes
+- [](../explanations/plan_pre_registration.md) — why the Plan freezes
   inference parameters once the bootstrap bank is built.

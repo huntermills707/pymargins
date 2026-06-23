@@ -11,8 +11,6 @@ kernelspec:
 ---
 
 # Contrasts and difference-in-differences
-> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
-
 Pairwise contrasts, reference-level contrasts, and 2×2 DiD all reduce
 to a list of scenarios plus a contrast weight vector.
 
@@ -41,7 +39,7 @@ fit = smf.glm(
     data=df,
     family=sm.families.Binomial(),
 ).fit()
-m = Margins.linear_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="identity")
 ```
 
 ## Pairwise risk difference

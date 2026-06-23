@@ -11,11 +11,9 @@ kernelspec:
 ---
 
 # Panel data — fixed effects
-> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
-
 `linearmodels.PanelOLS` (entity, time, or two-way fixed effects),
 `RandomEffects`, `BetweenOLS`, `AbsorbingLS`, and `FamaMacBeth` are
-each handled by a dedicated adapter. The session API is unchanged.
+each handled by a dedicated adapter. The estimator API is unchanged.
 
 ```{code-cell} python
 import numpy as np
@@ -43,11 +41,11 @@ fit = PanelOLS(df["y"], df[["x"]], entity_effects=True).fit(
 ## AME of `x` with cluster-robust SEs
 
 The fit's clustered covariance is consumed automatically — the
-session does not need a separate `vcov=` argument when the model
+estimator does not need a separate `vcov=` argument when the model
 already carries one.
 
 ```{code-cell} python
-m = Margins.linear_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="identity")
 print(m.dydx("x").summary())
 ```
 

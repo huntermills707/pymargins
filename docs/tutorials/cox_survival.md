@@ -11,11 +11,9 @@ kernelspec:
 ---
 
 # Cox proportional hazards
-> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
-
 `lifelines.CoxPHFitter` is supported through a dedicated adapter that
-exposes hazard ratios on the log-scale (`Margins.log_scale`) and
-survival probabilities at user-specified times.
+exposes hazard ratios on the log-scale (`scale="log"`) and survival
+probabilities at user-specified times.
 
 ```{code-cell} python
 import numpy as np
@@ -48,7 +46,7 @@ we pass the training data explicitly to the adapter:
 from pymargins.adapters import LifelinesCoxPHAdapter
 
 _adapter = LifelinesCoxPHAdapter(cph, training_data=df)
-m = Margins.log_scale(cph, adapter=_adapter, at="overall")
+m = GComputation(cph, adapter=_adapter, at="overall", scale="log")
 print(m.contrasts(
     scenarios=[
         {"atexog": {"treated": 1}, "label": "treated"},
@@ -61,14 +59,14 @@ print(m.contrasts(
 ## Marginal HR per unit of `biomarker`
 
 ```{code-cell} python
-print(Margins.log_scale(cph, adapter=_adapter, at="overall").dydx("biomarker").summary())
+print(GComputation(cph, adapter=_adapter, at="overall", scale="log").dydx("biomarker").summary())
 ```
 
-Because the session is on the **log scale**, `dydx` returns the
+Because the estimator is on the **log scale**, `dydx` returns the
 change in `log(HR)` per unit of biomarker.  For a Cox model this is
 numerically close to the coefficient itself (the difference arises
 from the covariate centering lifelines applies internally).  If you
-want the change in the raw HR, use `Margins.linear_scale(...)` and
+want the change in the raw HR, use `GComputation(..., scale="identity")` and
 interpret the AME as the absolute change in the partial hazard ratio.
 
 ## Restricted mean survival time (RMST)
@@ -80,12 +78,12 @@ trapezoidal rule:
 ```{code-cell} python
 from pymargins.adapters import LifelinesCoxPHSurvivalAdapter
 
-m_surv = Margins(
+m_surv = GComputation(
     cph,
     adapter=LifelinesCoxPHSurvivalAdapter(cph, training_data=df, prediction_time=365),
     at="overall",
     method="bootstrap",
-    n_boot=100,
+    B=100,
 )
 
 # RMST at 3 years (1095 days) under treated and control

@@ -1,6 +1,4 @@
 # The session pre-commitment
-> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
-
 `Margins` is a session. Once constructed, it commits to:
 
 - the inference scale (`phi`, `phi_inv`)

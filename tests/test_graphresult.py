@@ -358,6 +358,73 @@ def test_pairwise_contrasts():
 
 
 # ---------------------------------------------------------------------------
+# Arithmetic composability
+# ---------------------------------------------------------------------------
+
+
+def test_graphresult_sub_delta():
+    data_a = _delta_result_data(
+        estimate=np.array([2.0]),
+        std_error=np.array([0.2]),
+        conf_int_lower=np.array([1.6]),
+        conf_int_upper=np.array([2.4]),
+        gradient=np.array([[1.0, 0.0]]),
+        cov_params=np.eye(2) * 0.01,
+        estimand_metadata={"labels": ["a"]},
+    )
+    data_b = _delta_result_data(
+        estimate=np.array([1.0]),
+        std_error=np.array([0.2]),
+        conf_int_lower=np.array([0.6]),
+        conf_int_upper=np.array([1.4]),
+        gradient=np.array([[0.0, 1.0]]),
+        cov_params=np.eye(2) * 0.01,
+        estimand_metadata={"labels": ["b"]},
+    )
+    a = _graph_from_data(data_a)
+    b = _graph_from_data(data_b)
+    diff = a - b
+    assert np.allclose(diff.estimate, 1.0)
+    assert diff.labels == ["a - b"]
+    assert diff.gradient is not None
+
+
+def test_graphresult_sub_draws():
+    rng = np.random.default_rng(12)
+    draws_a = rng.normal(loc=2.0, scale=0.5, size=500)
+    draws_b = draws_a + rng.normal(loc=1.0, scale=0.1, size=500)
+    data_a = _sim_result_data(
+        estimate=np.array([2.0]),
+        std_error=np.std(draws_a, ddof=1),
+        conf_int_lower=np.quantile(draws_a, 0.025),
+        conf_int_upper=np.quantile(draws_a, 0.975),
+        draws_inf=draws_a,
+        estimand_metadata={"labels": ["a"]},
+    )
+    data_b = _sim_result_data(
+        estimate=np.array([1.0]),
+        std_error=np.std(draws_b, ddof=1),
+        conf_int_lower=np.quantile(draws_b, 0.025),
+        conf_int_upper=np.quantile(draws_b, 0.975),
+        draws_inf=draws_b,
+        estimand_metadata={"labels": ["b"]},
+    )
+    a = _graph_from_data(data_a)
+    b = _graph_from_data(data_b)
+    diff = a - b
+    assert np.allclose(diff.estimate, -1.0, atol=0.1)
+    assert diff.draws_inf is not None
+    assert diff.labels == ["a - b"]
+
+
+def test_graphresult_sub_rejects_incompatible_plan():
+    a = _graph_from_data(_delta_result_data())
+    b = _graph_from_data(_delta_result_data(), plan=_plan(seed=99))
+    with pytest.raises(ValueError, match="different plans"):
+        a - b
+
+
+# ---------------------------------------------------------------------------
 # Influence
 # ---------------------------------------------------------------------------
 

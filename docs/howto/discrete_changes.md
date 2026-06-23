@@ -11,8 +11,6 @@ kernelspec:
 ---
 
 # Discrete changes for binary / categorical regressors
-> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
-
 
 ```{code-cell} python
 import numpy as np
@@ -36,7 +34,7 @@ df["y"] = rng.binomial(1, 1 / (1 + np.exp(-lp)))
 
 fit = smf.glm("y ~ age + female + treated + C(region)", data=df,
               family=sm.families.Binomial()).fit()
-m = Margins.log_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="log")
 ```
 
 
@@ -53,7 +51,7 @@ Use `contrasts` with the `pairwise` helper:
 ```{code-cell} python
 from pymargins import GComputation, pairwise  # 0.4.0: Margins -> GComputation
 
-m = Margins.linear_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="identity")
 
 scen, w = pairwise("treated", [1, 0])
 print(m.contrasts(scenarios=scen, contrasts=w).summary())

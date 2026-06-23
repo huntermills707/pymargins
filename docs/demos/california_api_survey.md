@@ -11,8 +11,6 @@ kernelspec:
 ---
 
 # California API — stratified survey design
-> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
-
 The California Academic Performance Index (API) measures school achievement.
 The California Department of Education publishes the full population (`apipop`,
 6 194 schools) and several survey samples drawn from it. Here we analyze
@@ -40,7 +38,7 @@ import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from pymargins import GComputation, SurveyDesign  # 0.4.0: Margins -> GComputation
+from pymargins import GComputation, SurveyDesign, steps  # 0.4.0: Margins -> GComputation
 
 # Load the stratified sample generated from R's survey package
 apistrat = pd.read_csv("data/apistrat.csv")
@@ -106,8 +104,12 @@ survey = SurveyDesign(
     fpc=apistrat["fpc"].values,
 )
 
-m = Margins(fit, survey_design=survey,
-            weights=apistrat["pw"].values, at="overall")
+m = GComputation(
+    steps.input(apistrat, design=survey),
+    outcome=fit,
+    weights=apistrat["pw"].values,
+    at="overall",
+)
 print(m.dydx("meals").summary())
 ```
 
@@ -121,14 +123,14 @@ A stratified bootstrap resamples schools *within* each stratum. With enough
 replicates it should give a standard error close to the linearization one:
 
 ```{code-cell} python
-m_boot = Margins(
-    fit,
-    survey_design=survey,
+m_boot = GComputation(
+    steps.input(apistrat, design=survey),
+    outcome=fit,
     weights=apistrat["pw"].values,
     at="overall",
     method="bootstrap",
-    n_boot=500,
-    rng_seed=42,
+    B=500,
+    seed=42,
 )
 print(m_boot.dydx("meals").summary())
 ```
@@ -188,7 +190,7 @@ truth_fit = smf.glm(
     "api00 ~ meals + ell + Q(\"avg.ed\") + mobility",
     data=apipop.dropna(subset=["api00", "meals", "ell", "avg.ed", "mobility"]),
 ).fit()
-m_truth = Margins(truth_fit, at="overall")
+m_truth = GComputation(truth_fit, at="overall")
 
 ame_survey = m.dydx("meals")
 truth_value = float(m_truth.dydx("meals").estimate)

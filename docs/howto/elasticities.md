@@ -11,8 +11,6 @@ kernelspec:
 ---
 
 # Elasticities and semi-elasticities
-> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
-
 
 ```{code-cell} python
 import numpy as np
@@ -32,12 +30,12 @@ df["y"] = rng.binomial(1, 1 / (1 + np.exp(-lp)))
 
 fit = smf.glm("y ~ x + female", data=df,
               family=sm.families.Binomial()).fit()
-m = Margins.linear_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="identity")
 ```
 
 
 `dydx` returns the level derivative. The three elasticity / semi-elasticity
-flavours are available directly as session methods:
+flavours are available directly as estimator methods:
 
 | Stata `margins`    | Quantity                            | pymargins method       |
 |--------------------|-------------------------------------|------------------------|
@@ -53,7 +51,7 @@ method so standard errors and confidence intervals are valid.
 ## Basic usage
 
 ```{code-cell} python
-# Full elasticity at the session's `at` setting
+# Full elasticity at the estimator's `at` setting
 print(m.eyex("x").summary())
 
 # Semi-elasticities
@@ -71,25 +69,22 @@ print(m.eyex("x", over="female").summary())
 ## Under the hood: manual composition with `.scaled()`
 
 If you need a custom scaling factor (e.g. a subgroup mean that is not the
-overall mean, or a theoretical value), the underlying recipe is a
-`compose_results` of the slope and prediction.  The convenience methods above
-are exactly this pattern wrapped for you.
+overall mean, or a theoretical value), the underlying recipe is a ratio of the
+slope and prediction.  The convenience methods above are exactly this pattern
+wrapped for you.
 
-For reference, `eyex` is equivalent to:
+For reference, `eyex` is equivalent to scaling the level derivative by the
+ratio of the predictor mean to the predicted response mean:
 
 ```python
-from pymargins._result._margins import compose_results
-import jax.numpy as jnp
+import numpy as np
 
 slope_x = m.dydx("x")
 pred    = m.predict()
 x_bar   = float(df["x"].mean())
+y_bar   = float(pred.estimate)
 
-elasticity = compose_results(
-    [slope_x, pred],
-    fn=lambda t: t[0] * x_bar / t[1],
-    label="eyex(x)",
-)
+elasticity = slope_x.scaled(by=x_bar / y_bar, units="eyex(x)")
 ```
 
 The `.scaled(by=...)` helper offers a lighter-weight alternative when the
@@ -108,22 +103,19 @@ covariance correctly under the delta method.
 
 ## Subgroup elasticities
 
-Because `.scaled()` propagates the joint covariance, you can compute
-elasticities for several subgroups and test differences between them:
+Pass `over=` to compute a separate elasticity for each level of a discrete
+covariate.  `eyex` uses the group-specific means of `x` and the group-specific
+average prediction, and the joint covariance is carried through the delta
+method, so you can test differences between groups with `result.contrast()`:
 
 ```{code-cell} python
-# Subgroup means for scaling
-x_bar_0 = df.loc[df["female"] == 0, "x"].mean()
-y_bar_0 = m.predict(atexog={"female": 0}).estimate.item()
-x_bar_1 = df.loc[df["female"] == 1, "x"].mean()
-y_bar_1 = m.predict(atexog={"female": 1}).estimate.item()
+import numpy as np
 
-# Elasticity of x for female=0 and female=1
-res_0 = m.dydx("x", atexog={"female": 0}).scaled(by=x_bar_0 / y_bar_0)
-res_1 = m.dydx("x", atexog={"female": 1}).scaled(by=x_bar_1 / y_bar_1)
+res = m.eyex("x", over="female")
+print(res.summary())
 
 # Difference in elasticities with a proper SE
-diff = res_1 - res_0
+diff = res.contrast(np.array([[1, -1]]), labels=["female=1 - female=0"])
 print(diff.summary())
 ```
 
@@ -132,13 +124,12 @@ print(diff.summary())
 ```{code-cell} python
 import matplotlib.pyplot as plt
 
-df_0 = res_0.to_frame()
-df_1 = res_1.to_frame()
+df_res = res.to_frame()
 
 labels = ["female=0", "female=1"]
-estimates = [df_0["estimate"].iloc[0], df_1["estimate"].iloc[0]]
-ci_lower = [df_0["ci_lower"].iloc[0], df_1["ci_lower"].iloc[0]]
-ci_upper = [df_0["ci_upper"].iloc[0], df_1["ci_upper"].iloc[0]]
+estimates = df_res["estimate"].tolist()
+ci_lower = df_res["ci_lower"].tolist()
+ci_upper = df_res["ci_upper"].tolist()
 
 fig, ax = plt.subplots(figsize=(4, 4))
 ax.bar(labels, estimates,
@@ -153,7 +144,7 @@ ax.set(ylabel="Elasticity of x")
 * **Division by near-zero predictions.** Elasticities blow up when the
   predicted response is close to zero. The convenience methods clip near-zero
   denominators at `1e-12` by default; for a more principled solution, consider
-  a log-scale session (`Margins.log_scale(...)`) which linearises the problem.
+  a log-scale estimator (`GComputation(..., scale="log")`) which linearises the problem.
 
 * **Discrete inputs.** Elasticities are only defined for continuous variables —
   `pymargins` raises on discrete inputs.

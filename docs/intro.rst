@@ -11,11 +11,11 @@ The design target is `Stata's
 <https://www.stata.com/manuals/rmargins.pdf>`_ ``margins`` command and
 the R package `marginaleffects
 <https://marginaleffects.com/>`_, with one substantive difference:
-:class:`~pymargins.Margins` is a **session** — once constructed it
-commits to an inference scale, variance estimator, confidence level,
-default evaluation point, and inference method. Every subsequent
-computation inherits those commitments. Switching any of them requires
-a new session.
+:class:`~pymargins.GComputation` is an **estimator** — once constructed
+its underlying Plan commits to an inference scale, variance estimator,
+confidence level, default evaluation point, and inference method. Every
+subsequent computation inherits those commitments. Switching any of them
+requires a new estimator.
 
 Why marginal effects?
 ---------------------
@@ -40,11 +40,11 @@ uncertainty from the delta method, simulation, or bootstrap:
 
 .. code-block:: python
 
-    m = Margins.log_scale(fit, vcov="HC3")
+    est = GComputation(fit, scale="log", vcov="HC3")
 
-    m.dydx("bmi")                            # AME on P(diabetes)
-    m.predict(atexog={"age": [25, 45, 65]})  # adjusted predictions
-    m.contrasts(scenarios=[...], contrasts=[+1, -1])  # risk difference
+    est.dydx("bmi")                            # AME on P(diabetes)
+    est.predict(atexog={"age": [25, 45, 65]})  # adjusted predictions
+    est.contrasts(scenarios=[...], contrasts=[+1, -1])  # risk difference
 
 Reach for marginal effects when the model is nonlinear, when effects
 are conditional (interactions / polynomials / splines), when the
@@ -52,24 +52,24 @@ audience needs outcome units rather than link-scale coefficients, when
 heterogeneity across subgroups *is* the research question, or when the
 answer is a counterfactual contrast ("what if everyone were
 treated?"). These correspond exactly to the estimand axis below:
-:meth:`~pymargins.Margins.predict`,
-:meth:`~pymargins.Margins.dydx`, and
-:meth:`~pymargins.Margins.contrasts` /
-:meth:`~pymargins.Margins.evaluate`.
+:meth:`~pymargins.GComputation.predict`,
+:meth:`~pymargins.GComputation.dydx`, and
+:meth:`~pymargins.GComputation.contrasts` /
+:meth:`~pymargins.GComputation.evaluate`.
 
-Why a session?
---------------
+Why pre-commitment?
+-------------------
 
-A session forces the analyst to declare their analytical posture
+An estimator forces the analyst to declare their analytical posture
 explicitly, in code, at one location. A reviewer sees the entire
 methodological commitment in the constructor call. Any change in
 posture — different scale, different vcov, different level — shows up
-as a new ``Margins(...)`` in the audit trail.
+as a new ``GComputation(...)`` in the audit trail.
 
 The alternative (per-call configuration) is more flexible but invites
 the analyst to try multiple scales, multiple vcov flavors, multiple
 levels until something looks significant. ``pymargins`` makes this
-*possible but visible*: do it, and you'll have multiple sessions in
+*possible but visible*: do it, and you'll have multiple estimators in
 your code, each documenting its own posture.
 
 Installation
@@ -91,7 +91,7 @@ Quickstart
 
     import statsmodels.api as sm
     import statsmodels.formula.api as smf
-    from pymargins import Margins
+    from pymargins import GComputation
 
     fit = smf.glm(
         "diabetes ~ C(black) + C(female) + C(agegrp) + bmi + age",
@@ -99,21 +99,17 @@ Quickstart
         family=sm.families.Binomial(),
     ).fit()
 
-    # Open a session — log scale, HC3 robust SEs, 95% CIs, delta method.
-    m = Margins.log_scale(fit, vcov="HC3", level=0.95)
-    print(m.summary())          # methods-section paragraph
-
-    # Pre-flight: is delta reliable here?
-    print(m.diagnose().summary())
+    # Build an estimator — log scale, HC3 robust SEs, 95% CIs, delta method.
+    est = GComputation(fit, scale="log", vcov="HC3", level=0.95)
 
     # Adjusted predictions at representative values.
-    m.predict(atexog={"age": [25, 45, 65]})
+    est.predict(atexog={"age": [25, 45, 65]})
 
     # Average marginal effects on the response scale.
-    m.dydx("age")
+    est.dydx("age")
 
     # A relative-risk contrast, two scenarios with a [+1, -1] weight.
-    rr = m.contrasts(
+    rr = est.contrasts(
         scenarios=[
             {"atexog": {"treatment": 1}, "label": "treated"},
             {"atexog": {"treatment": 0}, "label": "control"},
@@ -122,7 +118,7 @@ Quickstart
     )
     print(rr.summary())
 
-Each call returns a :class:`~pymargins.MarginsResult` with
+Each call returns a :class:`~pymargins.GraphResult` with
 ``.estimate``, ``.se``, ``.vcov``, ``.ci_lower``, ``.ci_upper``,
 ``.pvalue``, plus ``.summary()``, ``.to_frame()``, ``.to_latex()``,
 and ``.to_html()``.
@@ -132,10 +128,10 @@ The three orthogonal axes
 
 Every call is a point in a three-dimensional design space:
 
-1. **Estimand** — what is computed? :meth:`~pymargins.Margins.predict`,
-   :meth:`~pymargins.Margins.dydx`,
-   :meth:`~pymargins.Margins.contrasts`, or
-   :meth:`~pymargins.Margins.evaluate` (arbitrary differentiable
+1. **Estimand** — what is computed? :meth:`~pymargins.GComputation.predict`,
+   :meth:`~pymargins.GComputation.dydx`,
+   :meth:`~pymargins.GComputation.contrasts`, or
+   :meth:`~pymargins.GComputation.evaluate` (arbitrary differentiable
    composition).
 2. **Aggregation** — where in covariate space?
    ``at="overall"`` (per-row, then average → AME / AAP),
@@ -144,7 +140,7 @@ Every call is a point in a three-dimensional design space:
 3. **Inference** — how is uncertainty quantified?
    ``method="delta"``, ``method="simulation"``, or ``method="bootstrap"``.
 
-These are orthogonal. Any combination is meaningful. The session fixes
+These are orthogonal. Any combination is meaningful. The estimator fixes
 the scale, vcov, level, and default ``at`` / ``method``; per-call
 keywords pick the estimand and override aggregation via ``atexog``.
 
@@ -168,8 +164,8 @@ Out of the box, with adapter auto-detection:
 
 Models fit without native formula support (array-fit statsmodels,
 linearmodels, sklearn) can still use interactions, polynomials, and
-splines by passing ``formula=`` and ``data=`` to ``Margins``; see
-:doc:`howto/formula_interface`.
+splines by passing ``outcome=`` as a formula string to ``GComputation``
+after ``steps.input(data)``; see :doc:`howto/formula_interface`.
 
 Adapters for other model classes can be registered via
 :func:`~pymargins.register_adapter`; see
@@ -180,7 +176,7 @@ Where to next
 
 **Tutorials — learn by doing.**
 
-- :doc:`tutorials/getting_started` — first session, AAP and AME.
+- :doc:`tutorials/getting_started` — first estimator, AAP and AME.
 - :doc:`tutorials/glm_logit`, :doc:`tutorials/glm_poisson`,
   :doc:`tutorials/ols_linear`, :doc:`tutorials/mnlogit` — GLM family
   walkthroughs.
@@ -215,7 +211,7 @@ Where to next
 **Explanations — theory and design.**
 
 - :doc:`math` — delta method, statistic schema, scale chain rule.
-- :doc:`explanations/session_precommitment` — why a session.
+- :doc:`explanations/session_precommitment` — historical note on pre-commitment (superseded).
 - :doc:`explanations/inference_scale` — ``phi`` / ``phi_inv``.
 - :doc:`explanations/kappa_diagnostic` — Skovgaard's κ and the
   auto-fallback.

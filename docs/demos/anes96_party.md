@@ -11,8 +11,6 @@ kernelspec:
 ---
 
 # ANES96 — Multinomial logit on party identification
-> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
-
 The 1996 American National Election Study records party
 identification (`PID`) on a 7-point scale from strong Democrat (0)
 to strong Republican (6), along with demographics and a 7-point
@@ -74,7 +72,7 @@ is exactly why marginal-effects machinery exists.
 ```{code-cell} python
 import matplotlib.pyplot as plt
 
-m = Margins.linear_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="identity")
 lr_grid = list(range(1, 8))  # selfLR scale 1..7
 res = m.predict(atexog={"selfLR": lr_grid})
 

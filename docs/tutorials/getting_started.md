@@ -11,12 +11,10 @@ kernelspec:
 ---
 
 # Getting started
-> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
-
-This tutorial fits a small logit model, opens a `Margins` session, and
-walks through the three orthogonal axes: estimand, aggregation, and
-inference. By the end you should be able to map every common
-Stata-style `margins` invocation to its `pymargins` equivalent.
+This tutorial fits a small logit model, builds a `GComputation`
+estimator, and walks through the three orthogonal axes: estimand,
+aggregation, and inference. By the end you should be able to map every
+common Stata-style `margins` invocation to its `pymargins` equivalent.
 
 ```{code-cell} python
 import numpy as np
@@ -48,23 +46,23 @@ fit = smf.glm(
 print(fit.summary())
 ```
 
-## 2. Open a session
+## 2. Build an estimator
 
-A session commits to an inference scale, a vcov estimator, a
-confidence level, an aggregation default (`at=`), and an inference
-method. Once constructed, every call inherits these commitments.
+A `GComputation` estimator commits to an inference scale, a vcov
+estimator, a confidence level, an aggregation default (`at=`), and an
+inference method. Once constructed, every call inherits these
+commitments.
 
 ```{code-cell} python
-m = Margins.log_scale(fit, vcov="HC3", level=0.95, at="overall")
-print(m.summary())
+m = GComputation(fit, scale="log", vcov="HC3", level=0.95, at="overall")
 ```
 
-`Margins.log_scale(...)` is shorthand for
-`Margins(..., phi=jnp.exp, phi_inv=jnp.log)`.  We use it here because
-we will compute a risk-ratio contrast below; for predicted
-probabilities `linear_scale` (identity) or `logit_scale` are also
-valid choices.  See [](../explanations/inference_scale.md) for the
-full scale menu.
+`scale="log"` is shorthand for the back-transform
+`jnp.exp` / `jnp.log`.  We use it here because we will compute a
+risk-ratio contrast below; for predicted probabilities
+`scale="response"` (identity) or `scale="logit"` are also valid
+choices.  See [](../explanations/inference_scale.md) for the full
+scale menu.
 
 ## 3. Adjusted predictions
 
@@ -75,17 +73,17 @@ distribution of the *other* covariates (`at="overall"`, the AAP):
 print(m.predict(atexog={"treated": [0, 1]}).summary())
 ```
 
-Because the session is on the log scale, the CI is asymmetric on the
-probability scale (multiplicative around the point estimate).  For a
-probability that can approach 1, `logit_scale` keeps the CI inside
-(0, 1); `linear_scale` gives a symmetric CI on the probability scale
-itself.
+Because the estimator is on the log scale, the CI is asymmetric on
+the probability scale (multiplicative around the point estimate).  For
+a probability that can approach 1, `scale="logit"` keeps the CI inside
+(0, 1); `scale="response"` gives a symmetric CI on the probability
+scale itself.
 
 The same predictions at the typical covariate profile (the APM —
 `at="typical"` uses median for continuous and mode for discrete):
 
 ```{code-cell} python
-print(Margins.log_scale(fit, vcov="HC3", at="typical").predict(
+print(GComputation(fit, scale="log", vcov="HC3", at="typical").predict(
     atexog={"treated": [0, 1]}
 ).summary())
 ```
@@ -119,20 +117,9 @@ rr = m.contrasts(
 print(rr.summary())
 ```
 
-Because the session is on the log scale, the back-transform turns a
+Because the estimator is on the log scale, the back-transform turns a
 log-RR into an RR with an asymmetric CI. See
 [](../explanations/inference_scale.md).
-
-## 6. Pre-flight diagnostic
-
-```{code-cell} python
-print(m.diagnose().summary())
-```
-
-`diagnose()` computes the κ curvature diagnostic on a sample of the
-estimand surface. When κ is small the delta method is reliable; when
-κ is large `pymargins` will *auto-fall-back to simulation* on the
-next call. See [](../explanations/kappa_diagnostic.md).
 
 ## Plot: prediction curve over a continuous variable
 

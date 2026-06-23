@@ -561,10 +561,19 @@ def _scenario_weights_for(weights, scenarios_X):
     matrix. A single-row scenario (at="mean"/"typical") aggregates
     trivially, so it carries None; any other row-count mismatch cannot be
     weighted coherently and refuses.
+
+    Validation happens here, at query construction time, so the kernel itself
+    can remain JAX-traceable.
     """
     if weights is None:
         return None
-    w = jnp.asarray(np.asarray(weights, dtype=float))
+    w = np.asarray(weights, dtype=float)
+    if not np.all(np.isfinite(w)):
+        raise ValueError("weights must be finite (no NaN or Inf)")
+    if np.any(w < 0):
+        raise ValueError("weights must be non-negative")
+    if np.sum(w) == 0:
+        raise ValueError("weights must not sum to zero")
     out = []
     for i, X in enumerate(scenarios_X):
         n_rows = X.shape[0]

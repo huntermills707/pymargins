@@ -11,8 +11,6 @@ kernelspec:
 ---
 
 # Rossi recidivism — Cox proportional hazards end-to-end
-> **Migration note (0.4.0):** the `Margins` session class has been removed. Use `GComputation` instead. This tutorial will be fully rewritten in R8.
-
 The Rossi data tracks 432 male convicts released from Maryland state
 prisons in the 1970s for up to 52 weeks. The outcome is time to
 first re-arrest; the censoring indicator is `arrest`. The
@@ -55,7 +53,7 @@ print(cph.summary[["coef", "exp(coef)", "se(coef)", "p"]].round(3))
 The raw `fin` coefficient is the log hazard ratio for treatment
 under Cox's partial likelihood — but coefficient tables don't
 average over the sample's covariate distribution. That's what the
-`Margins` session is for.
+`GComputation` estimator is for.
 
 ## 2. Marginal treatment effect on the log-hazard scale
 
@@ -63,7 +61,7 @@ Cox is multiplicative, so the natural inference scale is **log**:
 
 ```{code-cell} python
 adapter = LifelinesCoxPHAdapter(cph, training_data=df)
-m = Margins.log_scale(cph, adapter=adapter, at="overall")
+m = GComputation(cph, adapter=adapter, at="overall", scale="log")
 
 scen, w = pairwise("fin", [1, 0])
 hr = m.contrasts(scenarios=scen, contrasts=w)
@@ -75,7 +73,7 @@ financial aid; the back-transformed interval is the hazard ratio
 with asymmetric CI. For a Cox model the AAP-style averaging coincides
 with the raw coefficient (the partial likelihood is invariant to
 non-treatment covariates by design), so the value reported here will
-match `cph.summary.loc["fin"]` — but the session machinery now
+match `cph.summary.loc["fin"]` — but the estimator machinery now
 extends to derived quantities the summary table cannot give you, as
 the next two sections show.
 
@@ -107,12 +105,12 @@ Under proportional hazards the *log* HR for `fin` is constant in
 `prio` by construction — so this table is also a sanity check on the
 PH assumption: if the per-level effects drift, the proportionality
 assumption is suspect. (For real-world non-PH effects you would fit
-a stratified or time-varying model first; the same session API works
+a stratified or time-varying model first; the same estimator API works
 against either.)
 
 ## 4. Hazard-ratio profile across age
 
-The session-API equivalent of a "forest plot across age" is a sweep
+The estimator-API equivalent of a "forest plot across age" is a sweep
 of the treatment contrast at fixed age values. Each row is the
 treatment effect (`fin=1` vs `fin=0`) for someone of that age, with
 every other covariate held at its observed sample distribution:
@@ -158,10 +156,8 @@ the bootstrap is still useful when you want a sanity check that
 doesn't depend on the partial-likelihood asymptotics:
 
 ```{code-cell} python
-m_boot = Margins.log_scale(
-    cph, adapter=adapter, at="overall",
-    method="bootstrap", n_boot=300, rng_seed=0,
-)
+m_boot = GComputation(cph, adapter=adapter, at="overall",
+    method="bootstrap", B=300, seed=0, scale="log")
 print(m_boot.contrasts(scenarios=scen, contrasts=w).summary())
 ```
 
@@ -179,15 +175,15 @@ Kaplan–Meier plot for the counterfactual `fin=1` vs `fin=0` worlds,
 adjusted for the rest of the covariates.
 
 Each scenario carries its own `prediction_time`; one bootstrap pass
-covers the entire grid because the refit cache is session-level.
+covers the entire grid because the refit cache is estimator-level.
 
 ```{code-cell} python
 from pymargins.adapters import LifelinesCoxPHSurvivalAdapter
 
 surv_adapter = LifelinesCoxPHSurvivalAdapter(cph, training_data=df)
-m_surv = Margins(
+m_surv = GComputation(
     cph, adapter=surv_adapter, at="overall",
-    method="bootstrap", n_boot=300, rng_seed=0,
+    method="bootstrap", B=300, seed=0,
 )
 
 weeks = np.arange(4, 53, 4)
@@ -214,7 +210,7 @@ ax.legend()
 ```
 
 The bands are bootstrap percentile intervals, computed jointly across
-treatment arms and times because every estimand in this session shares
+treatment arms and times because every estimand in this estimator shares
 the same resample bank.
 
 The *difference* curve `S₁(t) − S₀(t)` is a contrast over the same
@@ -239,7 +235,7 @@ ax.axhline(0.0, color="grey", lw=0.5)
 ax.set(xlabel="Week", ylabel="S(t | fin=1) − S(t | fin=0)")
 ```
 
-Because both curves came from the same `Margins` session, their
+Because both curves came from the same `GComputation` estimator, their
 `draws_inf` are aligned per replicate — the difference is a valid
 bootstrap estimand without extra reweighting.
 
@@ -250,4 +246,4 @@ bootstrap estimand without extra reweighting.
   natural inference scale is *time* rather than *hazard*.
 - [](../explanations/adapter_pattern.md) — how the lifelines adapter
   exposes hazard- and survival-scale estimands behind the same
-  session API.
+  estimator API.
