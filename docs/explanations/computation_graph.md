@@ -58,7 +58,7 @@ hash — the anti-hacking mechanism is visibility, not prevention.
 
 ## How pymargins is validated
 
-Correctness is anchored outside the package in three layers:
+Correctness is anchored outside the package in four layers:
 
 1. **Analytic suite** (`tests/oracle/test_analytic.py`) — closed-form
    identities such as "OLS `dydx("x")` estimate equals `β_x` and SE equals
@@ -69,6 +69,10 @@ Correctness is anchored outside the package in three layers:
 3. **Regression goldens** (`tests/golden/`) — byte-exact recordings of anchor
    cells from the validated engine, protecting deterministic resampling streams
    that no external oracle can check.
+4. **Calibration lane** (`tests/test_calibration_slow.py`, weekly slow lane) —
+   Monte Carlo coverage simulations confirm that delta and simulation CIs reach
+   their nominal level on correctly-specified DGPs, and that simulation and
+   bootstrap SEs agree with the analytic delta SE on smooth cases.
 
 Disagreement between independent oracles beyond recorded tolerance is a
 stop-and-fix event, not a tolerance tweak.
