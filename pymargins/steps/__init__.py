@@ -147,6 +147,7 @@ def reimpute(node: Node, imputer: Any) -> Node:
         inputs=(node,),
         alters_rows=False,
         _payload=stage,
+        _payload_fp=stage._pymargins_hash_key,
     )
 
 

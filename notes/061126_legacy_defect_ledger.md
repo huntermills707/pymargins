@@ -493,3 +493,23 @@ byte mismatch is diagnosable as environment drift vs a logic regression.
 Changed cells: all 8 GLM + `ols_simulation_dydx` + manifest.
 
 Status: fixed (R7) — regenerated, suite green (24 passed).
+
+## D21 — Regression goldens regenerated after R8 engine/docs fixes
+
+Where: `tests/golden/*.npz`, `tests/golden/manifest.json`.
+
+Claim: after R8 fixes (scenario-weights validation moved to query construction,
+`Node.collect()` caching for stochastic stages, `reimpute.prepare()` imputing
+the point-execution output), the layer-4 byte-exact goldens no longer reproduced.
+
+Oracle: the numbers remain oracle-correct via `tests/oracle` (layers 1–2);
+regression goldens are self-recorded layer-4 artifacts.
+
+Evidence: `pytest tests/golden -q` showed 8 GLM cells + `ols_simulation_dydx`
+red before regeneration; after `python tools/record_goldens.py --force` the
+suite is green (22 cells).
+
+Disposition: regenerate (sanctioned for self-recorded layer-4 goldens). The
+`manifest.json` environment block records the float environment.
+
+Status: fixed (R8) — regenerated, suite green (22 passed).

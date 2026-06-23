@@ -98,9 +98,11 @@ value rather than the 0.3.x value. Each entry cites the oracle evidence in
   influence-variance identity. Test:
   `tests/test_psi_h_includes_bread_scale_equivariance`.
 
-Other ledgered items (D1/D3/D6/D7/D11/D15/D18/D20) are fixes, label-only
-changes, environment-fidelity notes, or implementation deviations with no
-user-visible numeric change.
+Other ledgered items (D1/D3/D6/D7/D10/D11/D15/D18/D20/D21) are fixes,
+label-only changes, R-script resyncs, golden regenerations, environment-fidelity
+notes, or implementation deviations with no user-visible numeric change.
+D2/D5/D12/D13/D14 are precursor/superseded entries whose resolutions are cited
+above.
 
 ### Reproducibility
 

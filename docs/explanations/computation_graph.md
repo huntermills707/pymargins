@@ -70,9 +70,8 @@ Correctness is anchored outside the package in three layers:
    cells from the validated engine, protecting deterministic resampling streams
    that no external oracle can check.
 
-The weekly slow lane adds calibration simulations (simulation/bootstrap SEs
-vs delta SEs on smooth cases). Disagreement between independent oracles beyond
-recorded tolerance is a stop-and-fix event, not a tolerance tweak.
+Disagreement between independent oracles beyond recorded tolerance is a
+stop-and-fix event, not a tolerance tweak.
 
 ## Migration from 0.3.x
 

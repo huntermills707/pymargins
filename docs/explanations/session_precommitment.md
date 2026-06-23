@@ -1,4 +1,11 @@
 # The session pre-commitment
+
+> **Superseded (0.4.0).** This page describes the `Margins` session API that
+> was removed in 0.4.0. The current surface is `GComputation` with an immutable
+> `Plan`; see [](plan_pre_registration.md) for pre-registration semantics and
+> [](computation_graph.md) for the wiring-graph design. The text below is kept
+> as a historical reference only.
+
 `Margins` is a session. Once constructed, it commits to:
 
 - the inference scale (`phi`, `phi_inv`)

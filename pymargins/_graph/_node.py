@@ -15,11 +15,6 @@ from pymargins._tabular import fingerprint_frame
 
 FanKind = Literal["imputation"]
 
-# Process-level cache for node point-execution outputs. Safe because Node is
-# immutable and content-addressed: the same hash always denotes the same node,
-# so collect() is pure (graph law L3).
-_NODE_COLLECT_CACHE: dict[str, Any] = {}
-
 
 def _fingerprint(value: Any) -> str:
     """Stable content fingerprint for a single value."""
@@ -124,11 +119,12 @@ class Node:
 
         For data-source nodes this returns the prepared DataFrame.
         For stage nodes this applies the stage to the collected inputs.
-        Outputs are cached by node hash so repeated calls are consistent
-        (required for stochastic stages such as ``reimpute``).
+        Outputs are cached on the node instance so repeated calls are consistent
+        (required for stochastic stages such as ``reimpute``). The cache is
+        per-instance and disappears when the node is garbage collected.
         """
-        if self.hash in _NODE_COLLECT_CACHE:
-            return _NODE_COLLECT_CACHE[self.hash]
+        if hasattr(self, "_collect_cache"):
+            return self._collect_cache
 
         if self.kind == "input":
             result = self._payload
@@ -153,7 +149,7 @@ class Node:
                 f"Node.collect() not yet implemented for kind={self.kind!r}."
             )
 
-        _NODE_COLLECT_CACHE[self.hash] = result
+        object.__setattr__(self, "_collect_cache", result)
         return result
 
     def with_payload(self, payload: Any) -> Node:
