@@ -9,6 +9,7 @@ import statsmodels.formula.api as smf
 
 from pymargins import GComputation, reimpute, steps
 from pymargins._graph._node import Node
+from pymargins._tabular import fingerprint_frame
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -372,3 +373,82 @@ def test_reimpute_draws_differ_from_plain_bootstrap():
         "MI bootstrap draws are identical to plain bootstrap draws — "
         "imputation uncertainty is not being injected"
     )
+
+
+# ---------------------------------------------------------------------------
+# F4 hardening: per-instance collect() memo shares one stochastic imputation
+# between the template fit and the estimand grid
+# ---------------------------------------------------------------------------
+
+
+class _StochasticFillImputer:
+    """Fills NaNs with a fresh random draw on every call.
+
+    Has no ``random_state`` attribute and re-draws each call, so two calls on
+    the same frame return different data. This makes the equality assertions
+    below meaningful: they can only hold if a *single* imputation is reused.
+    """
+
+    def __init__(self):
+        self._rng = np.random.default_rng()
+
+    def __call__(self, frame):
+        out = frame.copy()
+        for col in out.columns:
+            mask = out[col].isna()
+            if mask.any():
+                out.loc[mask, col] = self._rng.normal(size=int(mask.sum()))
+        return out
+
+
+def test_reimpute_node_collect_memo_is_stable():
+    """The per-instance ``Node.collect()`` memo returns the identical object on
+    repeated calls for a stochastic stage — the mechanism F4 relies on. Without
+    it, a stochastic ``reimpute`` would re-impute on every ``collect()``."""
+    df = pd.DataFrame({"x": [1.0, np.nan, 3.0, np.nan, 5.0]})
+    node = steps.reimpute(steps.input(df), imputer=_StochasticFillImputer())
+    first = node.collect()
+    second = node.collect()
+    assert first is second  # memoized, not recomputed
+
+
+def test_reimpute_memo_shares_imputation_between_fit_and_grid():
+    """F4 hardening: the template adapter's training data and the estimand
+    ``base_data`` must be the *same* stochastic imputation.
+
+    Spec-form (``outcome="..."``) fits on ``wiring.collect()`` while ``compile``
+    reuses the same node instance's memo for ``base_data``. If same-instance
+    reuse is ever lost (e.g. reverting to a cache that recomputes a stochastic
+    stage per call), the fit and the grid diverge and the point estimate
+    becomes incoherent. This guards that invariant.
+    """
+    rng = np.random.default_rng(0)
+    n = 80
+    df = pd.DataFrame(
+        {"x": rng.normal(size=n), "y": (rng.uniform(size=n) < 0.5).astype(float)}
+    )
+    df.loc[::5, "x"] = np.nan
+
+    imputer = _StochasticFillImputer()
+    # Precondition: the imputer really is stochastic (two calls differ), so the
+    # fingerprint equality below is not vacuously true.
+    mask = df["x"].isna().to_numpy()
+    first = imputer(df)["x"].to_numpy()[mask]
+    second = imputer(df)["x"].to_numpy()[mask]
+    assert not np.allclose(first, second)
+
+    est = GComputation(
+        steps.reimpute(steps.input(df), imputer=imputer),
+        outcome="y ~ x",
+        method="bootstrap",
+        B=10,
+        seed=1,
+    )
+    fit_fp = fingerprint_frame(est._compiled.adapter.training_data)
+    grid_fp = fingerprint_frame(est._compiled.base_data)
+    assert fit_fp == grid_fp, (
+        "Template fit and estimand grid saw different imputations — the "
+        "per-instance collect() memo is not being shared (F4 regression)."
+    )
+    # The imputation actually ran: no missing cells reached the model/grid.
+    assert not np.isnan(np.asarray(est._compiled.base_data["x"], dtype=float)).any()
