@@ -28,7 +28,11 @@ def _fingerprint(value: Any) -> str:
         return "[" + ",".join(_fingerprint(v) for v in value) + "]"
     if isinstance(value, dict):
         items = sorted(value.items(), key=lambda x: str(x[0]))
-        return "{" + ",".join(f"{_fingerprint(k)}:{_fingerprint(v)}" for k, v in items) + "}"
+        return (
+            "{"
+            + ",".join(f"{_fingerprint(k)}:{_fingerprint(v)}" for k, v in items)
+            + "}"
+        )
     if isinstance(value, np.ndarray):
         hasher = hashlib.sha256()
         hasher.update(str(value.shape).encode("utf-8"))

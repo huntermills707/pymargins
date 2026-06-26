@@ -48,9 +48,7 @@ class BankSet:
         block_type: str,
         strata: Any | None,
     ) -> tuple:
-        cluster_bytes = (
-            np.asarray(cluster).tobytes() if cluster is not None else b""
-        )
+        cluster_bytes = np.asarray(cluster).tobytes() if cluster is not None else b""
         strata_bytes = np.asarray(strata).tobytes() if strata is not None else b""
         return (n_obs, B, cluster_bytes, block, block_type, strata_bytes)
 

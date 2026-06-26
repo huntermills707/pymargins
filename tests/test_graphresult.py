@@ -391,7 +391,7 @@ def test_psi_h_variance_identity():
 
     grad = gradient(h, beta)
     psi_beta = np.asarray(adapter.influence())  # (n, p)
-    psi_h = psi_beta @ np.asarray(grad).T       # (n, 1)
+    psi_h = psi_beta @ np.asarray(grad).T  # (n, 1)
 
     lhs = psi_h.T @ psi_h
     rhs = np.asarray(grad) @ np.asarray(cov) @ np.asarray(grad).T
@@ -461,9 +461,7 @@ def test_to_disk_rejects_custom_phi():
 def test_joint_test_empirical():
     """kind='empirical' must not raise UnboundLocalError on nonsingular draws."""
     rng = np.random.default_rng(50)
-    draws = rng.multivariate_normal(
-        mean=[0.5, 0.0], cov=np.eye(2), size=2000
-    )
+    draws = rng.multivariate_normal(mean=[0.5, 0.0], cov=np.eye(2), size=2000)
     data = _sim_result_data(
         estimate=np.array([0.5, 0.0]),
         std_error=np.std(draws, axis=0, ddof=1),

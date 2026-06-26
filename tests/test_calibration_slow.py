@@ -127,7 +127,9 @@ def test_coverage_logit_ame_delta():
         df = _logit_dataset(rng, n, b0=b0, b1=b1, b2=b2)
         truth = _logit_true_ame(df, b0=b0, b1=b1, b2=b2)
         fit = smf.glm("y ~ x1 + x2", data=df, family=sm.families.Binomial()).fit()
-        est = GComputation(fit, at="overall", scale="response", method="delta", level=LEVEL)
+        est = GComputation(
+            fit, at="overall", scale="response", method="delta", level=LEVEL
+        )
         lo, hi = _ci(est.dydx("x1"))
         hits += lo <= truth <= hi
     cov = hits / n_rep
@@ -149,7 +151,9 @@ def test_calibration_se_agreement_ols():
     fit = smf.ols("y ~ x1 + x2", data=df).fit()
     se_delta = _se(GComputation(fit, method="delta", vcov="HC1").dydx("x1"))
     se_sim = _se(
-        GComputation(fit, method="simulation", vcov="HC1", n_sim=8000, seed=11).dydx("x1")
+        GComputation(fit, method="simulation", vcov="HC1", n_sim=8000, seed=11).dydx(
+            "x1"
+        )
     )
     se_boot = _se(GComputation(fit, method="bootstrap", B=3000, seed=11).dydx("x1"))
     assert abs(se_sim - se_delta) / se_delta < 0.05, (se_sim, se_delta)

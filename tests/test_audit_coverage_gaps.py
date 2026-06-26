@@ -231,9 +231,7 @@ def test_joint_test_non_identity_scale(fit_logit):
 
 
 def test_evaluate_non_jax_differentiable_compose(fit_logit):
-    m = GComputation(
-        fit_logit, at="typical", method="simulation", n_sim=200, seed=42
-    )
+    m = GComputation(fit_logit, at="typical", method="simulation", n_sim=200, seed=42)
     result = m.evaluate(
         scenarios=[
             {"atexog": {"treatment": 1}},
@@ -252,9 +250,7 @@ def test_evaluate_non_jax_differentiable_compose(fit_logit):
 
 
 def test_predict_non_jax_differentiable_transform(fit_logit):
-    m = GComputation(
-        fit_logit, at="typical", method="simulation", n_sim=200, seed=42
-    )
+    m = GComputation(fit_logit, at="typical", method="simulation", n_sim=200, seed=42)
     result = m.predict(
         atexog={"treatment": [0, 1]},
         transform=lambda x: x + 0.01 if x < 0.5 else x,

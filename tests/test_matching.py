@@ -180,9 +180,7 @@ def test_matched_predictions_differ_from_unmatched(df_matching, pysmatch_matcher
 # ---------------------------------------------------------------------------
 
 
-def test_end_to_end_delta_contrast(
-    fitted_logit_matched, pysmatch_matcher, df_matching
-):
+def test_end_to_end_delta_contrast(fitted_logit_matched, pysmatch_matcher, df_matching):
     client = PysmatchClient(pysmatch_matcher, treatment_col="treated")
     est = GComputation(
         steps.match(steps.input(df_matching), client),

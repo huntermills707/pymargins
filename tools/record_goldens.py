@@ -69,9 +69,7 @@ def _fit_ols(df: pd.DataFrame):
 
 
 def _fit_glm(df: pd.DataFrame):
-    return smf.glm(
-        "y ~ treat + x1 + x2", data=df, family=sm.families.Binomial()
-    ).fit()
+    return smf.glm("y ~ treat + x1 + x2", data=df, family=sm.families.Binomial()).fit()
 
 
 def _save(cell_id: str, r, constructor: str) -> dict:

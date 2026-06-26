@@ -105,7 +105,7 @@ def check_ci_method_compatibility(
             Severity.REFUSE,
             "ci_method_incompatible",
             'ci="studentized" requires method="bootstrap". '
-            'Per-replicate SEs are computed during the bootstrap run.',
+            "Per-replicate SEs are computed during the bootstrap run.",
         )
     return report
 
@@ -137,7 +137,7 @@ def check_tail_count_adequacy(
             Severity.WARN,
             "tail_count_low",
             f"Bootstrap tail count ≈ {tail:.1f} (< {TAIL_COUNT_WARN}) at level={level}: "
-            f"percentile tails are poorly estimated. Increase B or use ci=\"se\".",
+            f'percentile tails are poorly estimated. Increase B or use ci="se".',
         )
     elif tail < TAIL_COUNT_NOTE:
         report = report.append(
@@ -204,7 +204,7 @@ def check_ess(
     w = np.asarray(weights, dtype=float)
     if w.size == 0:
         return report
-    ess = float(np.sum(w) ** 2 / np.sum(w ** 2))
+    ess = float(np.sum(w) ** 2 / np.sum(w**2))
     n = w.shape[0]
     if ess / n < ESS_NOTE_FRACTION:
         report = report.append(

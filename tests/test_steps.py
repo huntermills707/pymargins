@@ -18,6 +18,7 @@ def test_input_is_only_dependence_carrier():
 
 def test_input_carries_design():
     from pymargins.survey import SurveyDesign
+
     df = pd.DataFrame({"x": [1, 2, 3]})
     design = SurveyDesign(weights=df["x"].values)
     n = steps.input(df, design=design)
@@ -42,11 +43,14 @@ def test_drop_outliers_produces_contract_fields():
 
 def test_match_population_note():
     df = pd.DataFrame({"x": [1, 2, 3], "treat": [1, 0, 1]})
-    matcher = type("FakeMatcher", (), {"matched_data": df, "cluster_ids": [1, 1, 2], "rematch": lambda self, d: d})()
+    matcher = type(
+        "FakeMatcher",
+        (),
+        {"matched_data": df, "cluster_ids": [1, 1, 2], "rematch": lambda self, d: d},
+    )()
     n = steps.match(steps.input(df), matcher)
     assert n.alters_rows is True
     assert n.population_note == "matched sample"
-
 
 
 def test_reimpute_collect_returns_imputed_parent():
@@ -78,6 +82,7 @@ def test_propensity_raises():
 
 def test_transform_order_preserved():
     import statsmodels.formula.api as smf
+
     df = pd.DataFrame({"y": [0, 1, 0, 1, 0], "x": [1, 2, 3, 4, 5]})
     # Use no-op transforms so the wiring output still matches the fit data.
     prep = steps.trim(steps.input(df), lower=-100, upper=100)
@@ -94,11 +99,13 @@ def test_design_affects_plan_hash():
     import statsmodels.formula.api as smf
 
     from pymargins.survey import SurveyDesign
+
     df = pd.DataFrame({"y": [0, 1, 0], "x": [1, 2, 3]})
     fit = smf.ols("y ~ x", data=df).fit()
     d1 = SurveyDesign(weights=df["x"].values)
     d2 = SurveyDesign(weights=(df["x"] * 2).values)
     from pymargins._graph._compile import compile
+
     plan1, _, _ = compile(steps.input(df, design=d1), fit)
     plan2, _, _ = compile(steps.input(df, design=d2), fit)
     assert plan1.hash != plan2.hash

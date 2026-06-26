@@ -67,9 +67,7 @@ class Compiled:
     at: Any = "overall"
 
 
-_KNOWN_NODE_KINDS = frozenset(
-    {"input", "match", "trim", "drop_outliers", "reimpute"}
-)
+_KNOWN_NODE_KINDS = frozenset({"input", "match", "trim", "drop_outliers", "reimpute"})
 _ROW_FILTER_KINDS = frozenset({"trim", "drop_outliers"})
 
 
@@ -263,19 +261,14 @@ def _extract_wiring_facts(nodes: list[Node]) -> WiringFacts:
     )
 
 
-def _resolve_vcov_spec(
-    vcov: Any, design: Any | None, cluster: Any | None
-) -> Any:
+def _resolve_vcov_spec(vcov: Any, design: Any | None, cluster: Any | None) -> Any:
     """Replicate the legacy vcov_spec resolution rule (G1.3).
 
     Explicit ``vcov=`` wins.  A survey design plus an explicit non-survey
     ``vcov=`` is a conflict, because the design already determines \u03a3\u0302.
     """
     if design is not None and vcov is not None:
-        is_survey_spec = (
-            isinstance(vcov, dict)
-            and vcov.get("type") == "survey"
-        )
+        is_survey_spec = isinstance(vcov, dict) and vcov.get("type") == "survey"
         if not is_survey_spec:
             raise CompileError(
                 "Explicit vcov= conflicts with the survey design declared at "
@@ -307,9 +300,7 @@ def _representative_design(
     if hasattr(base_data, "iloc"):
         n = len(base_data)
         idx = rng.choice(n, size=min(n_samples, n), replace=False)
-        return [
-            adapter.design_matrix_from_df(base_data.iloc[[i]])[0] for i in idx
-        ]
+        return [adapter.design_matrix_from_df(base_data.iloc[[i]])[0] for i in idx]
     X = adapter.design_matrix_from_df(to_pandas_if_needed(base_data))
     n = X.shape[0]
     idx = rng.choice(n, size=min(n_samples, n), replace=False)
@@ -356,7 +347,10 @@ def _resolve_method_auto(
     if not is_jax_differentiable(h, beta):
         if "simulation" in supported:
             return "simulation", "auto: estimand not JAX-differentiable"
-        return None, "auto: estimand not JAX-differentiable and simulation not supported"
+        return (
+            None,
+            "auto: estimand not JAX-differentiable and simulation not supported",
+        )
 
     if adapter.supports_jax_autodiff:
         rep_design = _representative_design(adapter, base_data, seed)
@@ -518,7 +512,11 @@ def compile(
 
     # Step 1: validate user-facing scalar arguments.
     _validate_compile_inputs(
-        method=method, at=at, scale=scale, ci=ci, constants_overrides=constants_overrides
+        method=method,
+        at=at,
+        scale=scale,
+        ci=ci,
+        constants_overrides=constants_overrides,
     )
 
     # C1: walk the graph in topological order and run structural checks.
@@ -530,9 +528,7 @@ def compile(
     try:
         base_data = wiring.collect()
     except Exception as exc:
-        raise CompileError(
-            f"Could not collect the wiring output: {exc}"
-        ) from exc
+        raise CompileError(f"Could not collect the wiring output: {exc}") from exc
     wiring_fp = fingerprint_frame(base_data)
 
     # Resolve outcome to an adapter.
@@ -621,7 +617,10 @@ def compile(
     # Bootstrap-only transform stages (e.g. reimpute) require bootstrap inference.
     if wiring_facts.transforms:
         for stage in wiring_facts.transforms:
-            if getattr(stage, "requires_resampling", False) and method_resolved != "bootstrap":
+            if (
+                getattr(stage, "requires_resampling", False)
+                and method_resolved != "bootstrap"
+            ):
                 report = report.append(
                     Severity.REFUSE,
                     "method_unsupported",
@@ -653,9 +652,7 @@ def compile(
     # Build the Plan.
     node_kinds = tuple(n.kind for n in nodes)
     node_hashes = tuple(n.hash for n in nodes)
-    population_note = "; ".join(
-        n for n in [wiring_facts.population_note] if n
-    ) or None
+    population_note = "; ".join(n for n in [wiring_facts.population_note] if n) or None
 
     at_fingerprint, at_unhashable = _fingerprint_at(at)
     unhashable_callable = unhashable_callable or at_unhashable

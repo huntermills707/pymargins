@@ -465,6 +465,7 @@ def test_session_phi_without_phi_inv():
     from pymargins import GComputation
 
     with pytest.raises(
-        ValueError, match="scale= must be a named scale string or a \\(phi, phi_inv\\) callable pair"
+        ValueError,
+        match="scale= must be a named scale string or a \\(phi, phi_inv\\) callable pair",
     ):
         GComputation(fit, scale=lambda x: x)

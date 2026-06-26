@@ -100,5 +100,3 @@ def test_is_jax_differentiable_accepts_clean_estimand():
 
     beta = jnp.array([0.5, -0.3, 1.0])
     assert is_jax_differentiable(h, beta) is True
-
-

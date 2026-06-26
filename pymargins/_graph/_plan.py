@@ -101,16 +101,20 @@ class Plan:
         ]
         if self.method_resolution_reason:
             lines.append(f"  resolution reason: {self.method_resolution_reason}")
-        lines.extend([
-            f"  scale: {self.scale}",
-            f"  at: {self.at}",
-            f"  ci: {self.ci}",
-            f"  level: {self.level}",
-            f"  B: {self.B}",
-            f"  n_sim: {self.n_sim}",
-            f"  seed: {self.seed}",
-            f"  data fingerprint: {self.data_fingerprint[:16]}..." if self.data_fingerprint else "  data fingerprint: (none)",
-        ])
+        lines.extend(
+            [
+                f"  scale: {self.scale}",
+                f"  at: {self.at}",
+                f"  ci: {self.ci}",
+                f"  level: {self.level}",
+                f"  B: {self.B}",
+                f"  n_sim: {self.n_sim}",
+                f"  seed: {self.seed}",
+                f"  data fingerprint: {self.data_fingerprint[:16]}..."
+                if self.data_fingerprint
+                else "  data fingerprint: (none)",
+            ]
+        )
         if self.unhashable_callable:
             lines.append("  unhashable-callable: marked")
         return "\n".join(lines)

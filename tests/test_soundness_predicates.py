@@ -37,7 +37,9 @@ def test_method_adapter_compatibility_refuse():
 
 
 def test_method_adapter_compatibility_pass():
-    report = check_method_adapter_compatibility("delta", {"delta", "simulation"}, CompileReport())
+    report = check_method_adapter_compatibility(
+        "delta", {"delta", "simulation"}, CompileReport()
+    )
     assert not report.has(Severity.REFUSE)
 
 
@@ -89,13 +91,21 @@ def test_cluster_count_pass():
 
 
 def test_lonely_psu_refuse():
-    sd = type("SD", (), {"psu": np.array([1, 1, 2]), "strata": np.array([1, 1, 2]), "nest": True})()
+    sd = type(
+        "SD",
+        (),
+        {"psu": np.array([1, 1, 2]), "strata": np.array([1, 1, 2]), "nest": True},
+    )()
     report = check_lonely_psu(sd, CompileReport())
     assert report.has(Severity.REFUSE, "lonely_psu")
 
 
 def test_lonely_psu_pass():
-    sd = type("SD", (), {"psu": np.array([1, 2, 3]), "strata": np.array([1, 1, 1]), "nest": True})()
+    sd = type(
+        "SD",
+        (),
+        {"psu": np.array([1, 2, 3]), "strata": np.array([1, 1, 1]), "nest": True},
+    )()
     report = check_lonely_psu(sd, CompileReport())
     assert not report.has(Severity.REFUSE)
 
@@ -127,7 +137,14 @@ def test_soundness_rows_text_present():
     """Every row carries verbatim text; unimplemented rows with a design-table *(future)* steer include it."""
     import re
 
-    valid_severities = {"sound", "conditional", "unrepresentable", "refuse", "warn", "note"}
+    valid_severities = {
+        "sound",
+        "conditional",
+        "unrepresentable",
+        "refuse",
+        "warn",
+        "note",
+    }
     # Row IDs whose design §6 cell steers at unshipped machinery via *(future)*.
     future_steer_rows = {
         "6.2-bootstrap-nn-matching-with-replacement",
@@ -141,7 +158,9 @@ def test_soundness_rows_text_present():
     for row in SOUNDNESS_ROWS:
         assert isinstance(row, SoundnessRow)
         assert row.text
-        assert row.severity in valid_severities, f"{row.id}: invalid severity {row.severity!r}"
+        assert row.severity in valid_severities, (
+            f"{row.id}: invalid severity {row.severity!r}"
+        )
         if row.predicate is None and row.id in future_steer_rows:
             assert future_marker.search(row.text), (
                 f"{row.id}: design cell steers at unshipped machinery so text must include a *(future)* marker"

@@ -131,9 +131,7 @@ def test_bootstrap_offset_jit_safety():
     ).fit()
 
     # Fixed-X (data-independent) with offset
-    est = GComputation(
-        fit, method="bootstrap", B=50, n_jobs=1, seed=123, at="typical"
-    )
+    est = GComputation(fit, method="bootstrap", B=50, n_jobs=1, seed=123, at="typical")
     result = est.predict(atexog={"x": 0})
     assert result.estimate is not None
     lower, upper = result.conf_int()

@@ -270,9 +270,7 @@ def test_wtp_h_matches_composed_slopes(fit_logit):
 
 
 def test_h_factory_rebuilds_prediction_on_refit_adapter(fit_logit):
-    est = GComputation(
-        fit_logit, at="overall", method="bootstrap", B=2, seed=1
-    )
+    est = GComputation(fit_logit, at="overall", method="bootstrap", B=2, seed=1)
     ctx = ctx_from_gcomp(est)
     spec = QuerySpec(kind="predict", scenario={})
     cq = compile_query(spec, ctx)
@@ -651,7 +649,9 @@ def test_unknown_query_kind_raises():
 
     rng = np.random.default_rng(1)
     n = 20
-    df = pd.DataFrame({"y": rng.binomial(1, 0.5, size=n).astype(float), "x": rng.normal(size=n)})
+    df = pd.DataFrame(
+        {"y": rng.binomial(1, 0.5, size=n).astype(float), "x": rng.normal(size=n)}
+    )
     fit = smf.ols("y ~ x", data=df).fit()
     adapter = auto_detect_adapter(fit)
     ctx = QueryContext(

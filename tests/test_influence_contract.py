@@ -24,6 +24,7 @@ from pymargins._inference._linearization import linearization_meat
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def df():
     rng = np.random.default_rng(42)
@@ -53,6 +54,7 @@ def design(df):
 # Test 1: ψ reproduces survey linearization
 # ---------------------------------------------------------------------------
 
+
 def _survey_covariance_from_psi(adapter, design):
     """Compute sandwich using adapter.influence() as the input to linearization_meat."""
     psi = np.asarray(adapter.influence())
@@ -73,9 +75,7 @@ def _survey_covariance_from_psi(adapter, design):
 @pytest.mark.parametrize(
     "adapter_factory",
     [
-        lambda df: StatsmodelsOLSAdapter(
-            smf.ols("y ~ x1 + x2", data=df).fit()
-        ),
+        lambda df: StatsmodelsOLSAdapter(smf.ols("y ~ x1 + x2", data=df).fit()),
         lambda df: StatsmodelsGLMAdapter(
             smf.glm("y ~ x1 + x2", data=df, family=sm.families.Binomial()).fit()
         ),
@@ -93,6 +93,7 @@ def test_influence_matches_survey_linearization(adapter_factory, df, design):
 # Test 2: Adapter ψ @ gradient matches GraphResult.influence()
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize(
     "fit_factory",
     [
@@ -106,6 +107,7 @@ def test_influence_matches_survey_linearization(adapter_factory, df, design):
 def test_influence_matches_result_influence(fit_factory, df):
     fit = fit_factory(df)
     from pymargins._adapters import auto_detect_adapter
+
     adapter = auto_detect_adapter(fit)
     est = GComputation(fit, at="overall", method="delta")
     result = est.predict()
@@ -125,6 +127,7 @@ def test_influence_matches_result_influence(fit_factory, df):
 # ---------------------------------------------------------------------------
 # Test 3: Tier-2 adapters return None
 # ---------------------------------------------------------------------------
+
 
 def test_influence_none_on_tier2():
     # Any adapter without score_obs should inherit the default None.
@@ -177,6 +180,7 @@ def test_influence_none_on_tier2():
 # Test 4: Index alignment
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize(
     "fit_factory",
     [
@@ -188,6 +192,7 @@ def test_influence_none_on_tier2():
 def test_influence_index_alignment(fit_factory, df):
     fit = fit_factory(df)
     from pymargins._adapters import auto_detect_adapter
+
     adapter = auto_detect_adapter(fit)
     psi = adapter.influence()
     assert psi is not None

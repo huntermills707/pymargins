@@ -1034,9 +1034,7 @@ def _run_bootstrap(
             f"Supported: 'percentile', 'basic', 'bca', 'studentized'."
         )
 
-    cluster_ids = _validate_resample_options(
-        cluster_ids, block_size, block_type, n_obs
-    )
+    cluster_ids = _validate_resample_options(cluster_ids, block_size, block_type, n_obs)
 
     # Use pre-generated resample bank if provided (session-level composition support)
     if config.all_idx is not None:

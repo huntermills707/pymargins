@@ -172,15 +172,21 @@ def test_vcov_cluster_without_cluster_refuses():
     d = make_df()
     fit = smf.ols("y ~ x", data=d).fit()
     wiring = Node(kind="input", _payload=d)
-    with pytest.raises(CompileError, match='vcov="cluster" requires a cluster variable'):
+    with pytest.raises(
+        CompileError, match='vcov="cluster" requires a cluster variable'
+    ):
         compile(wiring, fit, vcov="cluster")
 
 
 def test_match_plus_filter_refused():
     d = make_df()
     fit = smf.ols("y ~ x", data=d).fit()
-    matcher = type("M", (), {"matched_data": d, "cluster_ids": None, "population_note": "matched"})()
-    wiring = steps.drop_outliers(steps.match(steps.input(d), matcher), rule=lambda df: df["x"] > 10)
+    matcher = type(
+        "M", (), {"matched_data": d, "cluster_ids": None, "population_note": "matched"}
+    )()
+    wiring = steps.drop_outliers(
+        steps.match(steps.input(d), matcher), rule=lambda df: df["x"] > 10
+    )
     with pytest.raises(CompileError, match=r"match \+ row-filter"):
         compile(wiring, fit)
 
@@ -204,7 +210,10 @@ def test_auto_resolves_delta_low_kappa():
     wiring = Node(kind="input", _payload=d)
     plan, report, compiled = compile(wiring, fit, method="auto")
     assert plan.method_resolved == "delta"
-    assert "\u03ba" in plan.method_resolution_reason or "kappa" in plan.method_resolution_reason
+    assert (
+        "\u03ba" in plan.method_resolution_reason
+        or "kappa" in plan.method_resolution_reason
+    )
 
 
 def test_auto_resolves_simulation_high_kappa():
@@ -221,7 +230,10 @@ def test_auto_resolves_simulation_high_kappa():
     wiring = Node(kind="input", _payload=d)
     plan, report, compiled = compile(wiring, fit, method="auto")
     assert plan.method_resolved == "simulation"
-    assert "\u03ba" in plan.method_resolution_reason or "kappa" in plan.method_resolution_reason
+    assert (
+        "\u03ba" in plan.method_resolution_reason
+        or "kappa" in plan.method_resolution_reason
+    )
 
 
 def test_auto_reason_recorded():

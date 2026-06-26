@@ -53,17 +53,17 @@ class GraphResult:
     """
 
     # Core reporting --------------------------------------------------------
-    estimate: np.ndarray            # reporting scale
+    estimate: np.ndarray  # reporting scale
     std_error: np.ndarray
     conf_int_lower: np.ndarray
     conf_int_upper: np.ndarray
     labels: list[str] | None
-    method: str                     # resolved inference method
-    level: float                    # declared confidence level (locked)
+    method: str  # resolved inference method
+    level: float  # declared confidence level (locked)
     ci: str
     scale: str
     at: str
-    plan: Any                       # immutable Plan/copy
+    plan: Any  # immutable Plan/copy
     population_note: str | None
     n_obs: int
     estimand_metadata: dict
@@ -76,15 +76,15 @@ class GraphResult:
     imputation_diagnostic: Any | None = None
 
     # Per-method payload ----------------------------------------------------
-    gradient: np.ndarray | None = None          # delta (inference scale)
-    cov_params: np.ndarray | None = None        # delta (frozen Σ̂)
-    draws: np.ndarray | None = None             # sim/boot (reporting scale)
-    draws_inf: np.ndarray | None = None         # sim/boot (inference scale)
-    psi_h: np.ndarray | None = None             # tier-1 influence ψ^h
+    gradient: np.ndarray | None = None  # delta (inference scale)
+    cov_params: np.ndarray | None = None  # delta (frozen Σ̂)
+    draws: np.ndarray | None = None  # sim/boot (reporting scale)
+    draws_inf: np.ndarray | None = None  # sim/boot (inference scale)
+    psi_h: np.ndarray | None = None  # tier-1 influence ψ^h
     ci_method: str | None = None
     bootstrap_extras: dict | None = None
-    phi: Callable | None = None                 # reporting-scale transform
-    phi_inv: Callable | None = None             # inverse transform
+    phi: Callable | None = None  # reporting-scale transform
+    phi_inv: Callable | None = None  # inverse transform
 
     # ------------------------------------------------------------------
     # Construction
@@ -116,7 +116,9 @@ class GraphResult:
             labels=labels if labels is not None else meta.get("labels"),
             method=result_data["method"],
             level=float(result_data.get("level", plan.level)),
-            ci=plan.ci if plan.ci is not None else cls._default_ci_method(result_data["method"]),
+            ci=plan.ci
+            if plan.ci is not None
+            else cls._default_ci_method(result_data["method"]),
             scale=plan.scale,
             at=getattr(plan, "at", "overall"),
             plan=plan,
@@ -208,7 +210,9 @@ class GraphResult:
         if "level" in dead:
             raise TypeError(LEVEL_LOCKED_MSG)
         if dead:
-            raise TypeError(f"conf_int() got unexpected keyword argument {next(iter(dead))!r}")
+            raise TypeError(
+                f"conf_int() got unexpected keyword argument {next(iter(dead))!r}"
+            )
 
         if correction is None:
             return self.conf_int_lower, self.conf_int_upper
@@ -247,9 +251,7 @@ class GraphResult:
                 ci_method=self.ci_method or "percentile",
                 bootstrap_extras=self.bootstrap_extras,
             )
-        raise ValueError(
-            "Cannot recompute CI: result has neither gradient nor draws."
-        )
+        raise ValueError("Cannot recompute CI: result has neither gradient nor draws.")
 
     def _supt_interval(self) -> tuple[np.ndarray, np.ndarray]:
         est_inf = self._inference_estimate()
@@ -260,9 +262,7 @@ class GraphResult:
             )
         draws_inf = self._inference_draws()
         if draws_inf is not None:
-            return supt_interval_draws(
-                draws_inf, est_inf, se, self.level, phi=self.phi
-            )
+            return supt_interval_draws(draws_inf, est_inf, se, self.level, phi=self.phi)
         raise ValueError(
             "Cannot compute sup-t interval: result has neither gradient nor draws."
         )
@@ -359,9 +359,7 @@ class GraphResult:
                 solved = np.linalg.solve(emp_cov_reg, diff)
 
             if kind == "empirical":
-                Q = np.sum(
-                    (centered @ np.linalg.inv(emp_cov_reg)) * centered, axis=1
-                )
+                Q = np.sum((centered @ np.linalg.inv(emp_cov_reg)) * centered, axis=1)
                 Q_obs = float(diff @ solved)
                 p = float(np.mean(Q >= Q_obs))
                 chi2 = Q_obs
@@ -468,9 +466,7 @@ class GraphResult:
 
         def _fmt(key: str, row: dict) -> str:
             if key == "ci":
-                return (
-                    f"{row['ci_lower']:{float_fmt}}, {row['ci_upper']:{float_fmt}}"
-                )
+                return f"{row['ci_lower']:{float_fmt}}, {row['ci_upper']:{float_fmt}}"
             if key == "pvalue":
                 s = f"{row['pvalue']:{pvalue_fmt}}"
                 if s.startswith("-0.000"):
@@ -542,7 +538,11 @@ class GraphResult:
         if self.kappa is not None:
             k = np.asarray(self.kappa)
             if not np.all(np.isnan(k)):
-                footer += f" | κ = {float(k):.3f}" if k.ndim == 0 else f" | κ = max {float(np.nanmax(k)):.3f}"
+                footer += (
+                    f" | κ = {float(k):.3f}"
+                    if k.ndim == 0
+                    else f" | κ = max {float(np.nanmax(k)):.3f}"
+                )
         footers.append(footer)
 
         if self.imputation_diagnostic is not None:
@@ -650,8 +650,7 @@ class GraphResult:
                 for key in all_keys:
                     data[key] = [s.get(key, np.nan) for s in scenarios]
             elif (
-                outcome_shape is not None
-                and len(scenarios) == outcome_shape["n_atoms"]
+                outcome_shape is not None and len(scenarios) == outcome_shape["n_atoms"]
             ):
                 n_outcomes = outcome_shape["n_outcomes"]
                 tiled = []
@@ -691,9 +690,7 @@ class GraphResult:
 
         def _fmt(key: str, row: dict) -> str:
             if key == "ci":
-                return (
-                    f"{row['ci_lower']:{float_fmt}}, {row['ci_upper']:{float_fmt}}"
-                )
+                return f"{row['ci_lower']:{float_fmt}}, {row['ci_upper']:{float_fmt}}"
             if key == "pvalue":
                 s = f"{row['pvalue']:{pvalue_fmt}}"
                 if s.startswith("-0.000"):
@@ -749,9 +746,7 @@ class GraphResult:
 
         def _fmt(key: str, row: dict) -> str:
             if key == "ci":
-                return (
-                    f"{row['ci_lower']:{float_fmt}}, {row['ci_upper']:{float_fmt}}"
-                )
+                return f"{row['ci_lower']:{float_fmt}}, {row['ci_upper']:{float_fmt}}"
             if key == "pvalue":
                 s = f"{row['pvalue']:{pvalue_fmt}}"
                 if s.startswith("-0.000"):
@@ -776,18 +771,20 @@ class GraphResult:
         html_lines.append("<tbody>")
         for r in rows:
             cells = [r["label"]] + [_fmt(k, r) for k, _ in data_keys]
-            html_lines.append("<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>")
+            html_lines.append(
+                "<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>"
+            )
         html_lines.append("</tbody>")
 
-        return '<table class="pymargins-result">\n' + "\n".join(html_lines) + "\n</table>"
+        return (
+            '<table class="pymargins-result">\n' + "\n".join(html_lines) + "\n</table>"
+        )
 
     # ------------------------------------------------------------------
     # Outcome / composability
     # ------------------------------------------------------------------
 
-    def outcome(
-        self, index: int | str | list[int] | tuple[int, ...]
-    ) -> GraphResult:
+    def outcome(self, index: int | str | list[int] | tuple[int, ...]) -> GraphResult:
         """Slice a multi-outcome result to one or more outcomes."""
         outcome_shape = self.estimand_metadata.get("_outcome_shape")
         labels = self.labels
@@ -843,7 +840,11 @@ class GraphResult:
                     return arr
 
                 new_labels = (
-                    [labels[i] for i in range(len(labels)) if i % n_outcomes == outcome_idx]
+                    [
+                        labels[i]
+                        for i in range(len(labels))
+                        if i % n_outcomes == outcome_idx
+                    ]
                     if labels
                     else None
                 )
@@ -868,7 +869,11 @@ class GraphResult:
                     return arr
 
                 new_labels = (
-                    [labels[i] for i in range(len(labels)) if i % n_outcomes in outcome_indices]
+                    [
+                        labels[i]
+                        for i in range(len(labels))
+                        if i % n_outcomes in outcome_indices
+                    ]
                     if labels
                     else None
                 )
@@ -981,14 +986,10 @@ class GraphResult:
             estimate=self.estimate * by,
             std_error=self.std_error * abs(by),
             conf_int_lower=(
-                self.conf_int_lower * by
-                if by >= 0
-                else self.conf_int_upper * by
+                self.conf_int_lower * by if by >= 0 else self.conf_int_upper * by
             ),
             conf_int_upper=(
-                self.conf_int_upper * by
-                if by >= 0
-                else self.conf_int_lower * by
+                self.conf_int_upper * by if by >= 0 else self.conf_int_lower * by
             ),
             gradient=(self.gradient * by if self.gradient is not None else None),
             draws=(self.draws * by if self.draws is not None else None),
@@ -996,9 +997,7 @@ class GraphResult:
             psi_h=(self.psi_h * by if self.psi_h is not None else None),
         )
         meta = dict(self.estimand_metadata)
-        meta["labels"] = [
-            f"({lbl})*{by}" for lbl in self.labels or []
-        ]
+        meta["labels"] = [f"({lbl})*{by}" for lbl in self.labels or []]
         if units:
             meta["units"] = units
         new.estimand_metadata = meta
@@ -1023,7 +1022,9 @@ class GraphResult:
         lo_inf = new_est_inf - z * se
         hi_inf = new_est_inf + z * se
 
-        new_est = np.asarray(self.phi(new_est_inf)) if self.phi else np.asarray(new_est_inf)
+        new_est = (
+            np.asarray(self.phi(new_est_inf)) if self.phi else np.asarray(new_est_inf)
+        )
         new_lo = np.asarray(self.phi(lo_inf)) if self.phi else np.asarray(lo_inf)
         new_hi = np.asarray(self.phi(hi_inf)) if self.phi else np.asarray(hi_inf)
 

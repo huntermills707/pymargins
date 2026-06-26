@@ -351,5 +351,7 @@ def pool_imputations(results, *, label="pooled", complete_df=None):
         scale=ref.scale if hasattr(ref, "scale") else "response",
         at=ref.at if hasattr(ref, "at") else "overall",
         plan=ref.plan if hasattr(ref, "plan") else None,
-        population_note=ref.population_note if hasattr(ref, "population_note") else None,
+        population_note=ref.population_note
+        if hasattr(ref, "population_note")
+        else None,
     )

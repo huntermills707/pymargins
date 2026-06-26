@@ -230,9 +230,8 @@ class GComputation:
             phi_inv=self._compiled.phi_inv,
         )
         psi_h = None
-        if (
-            self._plan.method_resolved == "delta"
-            and not _is_user_supplied_vcov(self._plan.vcov)
+        if self._plan.method_resolved == "delta" and not _is_user_supplied_vcov(
+            self._plan.vcov
         ):
             # A user-supplied covariance matrix is not guaranteed to be
             # consistent with the model's score observations; tier-1 influence

@@ -40,10 +40,18 @@ def _source_imports_legacy(path: Path) -> list[str]:
                 or module.endswith(".margins")
                 or module.startswith("pymargins.margins")
             ):
-                violations.append(f"{path}: imports from legacy margins package: {module}")
+                violations.append(
+                    f"{path}: imports from legacy margins package: {module}"
+                )
             # pymargins._result._margins module
-            if module == "_margins" or module.endswith("._margins") or module == "pymargins._result._margins":
-                violations.append(f"{path}: imports from legacy _margins module: {module}")
+            if (
+                module == "_margins"
+                or module.endswith("._margins")
+                or module == "pymargins._result._margins"
+            ):
+                violations.append(
+                    f"{path}: imports from legacy _margins module: {module}"
+                )
             # MarginsResult symbol
             if any(alias.name == "MarginsResult" for alias in node.names):
                 violations.append(f"{path}: imports MarginsResult from {module}")
@@ -65,7 +73,9 @@ def _source_imports_legacy(path: Path) -> list[str]:
     return violations
 
 
-@pytest.mark.parametrize("path", _i6_source_files(), ids=lambda p: str(p.relative_to(p.parent.parent.parent)))
+@pytest.mark.parametrize(
+    "path", _i6_source_files(), ids=lambda p: str(p.relative_to(p.parent.parent.parent))
+)
 def test_i6_no_legacy_imports(path: Path):
     violations = _source_imports_legacy(path)
     assert not violations, "\n".join(violations)

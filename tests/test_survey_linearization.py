@@ -200,7 +200,9 @@ def test_fpc_fraction():
     d_no_fpc = SurveyDesign(
         weights=np.ones(n), psu=df.psu.values, strata=df.strat.values
     )
-    se_no_fpc = GComputation(steps.input(df, design=d_no_fpc), outcome=fit).dydx("x").std_error
+    se_no_fpc = (
+        GComputation(steps.input(df, design=d_no_fpc), outcome=fit).dydx("x").std_error
+    )
 
     # Small FPC fraction (0.1) → modest variance reduction
     fpc = np.full(n, 0.1)
@@ -211,6 +213,8 @@ def test_fpc_fraction():
         fpc=fpc,
         fpc_is_fraction=True,
     )
-    se_fpc = GComputation(steps.input(df, design=d_fpc), outcome=fit).dydx("x").std_error
+    se_fpc = (
+        GComputation(steps.input(df, design=d_fpc), outcome=fit).dydx("x").std_error
+    )
 
     assert se_fpc < se_no_fpc

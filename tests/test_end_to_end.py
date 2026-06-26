@@ -242,9 +242,7 @@ def test_simulation_method(fit_logit):
 
 def test_bootstrap_method(fit_logit):
     """Bootstrap method should produce valid CIs via refit."""
-    est = GComputation(
-        fit_logit, at="typical", method="bootstrap", B=50, seed=42
-    )
+    est = GComputation(fit_logit, at="typical", method="bootstrap", B=50, seed=42)
 
     rd = est.contrasts(
         scenarios=[

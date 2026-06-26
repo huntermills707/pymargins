@@ -130,7 +130,9 @@ def resolve_scale(scale: str | tuple | None) -> tuple[Callable | None, Callable 
 # ---------------------------------------------------------------------------
 
 
-def _bootstrap_weights_for_adapter(ctx: QueryContext, adapter: ModelAdapter | None = None):
+def _bootstrap_weights_for_adapter(
+    ctx: QueryContext, adapter: ModelAdapter | None = None
+):
     """Return session weights, subsetted by bootstrap resample index if needed."""
     weights = ctx.weights
     adapter = adapter if adapter is not None else ctx.adapter
@@ -329,7 +331,11 @@ def _build_prediction_query(spec: QuerySpec, ctx: QueryContext) -> CompiledQuery
             if end > X.shape[0]:
                 raise ValueError(f"Grid block {i} would exceed design matrix rows.")
             X_i = X[start:end]
-            agg_kind = "overall" if ctx.at == "overall" else ("none" if X_i.shape[0] == 1 else "overall")
+            agg_kind = (
+                "overall"
+                if ctx.at == "overall"
+                else ("none" if X_i.shape[0] == 1 else "overall")
+            )
             h_atom = make_prediction_estimand(
                 estimand_adapter,
                 X_i,
@@ -437,7 +443,11 @@ def _build_slope_query(spec: QuerySpec, ctx: QueryContext) -> CompiledQuery:
         )
         resolver = make_aggregation_resolver(ctx.at, w_g)
         df, meta = expand_scenario(sub_scenario, group_df, resolver, var_meta)
-        agg_kind = "overall" if ctx.at == "overall" else ("none" if len(df) == 1 else "overall")
+        agg_kind = (
+            "overall"
+            if ctx.at == "overall"
+            else ("none" if len(df) == 1 else "overall")
+        )
 
         base_scen: dict = {}
         if over_keys is not None:
@@ -513,7 +523,9 @@ def _normalize_contrast_weights(weights_arg, scenarios):
         }
         labels = list(weights_arg.keys())
     elif (
-        isinstance(weights_arg, list) and weights_arg and isinstance(weights_arg[0], list)
+        isinstance(weights_arg, list)
+        and weights_arg
+        and isinstance(weights_arg[0], list)
     ):
         contrasts_arr = jnp.asarray(weights_arg)
         if contrasts_arr.ndim != 2:
@@ -521,8 +533,7 @@ def _normalize_contrast_weights(weights_arg, scenarios):
                 f"list-of-lists contrast must be 2D after conversion, got {contrasts_arr.ndim}D"
             )
         weights_arg = {
-            f"contrast[{i}]": contrasts_arr[i]
-            for i in range(contrasts_arr.shape[0])
+            f"contrast[{i}]": contrasts_arr[i] for i in range(contrasts_arr.shape[0])
         }
         labels = list(weights_arg.keys())
     else:
@@ -739,10 +750,14 @@ def _build_elasticity_query(spec: QuerySpec, ctx: QueryContext) -> CompiledQuery
 
     def fn(slope, pred):
         if kind == "eyex":
-            return slope * x_bar / jnp.where(
-                jnp.abs(pred) < clip_near_zero,
-                jnp.sign(pred) * clip_near_zero,
-                pred,
+            return (
+                slope
+                * x_bar
+                / jnp.where(
+                    jnp.abs(pred) < clip_near_zero,
+                    jnp.sign(pred) * clip_near_zero,
+                    pred,
+                )
             )
         if kind == "eydx":
             return slope / jnp.where(
@@ -873,9 +888,7 @@ def _build_rmst_query(spec: QuerySpec, ctx: QueryContext) -> CompiledQuery:
     n_grid = spec.n_grid
     times = np.linspace(0.0, float(horizon), int(n_grid))
     scenario = dict(spec.scenario or {})
-    scenarios = [
-        {**scenario, "prediction_time": float(t)} for t in times
-    ]
+    scenarios = [{**scenario, "prediction_time": float(t)} for t in times]
     times_jax = jnp.asarray(times)
 
     def compose(surv):

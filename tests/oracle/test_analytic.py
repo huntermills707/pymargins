@@ -33,7 +33,9 @@ def test_ols_ame_equals_beta(fit_ols):
     se = np.asarray(r.std_error).item()
     j = fit_ols.model.exog_names.index("x1")
     np.testing.assert_allclose(est, fit_ols.params.iloc[j], rtol=TOL_ANALYTIC)
-    np.testing.assert_allclose(se, np.sqrt(fit_ols.cov_params().iloc[j, j]), rtol=TOL_ANALYTIC)
+    np.testing.assert_allclose(
+        se, np.sqrt(fit_ols.cov_params().iloc[j, j]), rtol=TOL_ANALYTIC
+    )
 
 
 def test_ols_mean_prediction_equals_ybar(fit_ols):
@@ -46,7 +48,9 @@ def test_ols_mean_prediction_equals_ybar(fit_ols):
     X = fit_ols.model.exog
     np.testing.assert_allclose(est, np.mean(y), rtol=TOL_ANALYTIC)
     xbar = np.mean(X, axis=0)
-    np.testing.assert_allclose(se, np.sqrt(xbar @ fit_ols.cov_params().values @ xbar), rtol=TOL_ANALYTIC)
+    np.testing.assert_allclose(
+        se, np.sqrt(xbar @ fit_ols.cov_params().values @ xbar), rtol=TOL_ANALYTIC
+    )
 
 
 def test_logit_ame_closed_form(fit_logit):
@@ -161,16 +165,28 @@ def test_hand_ols_micro():
     m = GComputation(fit, at="overall", method="delta")
 
     pred = m.predict()
-    np.testing.assert_allclose(np.asarray(pred.estimate).item(), beta[0] + beta[1] * np.mean(X[:, 1]), rtol=TOL_ANALYTIC)
+    np.testing.assert_allclose(
+        np.asarray(pred.estimate).item(),
+        beta[0] + beta[1] * np.mean(X[:, 1]),
+        rtol=TOL_ANALYTIC,
+    )
     np.testing.assert_allclose(
         np.asarray(pred.std_error).item(),
-        np.sqrt(np.array([1.0, np.mean(X[:, 1])]) @ Sigma @ np.array([1.0, np.mean(X[:, 1])])),
+        np.sqrt(
+            np.array([1.0, np.mean(X[:, 1])])
+            @ Sigma
+            @ np.array([1.0, np.mean(X[:, 1])])
+        ),
         rtol=TOL_ANALYTIC,
     )
 
     slope = m.dydx("x")
-    np.testing.assert_allclose(np.asarray(slope.estimate).item(), beta[1], rtol=TOL_ANALYTIC)
-    np.testing.assert_allclose(np.asarray(slope.std_error).item(), np.sqrt(Sigma[1, 1]), rtol=TOL_ANALYTIC)
+    np.testing.assert_allclose(
+        np.asarray(slope.estimate).item(), beta[1], rtol=TOL_ANALYTIC
+    )
+    np.testing.assert_allclose(
+        np.asarray(slope.std_error).item(), np.sqrt(Sigma[1, 1]), rtol=TOL_ANALYTIC
+    )
 
 
 def test_ci_convention_is_z(fit_logit):
@@ -180,5 +196,9 @@ def test_ci_convention_is_z(fit_logit):
     est = np.asarray(r.estimate).item()
     se = np.asarray(r.std_error).item()
     z = st.norm.ppf(0.975)
-    np.testing.assert_allclose(np.asarray(r.conf_int_lower).item(), est - z * se, rtol=TOL_ANALYTIC)
-    np.testing.assert_allclose(np.asarray(r.conf_int_upper).item(), est + z * se, rtol=TOL_ANALYTIC)
+    np.testing.assert_allclose(
+        np.asarray(r.conf_int_lower).item(), est - z * se, rtol=TOL_ANALYTIC
+    )
+    np.testing.assert_allclose(
+        np.asarray(r.conf_int_upper).item(), est + z * se, rtol=TOL_ANALYTIC
+    )

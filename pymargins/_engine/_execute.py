@@ -105,7 +105,9 @@ def execute_query(
     return result
 
 
-def _resolve_resample_source(adapter: Any, wiring_facts: WiringFacts) -> tuple[Any, int]:
+def _resolve_resample_source(
+    adapter: Any, wiring_facts: WiringFacts
+) -> tuple[Any, int]:
     """Return (data, n_obs) for the bootstrap resampler.
 
     The resample source is normally ``adapter.training_data``, but a

@@ -54,9 +54,7 @@ def fit_ols(df):
 
 @pytest.fixture(scope="session")
 def fit_glm(df):
-    return smf.glm(
-        "y ~ treat + x1 + x2", data=df, family=sm.families.Binomial()
-    ).fit()
+    return smf.glm("y ~ treat + x1 + x2", data=df, family=sm.families.Binomial()).fit()
 
 
 @pytest.fixture(scope="session")
@@ -100,7 +98,9 @@ def _run_cell(cell_id: str, fit_ols, fit_glm, weights):
         est = GComputation(fit, at="overall", method=method, seed=SEED)
 
     if "weights" in cell_id:
-        est = GComputation(fit, at="overall", method="delta", weights=weights, seed=SEED)
+        est = GComputation(
+            fit, at="overall", method="delta", weights=weights, seed=SEED
+        )
 
     if cell_id.endswith("_predict"):
         return est.predict()
