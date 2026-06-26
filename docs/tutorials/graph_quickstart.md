@@ -90,8 +90,16 @@ the method is resolved once at compile and never flips later.
 ## 3. Matching → ATT, hand-fit preserved
 
 ```{code-cell} python
+import logging
+
 from pymargins import steps, PysmatchClient
 from pysmatch.Matcher import Matcher
+
+# pysmatch logs ~15 INFO/WARNING lines (to the root logger) on every match,
+# and the bootstrap below re-matches on each of the B replicates. Raise the
+# root log level so that per-replicate spam stays out of the rendered output
+# and the cached notebook.
+logging.getLogger().setLevel(logging.ERROR)
 
 test = df[df["treat"] == 1].copy()
 control = df[df["treat"] == 0].copy()

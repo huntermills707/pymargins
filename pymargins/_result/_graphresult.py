@@ -142,6 +142,34 @@ class GraphResult:
     def _default_ci_method(method: str) -> str:
         return "percentile" if method == "bootstrap" else "wald"
 
+    def __repr__(self) -> str:
+        """Concise repr: core estimates inline, large array payloads (draws,
+        Σ̂, influence) summarised by shape so sim/bootstrap draws never flood
+        the output."""
+
+        def _fmt(value: Any) -> str:
+            arr = np.asarray(value)
+            if arr.ndim == 0 or arr.size <= 6:
+                return np.array2string(arr, precision=6, separator=", ")
+            return f"array(shape={arr.shape}, dtype={arr.dtype})"
+
+        parts = [
+            f"estimate={_fmt(self.estimate)}",
+            f"std_error={_fmt(self.std_error)}",
+            f"conf_int=[{_fmt(self.conf_int_lower)}, {_fmt(self.conf_int_upper)}]",
+            f"labels={self.labels!r}",
+            f"method={self.method!r}",
+            f"scale={self.scale!r}",
+            f"level={self.level!r}",
+            f"ci={self.ci!r}",
+            f"n_obs={self.n_obs!r}",
+        ]
+        for name in ("kappa", "gradient", "cov_params", "draws", "draws_inf", "psi_h"):
+            value = getattr(self, name)
+            if value is not None:
+                parts.append(f"{name}={_fmt(value)}")
+        return f"GraphResult({', '.join(parts)})"
+
     # ------------------------------------------------------------------
     # Scale helpers
     # ------------------------------------------------------------------
