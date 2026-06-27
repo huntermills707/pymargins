@@ -36,10 +36,11 @@ SEED = 12345
 
 
 def _env_versions() -> dict:
-    """Float-environment fingerprint. Layer-4 goldens are byte-exact, so
-    transcendental (expit) and reduction-order bits drift across jaxlib/XLA
-    and numpy upgrades. Pinning these makes a future byte mismatch
-    diagnosable as environment drift rather than a logic regression."""
+    """Float-environment fingerprint. Layer-4 goldens are compared within
+    tolerance (not byte-for-byte), since transcendental (expit) and
+    reduction-order bits drift across jaxlib/XLA and numpy upgrades. Pinning
+    these records the environment a recording was made in, so a future
+    tolerance miss is diagnosable as environment drift vs a logic regression."""
     return {
         "jax": jax.__version__,
         "jaxlib": jaxlib.__version__,

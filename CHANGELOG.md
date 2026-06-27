@@ -129,8 +129,9 @@ above.
   (`bonferroni`, `sidak`, `sup-t`) but no `level=`.
 - **Oracle validation suite** — analytic closed-form tests plus R
   `marginaleffects` / `survey` / `sandwich` goldens under `tests/oracle/`.
-- **Regression golden suite** — byte-exact layer-4 checks in `tests/golden/`
-  recorded from the validated new engine.
+- **Regression golden suite** — layer-4 checks in `tests/golden/` recorded from
+  the validated new engine, compared within the documented oracle tolerances so
+  they hold across the Python/numpy/BLAS matrix.
 - **Session-free banks** — `BankSet` owns resample indices, refit states, and
   simulation draws per `(plan, branch, seed)`; replay makes results from one
   estimator jointly composable.

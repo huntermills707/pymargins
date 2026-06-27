@@ -1,7 +1,16 @@
-"""Layer-4 regression goldens: byte-identical reproduction of anchor cells.
+"""Layer-4 regression goldens: reproduction of anchor cells within tolerance.
 
 Design §7.4, R7.4. These arrays were recorded by tools/record_goldens.py
 from the new engine; regeneration requires a ledger entry.
+
+The recorded values are environment-specific in their low-order bits: the
+GLM/logit ``expit`` path and the simulation MVN-sampling path drift by ~1e-13
+across Python/numpy/scipy/BLAS builds (ledger D20/D22). We therefore compare
+within the project's documented oracle tolerances instead of byte-for-byte, so
+the gate holds across the 3.10/3.12/3.14 CI matrix while still catching any
+genuine logic regression (which would exceed these tolerances by orders of
+magnitude). The numbers themselves remain oracle-validated by the layer-1/2
+analytic + R-golden suites.
 """
 
 from __future__ import annotations
@@ -25,6 +34,14 @@ GOLDEN_DIR = Path(__file__).parent
 MANIFEST = GOLDEN_DIR / "manifest.json"
 
 SEED = 12345
+
+# Comparison tolerances — mirror tests/oracle/_tolerances.py (the layer-1/2
+# correctness authority). Changing any value = ledger entry. A small atol
+# guards entries near zero where rtol alone is meaningless.
+TOL_EST = 1e-6
+TOL_SE = 1e-5
+TOL_CI = 1e-5
+ATOL = 1e-9
 
 
 def _make_df() -> pd.DataFrame:
@@ -123,7 +140,7 @@ def _run_cell(cell_id: str, fit_ols, fit_glm, weights):
 
 
 @pytest.mark.parametrize("cell", _load_manifest()["cells"], ids=lambda c: c["cell_id"])
-def test_regression_golden_byte_exact(cell, fit_ols, fit_glm, weights):
+def test_regression_golden(cell, fit_ols, fit_glm, weights):
     recorded = _load_cell(cell["cell_id"])
 
     assert "estimate" in recorded
@@ -131,14 +148,30 @@ def test_regression_golden_byte_exact(cell, fit_ols, fit_glm, weights):
 
     result = _run_cell(cell["cell_id"], fit_ols, fit_glm, weights)
 
-    assert np.array_equal(np.asarray(result.estimate), recorded["estimate"])
-    assert np.array_equal(np.asarray(result.std_error), recorded["std_error"])
-    assert np.array_equal(np.asarray(result.conf_int_lower), recorded["conf_int_lower"])
-    assert np.array_equal(np.asarray(result.conf_int_upper), recorded["conf_int_upper"])
+    np.testing.assert_allclose(
+        np.asarray(result.estimate), recorded["estimate"], rtol=TOL_EST, atol=ATOL
+    )
+    np.testing.assert_allclose(
+        np.asarray(result.std_error), recorded["std_error"], rtol=TOL_SE, atol=ATOL
+    )
+    np.testing.assert_allclose(
+        np.asarray(result.conf_int_lower),
+        recorded["conf_int_lower"],
+        rtol=TOL_CI,
+        atol=ATOL,
+    )
+    np.testing.assert_allclose(
+        np.asarray(result.conf_int_upper),
+        recorded["conf_int_upper"],
+        rtol=TOL_CI,
+        atol=ATOL,
+    )
 
     if "draws" in recorded:
         assert result.draws is not None
-        assert np.array_equal(np.asarray(result.draws), recorded["draws"])
+        np.testing.assert_allclose(
+            np.asarray(result.draws), recorded["draws"], rtol=TOL_SE, atol=ATOL
+        )
 
 
 def test_manifest_matches_files_on_disk():

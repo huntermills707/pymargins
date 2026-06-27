@@ -66,9 +66,9 @@ Correctness is anchored outside the package in four layers:
 2. **R reference suite** (`tests/oracle/test_r_golden.py`) — goldens generated
    by `marginaleffects`, `survey`, and `sandwich` in R, committed as JSON, and
    compared in the default test lane.
-3. **Regression goldens** (`tests/golden/`) — byte-exact recordings of anchor
-   cells from the validated engine, protecting deterministic resampling streams
-   that no external oracle can check.
+3. **Regression goldens** (`tests/golden/`) — recordings of anchor cells from
+   the validated engine, compared within the documented oracle tolerances,
+   protecting deterministic resampling streams that no external oracle can check.
 4. **Calibration lane** (`tests/test_calibration_slow.py`, weekly slow lane) —
    Monte Carlo coverage simulations confirm that delta and simulation CIs reach
    their nominal level on correctly-specified DGPs, and that simulation and
