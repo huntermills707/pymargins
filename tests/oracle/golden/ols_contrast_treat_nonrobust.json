@@ -1,0 +1,34 @@
+{
+  "case_id": "ols_contrast_treat_nonrobust",
+  "created": "2026-06-11",
+  "r_version": "R version 4.6.0 (2026-04-24)",
+  "packages": {
+    "marginaleffects": "0.32.0",
+    "sandwich": "3.1.1",
+    "survey": "4.5"
+  },
+  "data": "oracle_main.csv",
+  "model": {
+    "formula": "y_cont ~ treat + x1 + x2",
+    "family": "gaussian(identity)",
+    "fit_control": "lm()"
+  },
+  "r_call": "avg_comparisons(fit, variables = 'treat')",
+  "vcov": "nonrobust",
+  "ci_convention": {
+    "dist": "z",
+    "level": 0.95
+  },
+  "labels": [
+    "treat"
+  ],
+  "quantities": {
+    "coefficients": [0.963687783269367, 2.00517323181344, 1.42623830140146, -0.993470135630923],
+    "estimate": 2.00517323181344,
+    "std_error": 0.0997743655152377,
+    "conf_low": 1.80961906882324,
+    "conf_high": 2.20072739480364
+  },
+  "tolerances": {},
+  "notes": ""
+}

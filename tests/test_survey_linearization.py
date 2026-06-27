@@ -12,7 +12,7 @@ import pytest
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from pymargins import Margins, SurveyDesign
+from pymargins import GComputation, SurveyDesign, steps
 
 
 def test_survey_se_differs_from_default():
@@ -31,10 +31,11 @@ def test_survey_se_differs_from_default():
     fit = smf.glm("y ~ x", df, family=sm.families.Binomial()).fit()
     d = SurveyDesign(weights=df.w.values, psu=df.psu.values, strata=df.strat.values)
 
-    m = Margins(fit, survey_design=d, weights=df.w.values)
+    inp = steps.input(df, design=d)
+    m = GComputation(inp, outcome=fit, weights=df.w.values)
     r_survey = m.dydx("x")
 
-    m_default = Margins(fit)
+    m_default = GComputation(fit)
     r_default = m_default.dydx("x")
 
     assert not np.isclose(r_survey.std_error, r_default.std_error, rtol=1e-4)
@@ -52,13 +53,14 @@ def test_survey_self_consistency_with_cluster_cov():
 
     fit = smf.glm("y ~ x", df, family=sm.families.Binomial()).fit()
     d_simple = SurveyDesign(weights=np.ones(n), psu=clusters)
-    m_simple = Margins(fit, survey_design=d_simple)
+    inp = steps.input(df, design=d_simple)
+    m_simple = GComputation(inp, outcome=fit)
 
     fit_cluster = smf.glm("y ~ x", df, family=sm.families.Binomial()).fit(
         cov_type="cluster", cov_kwds={"groups": clusters}
     )
 
-    survey_cov = np.asarray(m_simple._frozen_cov())
+    survey_cov = np.asarray(m_simple._compiled.frozen_cov)
     cluster_cov = np.asarray(fit_cluster.cov_params())
 
     # The survey sandwich and statsmodels' cluster cov both carry the
@@ -87,10 +89,11 @@ def test_survey_ols_adapter():
     fit = smf.ols("y ~ x", df).fit()
     d = SurveyDesign(weights=df.w.values, psu=df.psu.values, strata=df.strat.values)
 
-    m = Margins(fit, survey_design=d, weights=df.w.values)
+    inp = steps.input(df, design=d)
+    m = GComputation(inp, outcome=fit, weights=df.w.values)
     r = m.dydx("x")
 
-    m_default = Margins(fit)
+    m_default = GComputation(fit)
     r_default = m_default.dydx("x")
 
     assert not np.isclose(r.std_error, r_default.std_error, rtol=1e-4)
@@ -108,14 +111,15 @@ def test_lonely_psu_raises():
     fit = smf.glm("y ~ x", df, family=sm.families.Binomial()).fit()
     d = SurveyDesign(weights=np.ones(n), psu=df.psu.values, strata=df.strat.values)
 
-    with pytest.raises(ValueError, match="lonely PSU"):
-        Margins(fit, survey_design=d).dydx("x")
+    with pytest.raises(ValueError, match="only 1 PSU"):
+        GComputation(steps.input(df, design=d), outcome=fit)
 
 
 def test_weighted_fit_avoids_double_counting():
     """When the model is fit with freq_weights, survey SE must not
     double-count — the adapter should detect fitting weights and pass
-    unit weights to the linearization kernel."""
+    unit weights to the linearization kernel.
+    """
     rng = np.random.default_rng(0)
     n = 300
     df = pd.DataFrame(
@@ -133,16 +137,17 @@ def test_weighted_fit_avoids_double_counting():
         "y ~ x", df, family=sm.families.Binomial(), freq_weights=df.w.values
     ).fit()
     d = SurveyDesign(weights=df.w.values, psu=df.psu.values, strata=df.strat.values)
+    inp = steps.input(df, design=d)
 
     # Fit weights == design weights → proportional → must NOT warn.
     with warnings.catch_warnings(record=True) as rec:
         warnings.simplefilter("always")
-        m_w = Margins(fit_w, survey_design=d, weights=df.w.values)
+        m_w = GComputation(inp, outcome=fit_w, weights=df.w.values)
         se_weighted_fit = float(m_w.dydx("x").std_error)
     assert not any("not proportional" in str(x.message) for x in rec)
 
     fit_uw = smf.glm("y ~ x", df, family=sm.families.Binomial()).fit()
-    m_uw = Margins(fit_uw, survey_design=d, weights=df.w.values)
+    m_uw = GComputation(inp, outcome=fit_uw, weights=df.w.values)
     se_unweighted_fit = float(m_uw.dydx("x").std_error)
 
     assert se_weighted_fit > 0
@@ -156,7 +161,8 @@ def test_weighted_fit_avoids_double_counting():
 def test_weighted_fit_mismatched_weights_warns():
     """If the model's fit weights are not proportional to the survey design
     weights, the adapter must warn: the design-based variance uses the fit
-    weights while the point estimate uses the design weights."""
+    weights while the point estimate uses the design weights.
+    """
     rng = np.random.default_rng(1)
     n = 300
     df = pd.DataFrame(
@@ -172,8 +178,9 @@ def test_weighted_fit_mismatched_weights_warns():
 
     fit = smf.glm("y ~ x", df, family=sm.families.Binomial(), freq_weights=w_fit).fit()
     d = SurveyDesign(weights=w_design, psu=df.psu.values, strata=df.strat.values)
+    inp = steps.input(df, design=d)
     with pytest.warns(UserWarning, match="not proportional"):
-        Margins(fit, survey_design=d, weights=w_design).dydx("x")
+        GComputation(inp, outcome=fit, weights=w_design).dydx("x")
 
 
 def test_fpc_fraction():
@@ -193,7 +200,9 @@ def test_fpc_fraction():
     d_no_fpc = SurveyDesign(
         weights=np.ones(n), psu=df.psu.values, strata=df.strat.values
     )
-    se_no_fpc = Margins(fit, survey_design=d_no_fpc).dydx("x").std_error
+    se_no_fpc = (
+        GComputation(steps.input(df, design=d_no_fpc), outcome=fit).dydx("x").std_error
+    )
 
     # Small FPC fraction (0.1) → modest variance reduction
     fpc = np.full(n, 0.1)
@@ -204,6 +213,8 @@ def test_fpc_fraction():
         fpc=fpc,
         fpc_is_fraction=True,
     )
-    se_fpc = Margins(fit, survey_design=d_fpc).dydx("x").std_error
+    se_fpc = (
+        GComputation(steps.input(df, design=d_fpc), outcome=fit).dydx("x").std_error
+    )
 
     assert se_fpc < se_no_fpc

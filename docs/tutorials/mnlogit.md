@@ -11,17 +11,16 @@ kernelspec:
 ---
 
 # Multinomial logit
-
 Multi-outcome models return one estimate per outcome category. The
-session API is unchanged; results carry an outcome axis you can slice
-with `result.outcome("category")`.
+estimator API is unchanged; results carry an outcome axis you can slice
+with `result.outcome(index)` using the integer outcome index.
 
 ```{code-cell} python
 import numpy as np
 import pandas as pd
 import statsmodels.formula.api as smf
 
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(3)
 n = 4000
@@ -45,16 +44,16 @@ fit = smf.mnlogit("mode ~ age + income", data=df).fit()
 ## Predicted probability by mode at representative ages
 
 ```{code-cell} python
-m = Margins.linear_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="identity")
 preds = m.predict(atexog={"age": [25, 45, 65]})
 print(preds.summary())
 ```
 
 The response scale for multinomial predictions is the probability scale
-itself, so `linear_scale` is the natural default.  If you need CIs that
-are guaranteed to stay inside \[0, 1\] for a particular category, you
-could open a `logit_scale` session and then use `outcome="car"`, but
-`linear_scale` is the standard choice for tables and plots.
+itself, so `scale="identity"` is the natural default.  If you need CIs
+that are guaranteed to stay inside \[0, 1\] for a particular category,
+you could use `scale="logit"` and then `outcome=1` (the integer index
+for "car"), but `scale="identity"` is the standard choice for tables and plots.
 
 ## Plot: predicted probability curves by mode
 
@@ -112,23 +111,20 @@ has a negative coefficient):
 # Add a price variable to the data for illustration
 df["price"] = rng.normal(10, 2, n)
 fit_wtp = smf.mnlogit("mode ~ age + income + price", data=df).fit(disp=0)
-m_wtp = Margins.linear_scale(fit_wtp, at="overall")
+m_wtp = GComputation(fit_wtp, at="overall", scale="identity")
 
 # WTP for one additional unit of income, in price units
 wtp = m_wtp.wtp("income", "price")
 print(wtp.summary())
 ```
 
-For multi-outcome models, slice to a single alternative first:
+For multi-outcome models, `wtp()` returns one ratio per outcome
+alternative. Inspect the row that corresponds to the alternative of interest:
 
 ```{code-cell} python
-wtp_car = m_wtp.dydx("income").outcome(1)
-price_car = m_wtp.dydx("price").outcome(1)
-from pymargins._result._margins import compose_results
-wtp_car_ratio = compose_results(
-    [wtp_car, price_car],
-    fn=lambda t: -t[0] / t[1],
-    label="WTP_car(income)",
-)
-print(wtp_car_ratio.summary())
+print(m_wtp.wtp("income", "price").summary())
+
+# WTP for the "car" alternative (outcome index 1)
+wtp_car = m_wtp.wtp("income", "price").to_frame().iloc[1]
+print(wtp_car)
 ```

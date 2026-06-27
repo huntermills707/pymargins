@@ -67,7 +67,8 @@ def design_matrix_from_df(
             "model's exog_names contain derived terms (interactions, polynomials, "
             "splines, etc.). dydx() on variables involved in these terms will be "
             "silently incorrect because the fallback does not re-evaluate derived "
-            "terms. Pass formula= and data= to Margins() to fix this.",
+            "terms. Use steps.input(data) and pass the formula to outcome= in "
+            "GComputation() to fix this.",
             UserWarning,
             stacklevel=3,
         )

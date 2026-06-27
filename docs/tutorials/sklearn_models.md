@@ -12,14 +12,13 @@ kernelspec:
 
 # scikit-learn models
 
-
 ```{code-cell} python
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import GradientBoostingRegressor
 
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 from pymargins.adapters import SklearnBootstrapAdapter
 
 rng = np.random.default_rng(42)
@@ -57,7 +56,7 @@ strategy.
 ## Basic workflow
 
 Fit the sklearn estimator as usual, wrap it in
-`SklearnBootstrapAdapter`, and open a `Margins` session with
+`SklearnBootstrapAdapter`, and build a `GComputation` estimator with
 `method="bootstrap"`:
 
 ```{code-cell} python
@@ -67,7 +66,7 @@ model = LinearRegression()
 model.fit(X, y)
 
 adapter = SklearnBootstrapAdapter(model, X_train=X, y_train=y)
-m = Margins(model, adapter=adapter, method="bootstrap", n_boot=200, rng_seed=42)
+m = GComputation(model, adapter=adapter, method="bootstrap", B=200, seed=42)
 print(m.predict(atexog={"treated": [0, 1]}).summary())
 ```
 
@@ -97,9 +96,9 @@ adapter_poly = SklearnBootstrapAdapter(
     data=df,
     target_name="y",
 )
-m_poly = Margins(
+m_poly = GComputation(
     model_poly, adapter=adapter_poly,
-    method="bootstrap", n_boot=200, rng_seed=42,
+    method="bootstrap", B=200, seed=42,
 )
 slope = m_poly.dydx("age")
 print(slope.summary())
@@ -119,7 +118,7 @@ gbr = GradientBoostingRegressor(n_estimators=100, max_depth=3, random_state=42)
 gbr.fit(X, y)
 
 adapter_gbr = SklearnBootstrapAdapter(gbr, X_train=X, y_train=y)
-m_gbr = Margins(gbr, adapter=adapter_gbr, method="bootstrap", n_boot=100, rng_seed=42)
+m_gbr = GComputation(gbr, adapter=adapter_gbr, method="bootstrap", B=100, seed=42)
 print(m_gbr.predict(atexog={"treated": [0, 1]}).summary())
 ```
 

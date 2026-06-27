@@ -10,7 +10,7 @@ import statsmodels.formula.api as smf
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins._adapter import auto_detect_adapter
 from pymargins._adapters.statsmodels_mnlogit import StatsmodelsMNLogitAdapter
 
@@ -180,13 +180,13 @@ def test_column_index_raises_for_categorical(mnlogit_fit_formula):
 
 
 # ---------------------------------------------------------------------------
-# End-to-end via Margins session
+# End-to-end via GComputation
 # ---------------------------------------------------------------------------
 
 
 def test_margins_predict_aap(mnlogit_fit_formula):
     adapter = StatsmodelsMNLogitAdapter(mnlogit_fit_formula)
-    m = Margins.linear_scale(mnlogit_fit_formula, adapter=adapter)
+    m = GComputation(mnlogit_fit_formula, adapter=adapter)
     res = m.predict()
     assert res.estimate.shape == (adapter.n_outcomes,)
     np.testing.assert_allclose(res.estimate.sum(), 1.0, atol=1e-10)
@@ -194,7 +194,7 @@ def test_margins_predict_aap(mnlogit_fit_formula):
 
 def test_margins_dydx(mnlogit_fit_formula):
     adapter = StatsmodelsMNLogitAdapter(mnlogit_fit_formula)
-    m = Margins.linear_scale(mnlogit_fit_formula, adapter=adapter)
+    m = GComputation(mnlogit_fit_formula, adapter=adapter)
     res = m.dydx("x1")
     assert res.estimate.shape == (adapter.n_outcomes,)
     assert np.isfinite(res.estimate).all()
@@ -234,7 +234,7 @@ def test_refit_array(mnlogit_fit_array, df_mnlogit):
 
 def test_predict_outcome_subset(mnlogit_fit_formula):
     adapter = StatsmodelsMNLogitAdapter(mnlogit_fit_formula)
-    m = Margins.linear_scale(mnlogit_fit_formula, adapter=adapter)
+    m = GComputation(mnlogit_fit_formula, adapter=adapter)
     full = m.predict()
     sub = m.predict(outcome=1)
     np.testing.assert_allclose(sub.estimate, full.estimate[1:2], atol=1e-12)
@@ -242,7 +242,7 @@ def test_predict_outcome_subset(mnlogit_fit_formula):
 
 def test_predict_outcome_multi_subset(mnlogit_fit_formula):
     adapter = StatsmodelsMNLogitAdapter(mnlogit_fit_formula)
-    m = Margins.linear_scale(mnlogit_fit_formula, adapter=adapter)
+    m = GComputation(mnlogit_fit_formula, adapter=adapter)
     full = m.predict()
     sub = m.predict(outcome=[0, 2])
     np.testing.assert_allclose(sub.estimate, full.estimate[[0, 2]], atol=1e-12)
@@ -250,7 +250,7 @@ def test_predict_outcome_multi_subset(mnlogit_fit_formula):
 
 def test_dydx_outcome_subset(mnlogit_fit_formula):
     adapter = StatsmodelsMNLogitAdapter(mnlogit_fit_formula)
-    m = Margins.linear_scale(mnlogit_fit_formula, adapter=adapter)
+    m = GComputation(mnlogit_fit_formula, adapter=adapter)
     full = m.dydx("x1")
     sub = m.dydx("x1", outcome=2)
     np.testing.assert_allclose(sub.estimate, full.estimate[2:3], atol=1e-12)
@@ -258,7 +258,7 @@ def test_dydx_outcome_subset(mnlogit_fit_formula):
 
 def test_result_outcome_helper(mnlogit_fit_formula):
     adapter = StatsmodelsMNLogitAdapter(mnlogit_fit_formula)
-    m = Margins.linear_scale(mnlogit_fit_formula, adapter=adapter)
+    m = GComputation(mnlogit_fit_formula, adapter=adapter)
     full = m.predict()
     sub = full.outcome(1)
     np.testing.assert_allclose(sub.estimate, full.estimate[1:2], atol=1e-12)
@@ -266,7 +266,7 @@ def test_result_outcome_helper(mnlogit_fit_formula):
 
 def test_result_outcome_helper_by_label(mnlogit_fit_formula):
     adapter = StatsmodelsMNLogitAdapter(mnlogit_fit_formula)
-    m = Margins.linear_scale(mnlogit_fit_formula, adapter=adapter)
+    m = GComputation(mnlogit_fit_formula, adapter=adapter)
     full = m.predict()
     sub = full.outcome("1")
     np.testing.assert_allclose(sub.estimate, full.estimate[1:2], atol=1e-12)

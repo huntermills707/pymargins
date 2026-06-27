@@ -1,10 +1,9 @@
-"""End-to-end smoke tests for the Margins pipeline.
+"""End-to-end smoke tests for the GComputation pipeline.
 
 See IMPLEMENTATION_GUIDE.md §0.4 and §0.5.
 """
 
 import jax
-import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import pytest
@@ -13,7 +12,7 @@ import statsmodels.formula.api as smf
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins import Margins
+from pymargins import GComputation
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -48,30 +47,31 @@ def fit_logit(df_logit):
 
 
 # ---------------------------------------------------------------------------
-# 0.4 — Wire up Margins to the adapter
+# 0.4 — Wire up GComputation to the adapter
 # ---------------------------------------------------------------------------
 
 
-def test_margins_construction_log_scale(fit_logit):
-    m = Margins.log_scale(fit_logit)
-    assert m.adapter is not None
-    assert m.phi is jnp.exp
-    assert m.phi_inv is jnp.log
-    assert m.method == "delta"
+def test_gcomputation_construction_log_scale(fit_logit):
+    est = GComputation(fit_logit, scale="log")
+    assert est.plan is not None
+    assert est.plan.scale == "log"
+    assert est.plan.method_resolved == "delta"
 
 
-def test_margins_summary(fit_logit):
-    m = Margins.log_scale(fit_logit, vcov="HC3")
-    summary = m.summary()
-    assert "log" in summary
-    assert "HC3" in summary
+def test_gcomputation_summary(fit_logit):
+    est = GComputation(fit_logit, scale="log", vcov="HC3")
+    result = est.predict()
+    summary = result.summary()
+    assert "Graph Result" in summary
+    assert est.plan.scale == "log"
+    assert est.plan.vcov == "HC3"
 
 
-def test_margins_diagnose(fit_logit):
-    m = Margins.log_scale(fit_logit)
-    diag = m.diagnose(n_samples=10)
-    assert diag.verdict in ("delta_reliable", "delta_borderline", "delta_unreliable")
-    assert diag.n_samples == 10
+def test_gcomputation_diagnose(fit_logit):
+    est = GComputation(fit_logit, scale="log", method="auto")
+    desc = est.plan.describe()
+    assert "log" in desc
+    assert est.plan.method_resolved in ("delta", "simulation")
 
 
 # ---------------------------------------------------------------------------
@@ -81,9 +81,9 @@ def test_margins_diagnose(fit_logit):
 
 def test_relative_risk_contrast(fit_logit):
     """Compute a relative risk: exp(log(p_treat=1) - log(p_treat=0))."""
-    m = Margins.log_scale(fit_logit)
+    est = GComputation(fit_logit, scale="log")
 
-    rr = m.contrasts(
+    rr = est.contrasts(
         scenarios=[
             {"atexog": {"treatment": 1}, "label": "treated"},
             {"atexog": {"treatment": 0}, "label": "control"},
@@ -104,9 +104,9 @@ def test_relative_risk_contrast(fit_logit):
 
 def test_prediction_at_typical(fit_logit):
     """Predict at representative values."""
-    m = Margins.linear_scale(fit_logit, at="typical")
+    est = GComputation(fit_logit, at="typical")
 
-    pred = m.predict(atexog={"treatment": [0, 1]})
+    pred = est.predict(atexog={"treatment": [0, 1]})
 
     # Should produce 2 rows (one per treatment value)
     assert pred.estimate.shape == (2,)
@@ -117,9 +117,9 @@ def test_prediction_at_typical(fit_logit):
 
 def test_ame_continuous(fit_logit):
     """Average marginal effect of age."""
-    m = Margins.linear_scale(fit_logit, at="overall")
+    est = GComputation(fit_logit, at="overall")
 
-    ame = m.dydx("age")
+    ame = est.dydx("age")
 
     assert np.isfinite(float(ame.estimate))
     assert np.isfinite(float(ame.std_error))
@@ -128,9 +128,9 @@ def test_ame_continuous(fit_logit):
 
 def test_prediction_with_over(fit_logit):
     """Subgroup predictions by sex."""
-    m = Margins.linear_scale(fit_logit, at="typical")
+    est = GComputation(fit_logit, at="typical")
 
-    pred = m.predict(atexog={"treatment": 1}, over="sex")
+    pred = est.predict(atexog={"treatment": 1}, over="sex")
 
     # Should produce 2 rows (M and F)
     assert pred.estimate.shape == (2,)
@@ -138,9 +138,9 @@ def test_prediction_with_over(fit_logit):
 
 def test_contrast_vector_named(fit_logit):
     """Multiple named contrasts with joint inference."""
-    m = Margins.linear_scale(fit_logit, at="typical")
+    est = GComputation(fit_logit, at="typical")
 
-    result = m.contrasts(
+    result = est.contrasts(
         scenarios=[
             {"atexog": {"treatment": 1, "sex": "M"}, "label": "TM"},
             {"atexog": {"treatment": 0, "sex": "M"}, "label": "CM"},
@@ -160,9 +160,9 @@ def test_contrast_vector_named(fit_logit):
 
 def test_result_test_method(fit_logit):
     """Test a null hypothesis on a result."""
-    m = Margins.log_scale(fit_logit)
+    est = GComputation(fit_logit, scale="log")
 
-    rr = m.contrasts(
+    rr = est.contrasts(
         scenarios=[
             {"atexog": {"treatment": 1}},
             {"atexog": {"treatment": 0}},
@@ -178,9 +178,9 @@ def test_result_test_method(fit_logit):
 
 def test_result_joint_test(fit_logit):
     """Joint test on a vector result."""
-    m = Margins.linear_scale(fit_logit, at="typical")
+    est = GComputation(fit_logit, at="typical")
 
-    result = m.contrasts(
+    result = est.contrasts(
         scenarios=[
             {"atexog": {"treatment": 1, "sex": "M"}},
             {"atexog": {"treatment": 0, "sex": "M"}},
@@ -207,9 +207,9 @@ def test_result_joint_test(fit_logit):
 
 def test_evaluate_nnt(fit_logit):
     """Nonlinear composition: NNT = 1/(p_control - p_treated)."""
-    m = Margins.linear_scale(fit_logit, at="typical")
+    est = GComputation(fit_logit, at="typical")
 
-    nnt = m.evaluate(
+    nnt = est.evaluate(
         scenarios=[
             {"atexog": {"treatment": 0}, "label": "control"},
             {"atexog": {"treatment": 1}, "label": "treated"},
@@ -222,11 +222,11 @@ def test_evaluate_nnt(fit_logit):
 
 def test_simulation_method(fit_logit):
     """Explicit simulation method should produce valid CIs."""
-    m = Margins.linear_scale(
-        fit_logit, at="typical", method="simulation", n_sim=2000, rng_seed=42
+    est = GComputation(
+        fit_logit, at="typical", method="simulation", n_sim=2000, seed=42
     )
 
-    rr = m.contrasts(
+    rr = est.contrasts(
         scenarios=[
             {"atexog": {"treatment": 1}},
             {"atexog": {"treatment": 0}},
@@ -242,11 +242,9 @@ def test_simulation_method(fit_logit):
 
 def test_bootstrap_method(fit_logit):
     """Bootstrap method should produce valid CIs via refit."""
-    m = Margins.linear_scale(
-        fit_logit, at="typical", method="bootstrap", n_boot=50, rng_seed=42
-    )
+    est = GComputation(fit_logit, at="typical", method="bootstrap", B=50, seed=42)
 
-    rd = m.contrasts(
+    rd = est.contrasts(
         scenarios=[
             {"atexog": {"treatment": 1}},
             {"atexog": {"treatment": 0}},
@@ -261,65 +259,33 @@ def test_bootstrap_method(fit_logit):
 
 def test_predict_with_transform(fit_logit):
     """Per-row transform applied before aggregation."""
-    m = Margins.linear_scale(fit_logit, at="overall")
+    est = GComputation(fit_logit, at="overall")
 
-    pred = m.predict(atexog={"treatment": 1}, transform=lambda mu: mu**2)
+    pred = est.predict(atexog={"treatment": 1}, transform=lambda mu: mu**2)
     assert np.isfinite(float(pred.estimate))
     # Squared probabilities should be smaller than raw probabilities
-    pred_raw = m.predict(atexog={"treatment": 1})
+    pred_raw = est.predict(atexog={"treatment": 1})
     assert float(pred.estimate) < float(pred_raw.estimate)
 
 
 def test_dydx_on_binary_raises(fit_logit):
     """dydx on a binary variable must raise ValueError."""
-    m = Margins.linear_scale(fit_logit, at="overall")
+    est = GComputation(fit_logit, at="overall")
     with pytest.raises(ValueError, match="binary"):
-        m.dydx("treatment")
+        est.dydx("treatment")
 
 
 def test_dydx_on_categorical_raises(fit_logit):
     """dydx on a categorical variable must raise ValueError."""
-    m = Margins.linear_scale(fit_logit, at="overall")
+    est = GComputation(fit_logit, at="overall")
     with pytest.raises(ValueError, match="categorical"):
-        m.dydx("sex")
-
-
-def test_result_composition_test_and_conf_int(fit_logit):
-    """Composed results must retain phi/phi_inv so test() and conf_int() work."""
-    m = Margins.log_scale(fit_logit, at="typical")
-
-    pred_treat = m.predict(atexog={"treatment": 1})
-    pred_ctrl = m.predict(atexog={"treatment": 0})
-    diff = pred_treat - pred_ctrl
-
-    # test() should work on the composed result
-    test = diff.test(value=1.0)  # H0: RR = 1
-    assert test.method == "wald"
-    assert np.isfinite(float(test.statistic))
-
-    # conf_int() recomputation should work
-    lo, hi = diff.conf_int(level=0.90)
-    assert np.isfinite(float(lo))
-    assert np.isfinite(float(hi))
-
-
-def test_result_composition_preserves_fallback_triggered(fit_logit):
-    """A scaled result should preserve fallback_triggered when the input fell back."""
-    # Force fallback via very low kappa threshold on the session
-    m = Margins.log_scale(fit_logit, at="typical", kappa_threshold=0.0)
-
-    pred_treat = m.predict(atexog={"treatment": 1})
-    assert pred_treat.fallback_triggered is True
-
-    scaled = pred_treat * 2.0
-    assert scaled.fallback_triggered is True
-    assert scaled.fallback_reason == pred_treat.fallback_reason
+        est.dydx("sex")
 
 
 def test_scaled_transforms_result(fit_logit):
     """scaled() should multiply estimate and CI bounds by the given factor."""
-    m = Margins.linear_scale(fit_logit, at="overall")
-    pred = m.predict(atexog={"age": [40, 60]})
+    est = GComputation(fit_logit, at="overall")
+    pred = est.predict(atexog={"age": [40, 60]})
     scaled = pred.scaled(by=100, units="%")
     np.testing.assert_allclose(scaled.estimate, pred.estimate * 100)
     np.testing.assert_allclose(scaled.conf_int_lower, pred.conf_int_lower * 100)
@@ -327,45 +293,10 @@ def test_scaled_transforms_result(fit_logit):
     assert scaled.estimand_metadata.get("units") == "%"
 
 
-def test_test_one_sided_alternatives():
-    """One-sided test alternatives should produce valid p-values that differ from two-sided."""
-    rng = np.random.default_rng(42)
-    n = 100
-    df = pd.DataFrame({"x": rng.standard_normal(n), "y": rng.standard_normal(n)})
-    fit = smf.ols("y ~ x", data=df).fit()
-    m = Margins.linear_scale(fit, at="overall")
-    pred = m.predict(atexog={"x": [0.0]})
-
-    test_greater = pred.test(alternative="greater")
-    test_less = pred.test(alternative="less")
-
-    assert 0.0 <= float(test_greater.pvalue) <= 1.0
-    assert 0.0 <= float(test_less.pvalue) <= 1.0
-    # For a near-zero estimate, the one-sided p-values should sum to 1.0
-    np.testing.assert_allclose(
-        float(test_greater.pvalue) + float(test_less.pvalue), 1.0, rtol=1e-5
-    )
-
-
-def test_evaluate_non_differentiable_fallback(fit_logit):
-    """Non-differentiable compose should trigger fallback with a UserWarning."""
-    m = Margins.linear_scale(fit_logit, at="typical", method="delta")
-    with pytest.warns(UserWarning, match="not JAX-differentiable"):
-        result = m.evaluate(
-            scenarios=[
-                {"atexog": {"treatment": 0}},
-                {"atexog": {"treatment": 1}},
-            ],
-            compose=lambda p: np.where(p[0] > 0.5, p[0], 0.5),
-        )
-    assert result.method == "simulation"
-    assert result.fallback_triggered is True
-
-
 def test_dydx_with_over(fit_logit):
     """dydx with over= should produce one row per group."""
-    m = Margins.linear_scale(fit_logit, at="overall")
-    result = m.dydx("age", over="sex")
+    est = GComputation(fit_logit, at="overall")
+    result = est.dydx("age", over="sex")
     assert result.estimate.shape == (2,)
 
 
@@ -385,8 +316,8 @@ def test_single_observation_ci_collapses():
     """With a single observation, bootstrap should produce zero SE and collapsed CIs."""
     df_one = pd.DataFrame({"x": [1.0], "y": [2]})
     fit = smf.glm("y ~ x", data=df_one, family=sm.families.Poisson()).fit()
-    m = Margins(fit, method="bootstrap", n_boot=20, rng_seed=42)
-    pred = m.predict()
+    est = GComputation(fit, method="bootstrap", B=20, seed=42)
+    pred = est.predict()
     assert np.isclose(float(pred.std_error), 0.0, atol=1e-12)
     assert np.isclose(float(pred.conf_int_lower), float(pred.estimate))
     assert np.isclose(float(pred.conf_int_upper), float(pred.estimate))

@@ -11,7 +11,6 @@ kernelspec:
 ---
 
 # Survey designs — weights, strata, and clusters
-
 Complex surveys sample with **unequal probabilities**, **stratification**, and
 **clustering**. Ignore them and you get two distinct failures:
 
@@ -48,7 +47,7 @@ import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from pymargins import Margins, SurveyDesign
+from pymargins import GComputation, SurveyDesign, steps  # 0.4.0: Margins -> GComputation
 
 DATA = "../demos/data"
 pop = pd.read_csv(f"{DATA}/apipop.csv")
@@ -110,8 +109,8 @@ print(f"population truth:        {TRUTH_MEAN:7.2f}")
 
 The weighted mean is almost exactly the population value; the unweighted one is
 biased downward by ~12 points. The same logic carries into a model: fitting
-with `freq_weights` makes the coefficients — and therefore every `Margins`
-estimand built from them — generalize to the population.
+with `freq_weights` makes the coefficients — and therefore every
+`GComputation` estimand built from them — generalize to the population.
 
 ```{code-cell} python
 fit_w = smf.glm(
@@ -120,7 +119,7 @@ fit_w = smf.glm(
     freq_weights=strat["pw"].values,
 ).fit()
 
-m_weighted = Margins(fit_w, at="overall", weights=strat["pw"].values)
+m_weighted = GComputation(fit_w, at="overall", weights=strat["pw"].values)
 print(f"weighted population-mean prediction: "
       f"{float(m_weighted.predict().estimate):.2f}")
 ```
@@ -144,8 +143,11 @@ design = SurveyDesign(
     fpc=strat["fpc"].values,
 )
 
-m_survey = Margins(
-    fit_w, survey_design=design, weights=strat["pw"].values, at="overall"
+m_survey = GComputation(
+    steps.input(strat, design=design),
+    outcome=fit_w,
+    weights=strat["pw"].values,
+    at="overall",
 )
 print(m_survey.dydx("meals").summary())
 ```
@@ -173,15 +175,18 @@ fit_c = smf.glm(
     freq_weights=clus["pw"].values,
 ).fit()
 
-m_naive = Margins(fit_c, at="overall", weights=clus["pw"].values)
+m_naive = GComputation(fit_c, at="overall", weights=clus["pw"].values)
 
 design_c = SurveyDesign(
     weights=clus["pw"].values,
     psu=clus["dnum"].values,     # primary sampling unit = school district
     fpc=clus["fpc"].values,
 )
-m_cluster = Margins(
-    fit_c, survey_design=design_c, weights=clus["pw"].values, at="overall"
+m_cluster = GComputation(
+    steps.input(clus, design=design_c),
+    outcome=fit_c,
+    weights=clus["pw"].values,
+    at="overall",
 )
 
 se_naive = float(m_naive.dydx("meals").std_error)
@@ -199,15 +204,18 @@ overstate precision; the survey SE is the one to trust.
 ## 4. What if you can't fit with weights?
 
 Some estimators don't accept sampling weights. `pymargins` supports the
-post-hoc route: fit **unweighted**, then attach the design only via
-`survey_design`. You still get a design-based SE; the point estimate just comes
-from the unweighted coefficients.
+post-hoc route: fit **unweighted**, then attach the design through
+`steps.input(..., design=...)`. You still get a design-based SE; the
+point estimate just comes from the unweighted coefficients.
 
 ```{code-cell} python
 fit_u = smf.glm("api00 ~ meals + ell", data=strat).fit()
 
-m_posthoc = Margins(
-    fit_u, survey_design=design, weights=strat["pw"].values, at="overall"
+m_posthoc = GComputation(
+    steps.input(strat, design=design),
+    outcome=fit_u,
+    weights=strat["pw"].values,
+    at="overall",
 )
 print(m_posthoc.dydx("meals").summary())
 ```
@@ -223,14 +231,14 @@ a useful independent check, and your only option for estimators that expose no
 score (linearization needs one; the bootstrap does not).
 
 ```{code-cell} python
-m_boot = Margins(
-    fit_c,
-    survey_design=design_c,
+m_boot = GComputation(
+    steps.input(clus, design=design_c),
+    outcome=fit_c,
     weights=clus["pw"].values,
     at="overall",
     method="bootstrap",
-    n_boot=400,
-    rng_seed=0,
+    B=400,
+    seed=0,
 )
 print(f"linearization SE: {se_cluster:.3f}")
 print(f"bootstrap SE:     {float(m_boot.dydx('meals').std_error):.3f}")

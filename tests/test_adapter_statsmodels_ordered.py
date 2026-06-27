@@ -9,7 +9,7 @@ import statsmodels.miscmodels.ordinal_model as om
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins._adapter import auto_detect_adapter
 from pymargins._adapters.statsmodels_ordered import StatsmodelsOrderedAdapter
 
@@ -156,21 +156,21 @@ def test_column_index_raises_for_binary(ordered_fit_array, df_ordered):
 
 
 # ---------------------------------------------------------------------------
-# End-to-end via Margins session
+# End-to-end via GComputation
 # ---------------------------------------------------------------------------
 
 
-def test_margins_predict_aap(ordered_fit_array, df_ordered):
+def test_gcomputation_predict_aap(ordered_fit_array, df_ordered):
     adapter = StatsmodelsOrderedAdapter(ordered_fit_array, training_data=df_ordered)
-    m = Margins.linear_scale(ordered_fit_array, adapter=adapter)
+    m = GComputation(ordered_fit_array, adapter=adapter, method="auto")
     res = m.predict()
     assert res.estimate.shape == (adapter.n_outcomes,)
     np.testing.assert_allclose(res.estimate.sum(), 1.0, atol=1e-10)
 
 
-def test_margins_dydx(ordered_fit_array, df_ordered):
+def test_gcomputation_dydx(ordered_fit_array, df_ordered):
     adapter = StatsmodelsOrderedAdapter(ordered_fit_array, training_data=df_ordered)
-    m = Margins.linear_scale(ordered_fit_array, adapter=adapter)
+    m = GComputation(ordered_fit_array, adapter=adapter, method="auto")
     res = m.dydx("x1")
     assert res.estimate.shape == (adapter.n_outcomes,)
     assert np.isfinite(res.estimate).all()
@@ -195,30 +195,51 @@ def test_refit_array(ordered_fit_array, df_ordered):
 # ---------------------------------------------------------------------------
 # Outcome subsetting
 # ---------------------------------------------------------------------------
+# Re-enabled in R7 audit: multi-outcome slicing is wired for any adapter that
+# exposes n_outcomes > 1, including ordered models.
 
 
-def test_predict_outcome_subset(ordered_fit_array, df_ordered):
+def test_gcomputation_predict_outcome_subset(ordered_fit_array, df_ordered):
     adapter = StatsmodelsOrderedAdapter(ordered_fit_array, training_data=df_ordered)
-    m = Margins.linear_scale(ordered_fit_array, adapter=adapter)
+    m = GComputation(ordered_fit_array, adapter=adapter, method="auto")
     full = m.predict()
     sub = m.predict(outcome=2)
-    np.testing.assert_allclose(sub.estimate, full.estimate[2:3], atol=1e-12)
+    np.testing.assert_allclose(
+        np.asarray(sub.estimate).ravel(),
+        np.asarray(full.estimate[2]).ravel(),
+        atol=1e-12,
+    )
+    # result.outcome() helper is equivalent
+    helper = full.outcome(2)
+    np.testing.assert_allclose(
+        np.asarray(helper.estimate).ravel(),
+        np.asarray(full.estimate[2]).ravel(),
+        atol=1e-12,
+    )
 
 
-def test_dydx_outcome_subset(ordered_fit_array, df_ordered):
+def test_gcomputation_dydx_outcome_subset(ordered_fit_array, df_ordered):
     adapter = StatsmodelsOrderedAdapter(ordered_fit_array, training_data=df_ordered)
-    m = Margins.linear_scale(ordered_fit_array, adapter=adapter)
+    m = GComputation(ordered_fit_array, adapter=adapter, method="auto")
     full = m.dydx("x1")
     sub = m.dydx("x1", outcome=[1, 2])
-    np.testing.assert_allclose(sub.estimate, full.estimate[[1, 2]], atol=1e-12)
+    np.testing.assert_allclose(
+        np.asarray(sub.estimate).ravel(),
+        np.asarray(full.estimate[[1, 2]]).ravel(),
+        atol=1e-12,
+    )
 
 
-def test_result_outcome_helper(ordered_fit_array, df_ordered):
+def test_gcomputation_result_outcome_helper(ordered_fit_array, df_ordered):
     adapter = StatsmodelsOrderedAdapter(ordered_fit_array, training_data=df_ordered)
-    m = Margins.linear_scale(ordered_fit_array, adapter=adapter)
-    full = m.predict()
-    sub = full.outcome(2)
-    np.testing.assert_allclose(sub.estimate, full.estimate[2:3], atol=1e-12)
+    m = GComputation(ordered_fit_array, adapter=adapter, method="auto")
+    full = m.dydx("x1")
+    helper = full.outcome(1)
+    np.testing.assert_allclose(
+        np.asarray(helper.estimate).ravel(),
+        np.asarray(full.estimate[1]).ravel(),
+        atol=1e-12,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -11,10 +11,9 @@ kernelspec:
 ---
 
 # GLM — Poisson count
-
 A Poisson regression for count data. The natural reporting scale is
 the *rate ratio* (log link → exp); `pymargins` makes that explicit
-through `Margins.log_scale`.
+with `scale="log"`.
 
 ```{code-cell} python
 import numpy as np
@@ -22,7 +21,7 @@ import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(7)
 n = 4000
@@ -45,10 +44,10 @@ fit = smf.glm(
 ## Rate ratio for treatment
 
 The contrast `treated=1` vs `treated=0` on the log scale is a log-RR;
-the session back-transforms to a rate ratio with an asymmetric CI.
+the estimator back-transforms to a rate ratio with an asymmetric CI.
 
 ```{code-cell} python
-m = Margins.log_scale(fit, vcov="HC1", at="overall")
+m = GComputation(fit, vcov="HC1", at="overall", scale="log")
 print(m.contrasts(
     scenarios=[
         {"atexog": {"treated": 1}, "label": "treated"},
@@ -84,5 +83,5 @@ ax.set(xlabel="Age", ylabel="Predicted event count")
 ## Average marginal effect of `age` on rate
 
 ```{code-cell} python
-print(Margins.linear_scale(fit, at="overall").dydx("age").summary())
+print(GComputation(fit, at="overall", scale="identity").dydx("age").summary())
 ```

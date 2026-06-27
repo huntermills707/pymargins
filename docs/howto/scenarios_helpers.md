@@ -12,13 +12,12 @@ kernelspec:
 
 # Scenario helpers
 
-
 ```{code-cell} python
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(42)
 n = 2000
@@ -38,7 +37,7 @@ df["y"] = rng.binomial(1, 1 / (1 + np.exp(-lp)))
 
 fit = smf.glm("y ~ age + female + treated + C(region) + C(group) + preexist", data=df,
               family=sm.families.Binomial()).fit()
-m = Margins.log_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="log")
 ```
 
 

@@ -12,7 +12,7 @@ import statsmodels.formula.api as smf
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins._adapter import auto_detect_adapter
 from pymargins._adapters.statsmodels_mixedlm import StatsmodelsMixedLMAdapter
 
@@ -259,10 +259,8 @@ def test_refit_array(fit_mixed_array, df_mixed):
 
 def test_attach_rejects_unsupported_vcov_string(fit_mixed_formula):
     adapter = StatsmodelsMixedLMAdapter(fit_mixed_formula)
-    with pytest.raises(
-        ValueError, match="StatsmodelsMixedLMAdapter does not support vcov='HAC'"
-    ):
-        Margins(fit_mixed_formula, adapter=adapter, vcov="HAC")
+    with pytest.raises(ValueError, match="Unsupported vcov string: 'HAC'"):
+        GComputation(fit_mixed_formula, adapter=adapter, vcov="HAC")
 
 
 def test_attach_rejects_unsupported_vcov_dict(fit_mixed_formula):
@@ -271,7 +269,7 @@ def test_attach_rejects_unsupported_vcov_dict(fit_mixed_formula):
         ValueError,
         match="StatsmodelsMixedLMAdapter does not support vcov dict with type='hac'",
     ):
-        Margins(fit_mixed_formula, adapter=adapter, vcov={"type": "hac"})
+        GComputation(fit_mixed_formula, adapter=adapter, vcov={"type": "hac"})
 
 
 def test_attach_rejects_cluster_without_groups(fit_mixed_formula):
@@ -279,12 +277,12 @@ def test_attach_rejects_cluster_without_groups(fit_mixed_formula):
     with pytest.raises(
         ValueError, match="does not support vcov dict with type='cluster'"
     ):
-        Margins(fit_mixed_formula, adapter=adapter, vcov={"type": "cluster"})
+        GComputation(fit_mixed_formula, adapter=adapter, vcov={"type": "cluster"})
 
 
 def test_attach_accepts_supported_vcov(fit_mixed_formula):
     adapter = StatsmodelsMixedLMAdapter(fit_mixed_formula)
     # ndarray only
     cov = np.eye(len(fit_mixed_formula.fe_params))
-    m = Margins(fit_mixed_formula, adapter=adapter, vcov=cov)
-    assert m.vcov_spec is cov
+    est = GComputation(fit_mixed_formula, adapter=adapter, vcov=cov)
+    np.testing.assert_allclose(np.asarray(est._compiled.frozen_cov), cov, rtol=1e-10)

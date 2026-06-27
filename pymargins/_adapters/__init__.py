@@ -595,7 +595,7 @@ def _detect_adapter_class(model):
     raise TypeError(
         f"No adapter registered for {module}.{cls_name}.\n"
         f"{suggestion}\n"
-        "Alternatively, pass an explicit `adapter=` to Margins()."
+        "Alternatively, pass an explicit `adapter=` to GComputation()."
     )
 
 
@@ -605,7 +605,7 @@ def auto_detect_adapter(model, formula=None, data=None):
     Returns an instantiated adapter for `model`. For most adapters the
     constructor takes only `model` (and optional training_data); subclasses
     that need more arguments should be instantiated explicitly by the user
-    and passed to Margins via the `adapter=` keyword.
+    and passed to GComputation via the `adapter=` keyword.
 
     Parameters
     ----------

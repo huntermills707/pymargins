@@ -12,7 +12,7 @@ import pytest
 from linearmodels.iv import IV2SLS, AbsorbingLS
 from linearmodels.panel import PanelOLS, PooledOLS, RandomEffects
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins.scenarios import pairwise
 
 # ---------------------------------------------------------------------------
@@ -102,7 +102,7 @@ def _fd_slope(beta, X, eps, col_idx):
 def test_pooledols_dydx_matches_coefficient_within_fd_tolerance(panel_df):
     mod = PooledOLS.from_formula("y ~ x1 + x2", data=panel_df)
     res = mod.fit()
-    m = Margins(res)
+    m = GComputation(res)
 
     slope_x1 = m.dydx("x1")
     slope_x2 = m.dydx("x2")
@@ -115,7 +115,7 @@ def test_pooledols_dydx_matches_coefficient_within_fd_tolerance(panel_df):
 def test_pooledols_predict_at_mean_matches_native(panel_df):
     mod = PooledOLS.from_formula("y ~ x1 + x2", data=panel_df)
     res = mod.fit()
-    m = Margins(res)
+    m = GComputation(res)
 
     pred = m.predict()
     # PooledOLS predict() expects exog with MultiIndex
@@ -128,7 +128,7 @@ def test_pooledols_predict_at_mean_matches_native(panel_df):
 def test_pooledols_pairwise_contrast_matches_manual(panel_df):
     mod = PooledOLS.from_formula("y ~ x1 + x2", data=panel_df)
     res = mod.fit()
-    m = Margins(res)
+    m = GComputation(res)
 
     x1_mean = panel_df["x1"].mean()
     x1_sd = panel_df["x1"].std()
@@ -149,7 +149,7 @@ def test_pooledols_pairwise_contrast_matches_manual(panel_df):
 def test_panelols_dydx_matches_coefficient_within_fd_tolerance(panel_df):
     mod = PanelOLS.from_formula("y ~ x1 + x2 + EntityEffects", data=panel_df)
     res = mod.fit()
-    m = Margins(res)
+    m = GComputation(res)
 
     slope_x1 = m.dydx("x1")
     slope_x2 = m.dydx("x2")
@@ -161,7 +161,7 @@ def test_panelols_dydx_matches_coefficient_within_fd_tolerance(panel_df):
 def test_panelols_predict_at_mean_matches_native(panel_df):
     mod = PanelOLS.from_formula("y ~ x1 + x2 + EntityEffects", data=panel_df)
     res = mod.fit()
-    m = Margins(res)
+    m = GComputation(res)
 
     pred = m.predict()
     native_pred = res.predict(exog=panel_df[["x1", "x2"]])
@@ -173,7 +173,7 @@ def test_panelols_predict_at_mean_matches_native(panel_df):
 def test_panelols_pairwise_contrast_matches_manual(panel_df):
     mod = PanelOLS.from_formula("y ~ x1 + x2 + EntityEffects", data=panel_df)
     res = mod.fit()
-    m = Margins(res)
+    m = GComputation(res)
 
     x1_mean = panel_df["x1"].mean()
     x1_sd = panel_df["x1"].std()
@@ -193,7 +193,7 @@ def test_panelols_pairwise_contrast_matches_manual(panel_df):
 def test_random_effects_dydx_matches_coefficient_within_fd_tolerance(panel_df):
     mod = RandomEffects.from_formula("y ~ x1 + x2", data=panel_df)
     res = mod.fit()
-    m = Margins(res)
+    m = GComputation(res)
 
     slope_x1 = m.dydx("x1")
     slope_x2 = m.dydx("x2")
@@ -213,7 +213,7 @@ def test_iv2sls_dydx_matches_coefficient_within_fd_tolerance(iv_df):
     from pymargins._adapters.linearmodels_iv import LinearmodelsIVAdapter
 
     adapter = LinearmodelsIVAdapter(res, training_data=iv_df)
-    m = Margins(model=None, adapter=adapter)
+    m = GComputation(adapter=adapter)
 
     slope_x = m.dydx("x")
     assert np.isclose(float(slope_x.estimate), float(res.params["x"]), rtol=2e-2)
@@ -225,7 +225,7 @@ def test_iv2sls_predict_at_mean_matches_native(iv_df):
     from pymargins._adapters.linearmodels_iv import LinearmodelsIVAdapter
 
     adapter = LinearmodelsIVAdapter(res, training_data=iv_df)
-    m = Margins(model=None, adapter=adapter)
+    m = GComputation(adapter=adapter)
 
     pred = m.predict()
     native_pred = res.predict(data=iv_df)
@@ -240,7 +240,7 @@ def test_iv2sls_pairwise_contrast_matches_manual(iv_df):
     from pymargins._adapters.linearmodels_iv import LinearmodelsIVAdapter
 
     adapter = LinearmodelsIVAdapter(res, training_data=iv_df)
-    m = Margins(model=None, adapter=adapter)
+    m = GComputation(adapter=adapter)
 
     x_mean = iv_df["x"].mean()
     x_sd = iv_df["x"].std()
@@ -267,7 +267,7 @@ def test_absorbingls_dydx_matches_coefficient_within_fd_tolerance(absorb_df):
     from pymargins._adapters.linearmodels_absorbing import LinearmodelsAbsorbingAdapter
 
     adapter = LinearmodelsAbsorbingAdapter(res)
-    m = Margins(model=None, adapter=adapter)
+    m = GComputation(adapter=adapter)
 
     slope_x1 = m.dydx("x1")
     slope_x2 = m.dydx("x2")
@@ -286,7 +286,7 @@ def test_absorbingls_pairwise_contrast_matches_manual(absorb_df):
     from pymargins._adapters.linearmodels_absorbing import LinearmodelsAbsorbingAdapter
 
     adapter = LinearmodelsAbsorbingAdapter(res)
-    m = Margins(model=None, adapter=adapter)
+    m = GComputation(adapter=adapter)
 
     x1_mean = absorb_df["x1"].mean()
     x1_sd = absorb_df["x1"].std()
@@ -323,12 +323,12 @@ def test_all_linear_adapters_ame_equals_coefficient_within_tolerance(
 
     for name, res, training_data in models:
         if training_data is None:
-            m = Margins(res)
+            m = GComputation(res)
         else:
             from pymargins._adapters.linearmodels_iv import LinearmodelsIVAdapter
 
             adapter = LinearmodelsIVAdapter(res, training_data=training_data)
-            m = Margins(model=None, adapter=adapter)
+            m = GComputation(adapter=adapter)
 
         slope = m.dydx("x1")
         coef = float(res.params["x1"])

@@ -1,7 +1,7 @@
 """Matching-library adapters for pymargins.
 
 This module provides thin wrappers that translate popular matching libraries
-into the ``MatchingClient`` protocol expected by ``Margins(..., matching=...)``.
+into the ``MatchingClient`` protocol expected by ``GComputation(..., matching=...)``.
 
 Reference implementation
 ------------------------
@@ -24,10 +24,10 @@ from ._tabular import to_pandas_if_needed
 
 
 class PysmatchClient:
-    """Wrap a fitted ``pysmatch.Matcher`` for use with ``Margins``.
+    """Wrap a fitted ``pysmatch.Matcher`` for use with ``GComputation``.
 
     This adapter satisfies the ``MatchingClient`` protocol consumed by
-    ``Margins(..., matching=...)``. It extracts the matched subset and
+    ``GComputation(..., matching=...)``. It extracts the matched subset and
     matched-set labels from a fitted ``pysmatch.Matcher``, and implements
     ``rematch()`` so that bootstrap inference can re-run matching on each
     resampled replicate.
@@ -65,7 +65,7 @@ class PysmatchClient:
     >>> matcher.predict_scores()
     >>> matcher.match(method="min", nmatches=1, threshold=0.001)
     >>> client = PysmatchClient(matcher, treatment_col="treated")
-    >>> m = Margins(fitted_model, matching=client)
+    >>> m = GComputation(fitted_model, matching=client)
     """
 
     def __init__(

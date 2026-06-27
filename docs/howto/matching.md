@@ -1,9 +1,9 @@
 # Matching support
-
 `pymargins` integrates with propensity-score and other matching libraries
-through a small protocol.  The matching object is attached at session
-construction and governs all downstream behavior: which rows enter the
-estimand, how `vcov` is derived, and how bootstrap resamples are drawn.
+through a small protocol.  The matching object is attached via
+`steps.match(...)` and governs all downstream behavior: which rows enter
+the estimand, how `vcov` is derived, and how bootstrap resamples are
+drawn.
 
 The reference implementation wraps
 [`pysmatch`](https://pypi.org/project/pysmatch/) (the active successor
@@ -12,7 +12,7 @@ exposes the same three attributes/methods.
 
 ## The `MatchingClient` protocol
 
-A matching object consumed by `Margins(..., matching=...)` must provide:
+A matching object consumed by `steps.match(node, matcher)` must provide:
 
 | Attribute / method | Description |
 |--------------------|-------------|
@@ -28,13 +28,13 @@ Krinsky–Robb ignore it.
 1. Fit a propensity-score model and run matching outside `pymargins`.
 2. Fit the **outcome model on the matched sample only**.
 3. Wrap the fitted matcher in `PysmatchClient`.
-4. Open a `Margins` session with `matching=client`.
+4. Build a `GComputation` estimator with `steps.match(steps.input(df), client)`.
 
 ```python
 import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
-from pymargins import Margins, PysmatchClient
+from pymargins import GComputation, PysmatchClient, steps  # 0.4.0: Margins -> GComputation
 from pysmatch.Matcher import Matcher
 
 # 1. Run matching
@@ -56,8 +56,8 @@ fit = smf.glm(
 # 3. Wrap the matcher
 client = PysmatchClient(matcher, treatment_col="treated")
 
-# 4. Open session — vcov auto-derives to cluster-robust
-m = Margins(fit, matching=client)
+# 4. Build estimator — vcov auto-derives to cluster-robust
+m = GComputation(steps.match(steps.input(matched), client), outcome=fit)
 rd = m.contrasts(
     scenarios=[
         {"atexog": {"treated": 1}, "label": "treated"},
@@ -94,7 +94,7 @@ for mult in [0.5, 1.0, 2.0]:
     matched = client.rematch(df, caliper_multiplier=mult)
     fit = smf.glm("y ~ x1 + x2 + treated", data=matched,
                   family=sm.families.Binomial()).fit()
-    m = Margins(fit, vcov="HC3", at="overall")
+    m = GComputation(fit, vcov="HC3", at="overall")
     res = m.contrasts(
         scenarios=[
             {"atexog": {"treated": 1}},
@@ -118,12 +118,12 @@ between matched pairs.  `pymargins` handles this automatically:
 ### Bootstrap with rematching
 
 ```python
-m_boot = Margins(
-    fit,
-    matching=client,
+m_boot = GComputation(
+    steps.match(steps.input(matched), client),
+    outcome=fit,
     method="bootstrap",
-    n_boot=500,
-    rng_seed=42,
+    B=500,
+    seed=42,
 )
 rd_boot = m_boot.contrasts(
     scenarios=[
@@ -159,20 +159,23 @@ class MyMatcher:
         return self._matcher_fn(data)
 
 # Usage
-m = Margins(fit, matching=MyMatcher(matched_df, pair_ids, my_match_fn))
+m = GComputation(
+    steps.match(steps.input(matched_df), MyMatcher(matched_df, pair_ids, my_match_fn)),
+    outcome=fit,
+)
 ```
 
 ## Pickling and parallelism
 
 `PysmatchClient` must be picklable for process-based parallel bootstrap
-(`n_jobs > 1`).  If the underlying matcher stores non-picklable objects,
-set `n_jobs=1` in the bootstrap configuration.
+(`n_jobs > 1` on the estimator).  If the underlying matcher stores
+non-picklable objects, set `n_jobs=1` on the estimator.
 
 ## Vcov behavior summary
 
 | User provides | Behavior |
 |---------------|----------|
-| `matching` only | Auto-derives `vcov = {"type": "cluster", "groups": matching.cluster_ids}` |
-| `matching` + `vcov="cluster"` | Uses user-supplied cluster specification |
-| `matching` + `vcov="HC3"` | User override; warning emitted because matched-set dependence is ignored |
-| `matching` + `vcov=ndarray` | User-supplied Σ̂ used directly; no validation against cluster structure |
+| `steps.match(...)` only | Auto-derives `vcov = {"type": "cluster", "groups": matching.cluster_ids}` |
+| `steps.match(...)` + `vcov="cluster"` | Uses user-supplied cluster specification |
+| `steps.match(...)` + `vcov="HC3"` | User override; warning emitted because matched-set dependence is ignored |
+| `steps.match(...)` + `vcov=ndarray` | User-supplied Σ̂ used directly; no validation against cluster structure |

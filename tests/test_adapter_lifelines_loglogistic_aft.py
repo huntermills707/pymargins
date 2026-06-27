@@ -11,7 +11,7 @@ from lifelines import LogLogisticAFTFitter
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins._adapter import auto_detect_adapter
 from pymargins._adapters.lifelines_loglogistic_aft import LifelinesLogLogisticAFTAdapter
 
@@ -152,21 +152,21 @@ def test_variable_metadata_is_cached(loglogistic_fit, df_survival):
 
 
 # ---------------------------------------------------------------------------
-# End-to-end via Margins session
+# End-to-end via GComputation
 # ---------------------------------------------------------------------------
 
 
-def test_margins_predict(loglogistic_fit, df_survival):
+def test_gcomputation_predict(loglogistic_fit, df_survival):
     adapter = LifelinesLogLogisticAFTAdapter(loglogistic_fit, training_data=df_survival)
-    m = Margins(loglogistic_fit, adapter=adapter)
-    res = m.predict()
+    est = GComputation(loglogistic_fit, adapter=adapter)
+    res = est.predict()
     assert res.estimate.size == 1
 
 
-def test_margins_dydx(loglogistic_fit, df_survival):
+def test_gcomputation_dydx(loglogistic_fit, df_survival):
     adapter = LifelinesLogLogisticAFTAdapter(loglogistic_fit, training_data=df_survival)
-    m = Margins(loglogistic_fit, adapter=adapter)
-    res = m.dydx("x1")
+    est = GComputation(loglogistic_fit, adapter=adapter)
+    res = est.dydx("x1")
     assert res.estimate.size == 1
     assert np.isfinite(float(res.estimate))
 
@@ -178,15 +178,15 @@ def test_margins_dydx(loglogistic_fit, df_survival):
 
 def test_bootstrap_end_to_end(loglogistic_fit, df_survival):
     adapter = LifelinesLogLogisticAFTAdapter(loglogistic_fit, training_data=df_survival)
-    m = Margins(
+    est = GComputation(
         loglogistic_fit,
         adapter=adapter,
         at="typical",
         method="bootstrap",
-        n_boot=50,
-        rng_seed=42,
+        B=50,
+        seed=42,
     )
-    rd = m.dydx("x1")
+    rd = est.dydx("x1")
     assert rd.method == "bootstrap"
     assert np.isfinite(float(rd.estimate))
     assert float(rd.conf_int_lower) < float(rd.conf_int_upper)
@@ -203,7 +203,7 @@ def test_attach_rejects_unsupported_vcov_string(loglogistic_fit, df_survival):
     with pytest.raises(
         ValueError, match="LifelinesLogLogisticAFTAdapter only supports vcov=None"
     ):
-        Margins(loglogistic_fit, adapter=adapter, vcov="HC0")
+        GComputation(loglogistic_fit, adapter=adapter, vcov="HC0")
 
 
 def test_attach_rejects_unsupported_vcov_dict(loglogistic_fit, df_survival):
@@ -211,7 +211,7 @@ def test_attach_rejects_unsupported_vcov_dict(loglogistic_fit, df_survival):
     with pytest.raises(
         ValueError, match="LifelinesLogLogisticAFTAdapter only supports vcov=None"
     ):
-        Margins(
+        GComputation(
             loglogistic_fit,
             adapter=adapter,
             vcov={"type": "cluster", "groups": df_survival["E"]},
@@ -221,12 +221,13 @@ def test_attach_rejects_unsupported_vcov_dict(loglogistic_fit, df_survival):
 def test_attach_accepts_supported_vcov(loglogistic_fit, df_survival):
     adapter = LifelinesLogLogisticAFTAdapter(loglogistic_fit, training_data=df_survival)
     # default (None)
-    m1 = Margins(loglogistic_fit, adapter=adapter)
-    assert m1.vcov_spec is None
-    # ndarray
+    est1 = GComputation(loglogistic_fit, adapter=adapter)
+    assert est1.plan.vcov is None
+    # ndarray is accepted and fingerprinted in the Plan
     cov = np.eye(4)
-    m2 = Margins(loglogistic_fit, adapter=adapter, vcov=cov)
-    assert m2.vcov_spec is cov
+    est2 = GComputation(loglogistic_fit, adapter=adapter, vcov=cov)
+    assert isinstance(est2.plan.vcov, dict)
+    assert est2.plan.vcov.get("kind") == "user_ndarray"
 
 
 # ---------------------------------------------------------------------------

@@ -1,5 +1,4 @@
 # Writing a custom adapter
-
 Most users will not need this — `pymargins` ships adapters for
 statsmodels, linearmodels, and lifelines. If you have a model class
 none of those cover, the adapter interface is small.
@@ -49,7 +48,7 @@ class MyGLMAdapter(GLMAdapter):
 register_adapter(MyGLMAdapter())
 ```
 
-After registration, `Margins(...)` will auto-detect your model class.
+After registration, `GComputation(...)` will auto-detect your model class.
 Adapters are tried in registration order; user-registered adapters are
 tried *before* built-ins, so you can override default detection if your
 fitted object subclasses one of the supported types but has different

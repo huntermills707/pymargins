@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 import statsmodels.formula.api as smf
 
-from pymargins import Margins
+from pymargins import GComputation, steps
 
 
 @pytest.fixture
@@ -34,8 +34,8 @@ def fit(df):
 
 
 def test_parallel_reproducible(fit):
-    m1 = Margins(fit, method="bootstrap", n_boot=100, rng_seed=42, n_jobs=1)
-    m2 = Margins(fit, method="bootstrap", n_boot=100, rng_seed=42, n_jobs=2)
+    m1 = GComputation(fit, method="bootstrap", B=100, seed=42, n_jobs=1)
+    m2 = GComputation(fit, method="bootstrap", B=100, seed=42, n_jobs=2)
     res1 = m1.dydx("x1")
     res2 = m2.dydx("x1")
     np.testing.assert_allclose(res1.estimate, res2.estimate)
@@ -45,7 +45,7 @@ def test_parallel_reproducible(fit):
 
 
 def test_parallel_n_jobs_minus_one(fit):
-    m = Margins(fit, method="bootstrap", n_boot=50, rng_seed=42, n_jobs=-1)
+    m = GComputation(fit, method="bootstrap", B=50, seed=42, n_jobs=-1)
     res = m.dydx("x1")
     assert np.isfinite(res.estimate)
     assert np.isfinite(res.std_error)
@@ -57,20 +57,21 @@ def test_parallel_n_jobs_minus_one(fit):
 
 
 def test_parallel_cluster_bootstrap(fit, df):
-    m1 = Margins(
-        fit,
+    inp = steps.input(df, cluster=df.index % 10)
+    m1 = GComputation(
+        inp,
+        outcome=fit,
         method="bootstrap",
-        n_boot=100,
-        rng_seed=42,
-        cluster=df.index % 10,
+        B=100,
+        seed=42,
         n_jobs=1,
     )
-    m2 = Margins(
-        fit,
+    m2 = GComputation(
+        inp,
+        outcome=fit,
         method="bootstrap",
-        n_boot=100,
-        rng_seed=42,
-        cluster=df.index % 10,
+        B=100,
+        seed=42,
         n_jobs=2,
     )
     res1 = m1.dydx("x1")
@@ -85,12 +86,23 @@ def test_parallel_cluster_bootstrap(fit, df):
 # ---------------------------------------------------------------------------
 
 
-def test_parallel_block_bootstrap(fit):
-    m1 = Margins(
-        fit, method="bootstrap", n_boot=100, rng_seed=42, block_size=10, n_jobs=1
+def test_parallel_block_bootstrap(fit, df):
+    inp = steps.input(df, block=10)
+    m1 = GComputation(
+        inp,
+        outcome=fit,
+        method="bootstrap",
+        B=100,
+        seed=42,
+        n_jobs=1,
     )
-    m2 = Margins(
-        fit, method="bootstrap", n_boot=100, rng_seed=42, block_size=10, n_jobs=2
+    m2 = GComputation(
+        inp,
+        outcome=fit,
+        method="bootstrap",
+        B=100,
+        seed=42,
+        n_jobs=2,
     )
     res1 = m1.dydx("x1")
     res2 = m2.dydx("x1")
@@ -105,7 +117,7 @@ def test_parallel_block_bootstrap(fit):
 
 
 def test_parallel_predictions(fit):
-    m = Margins(fit, method="bootstrap", n_boot=50, rng_seed=42, n_jobs=2)
+    m = GComputation(fit, method="bootstrap", B=50, seed=42, n_jobs=2)
     res = m.predict(atexog={"x1": [0, 1]})
     assert np.all(np.isfinite(res.estimate))
     assert np.all(np.isfinite(res.conf_int_lower))
@@ -113,7 +125,7 @@ def test_parallel_predictions(fit):
 
 
 def test_parallel_contrasts(fit):
-    m = Margins(fit, method="bootstrap", n_boot=50, rng_seed=42, n_jobs=2)
+    m = GComputation(fit, method="bootstrap", B=50, seed=42, n_jobs=2)
     res = m.contrasts(
         scenarios=[
             {"atexog": {"x1": 1}},
@@ -133,7 +145,7 @@ def test_parallel_contrasts(fit):
 
 def test_n_jobs_two_respects_threadpool_limits(fit):
     """Bootstrap with n_jobs=2 should complete and return finite results."""
-    m = Margins(fit, method="bootstrap", n_boot=50, rng_seed=42, n_jobs=2)
+    m = GComputation(fit, method="bootstrap", B=50, seed=42, n_jobs=2)
     res = m.dydx("x1")
     assert np.isfinite(res.estimate)
     assert np.isfinite(res.std_error)

@@ -8,14 +8,14 @@ API reference
 
 .. currentmodule:: pymargins
 
-Session
--------
+Estimator
+---------
 
 .. autosummary::
     :toctree: _autosummary
     :recursive:
 
-    Margins
+    GComputation
 
 Results
 -------
@@ -24,9 +24,10 @@ Results
     :toctree: _autosummary
     :recursive:
 
-    MarginsResult
+    GraphResult
     TestResult
-    DiagnosticResult
+    AdjustedResults
+    adjust
 
 Scenario helpers
 ----------------
@@ -60,7 +61,7 @@ Adapter interface
 Concrete adapters
 -----------------
 
-You rarely need these — ``Margins(model)`` auto-detects the right adapter
+You rarely need these — ``GComputation(model)`` auto-detects the right adapter
 for standard statsmodels / linearmodels / lifelines results. Import a
 concrete adapter from ``pymargins.adapters`` only when you need a
 non-default scale that shares a result class with another adapter (e.g.
@@ -100,9 +101,9 @@ Transform pipeline (bootstrap)
 Multiple imputation (pooling)
 -----------------------------
 
-Rubin's-rules combinator over ``MarginsResult`` objects from M completed
+Rubin's-rules combinator over ``GraphResult`` objects from M completed
 datasets. The artifacts-side counterpart to the bootstrap ``reimpute`` stage:
-use ``pool_imputations`` when you already hold M precomputed imputations, and
+use ``pool_imputations`` when you already hold M precomputed results, and
 ``reimpute`` when you have a re-runnable imputer.
 
 .. autosummary::

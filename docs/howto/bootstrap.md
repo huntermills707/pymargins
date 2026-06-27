@@ -12,13 +12,12 @@ kernelspec:
 
 # Bootstrap inference
 
-
 ```{code-cell} python
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(42)
 n = 2000
@@ -32,16 +31,16 @@ df["y"] = rng.binomial(1, 1 / (1 + np.exp(-lp)))
 
 fit = smf.glm("y ~ age + female + treated", data=df,
               family=sm.families.Binomial()).fit()
-m = Margins.log_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="log")
 ```
 
 
-Switch the session's inference method to `"bootstrap"` and pick the
+Switch the estimator's inference method to `"bootstrap"` and pick the
 number of replicates. The default scheme is *pairs* — rows resampled
 IID with replacement.
 
 ```{code-cell} python
-m = Margins.log_scale(fit, method="bootstrap", n_boot=2000, vcov="HC3")
+m = GComputation(fit, method="bootstrap", B=2000, vcov="HC3", scale="log")
 print(m.dydx("age").summary())
 ```
 
@@ -49,7 +48,7 @@ Parallelism uses thread pools; BLAS threads are pinned to 1 per worker
 to avoid oversubscription:
 
 ```{code-cell} python
-m = Margins.log_scale(fit, method="bootstrap", n_boot=2000, n_jobs=-1)
+m = GComputation(fit, method="bootstrap", B=2000, n_jobs=-1, scale="log")
 ```
 
 ## Point estimates under bootstrap

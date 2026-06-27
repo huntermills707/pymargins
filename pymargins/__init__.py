@@ -1,15 +1,15 @@
-"""
-pymargins — expert-mode marginal effects for Python.
+"""pymargins — expert-mode marginal effects for Python.
 
 Quick reference
 ---------------
-Wrap a fitted model in a Margins session, declare your analytical posture
-(scale, vcov, level, at), then compute predictions, slopes, and
-contrasts via the session's methods::
+Build a wiring graph, wrap a fitted model in a pre-registered estimator, and
+compute predictions, slopes, and contrasts via the estimator's methods::
 
-    from pymargins import Margins
-    m = Margins.log_scale(fitted_glm, vcov="HC3")
-    rr = m.contrasts(
+    from pymargins import steps, GComputation
+
+    est = GComputation(steps.input(df), outcome="y ~ x + z", method="delta")
+    est.dydx("x")
+    est.contrasts(
         scenarios=[
             {"atexog": {"treatment": "treated"}},
             {"atexog": {"treatment": "control"}},
@@ -19,10 +19,10 @@ contrasts via the session's methods::
 
 Public API
 ----------
-- ``Margins`` — main session class
-- ``MarginsResult`` — output of predict/dydx/contrasts/evaluate
+- ``GComputation`` — main estimator noun (v0.4.0+)
+- ``GraphResult`` — output of predict/dydx/contrasts/evaluate
 - ``TestResult`` — output of result.test() and result.joint_test()
-- ``DiagnosticResult`` — output of m.diagnose()
+- ``AdjustedResults`` — output of adjust()
 - ``VariableInfo`` — per-variable metadata used by adapters
 - ``register_adapter`` — register a custom adapter for auto-detection
 
@@ -33,11 +33,10 @@ Adapter authors writing a custom adapter subclass one of the base shapes
 re-exported above (``ModelAdapter``, ``GLMAdapter``, etc.) plus the
 ``make_*_jvp_wrapper`` gradient helpers, and register it with
 ``register_adapter``. The concrete built-in adapters are available, lazily,
-from the public ``pymargins.adapters`` module — you rarely need them since
-``Margins(model)`` auto-detects the right one; import explicitly only to
-override detection or select a non-default scale.
+from the public ``pymargins.adapters`` module.
 """
 
+from . import steps
 from ._adapter import (
     BootstrapOnlyAdapter,
     GLMAdapter,
@@ -55,15 +54,14 @@ from ._gradients import (
 )
 from ._result import (
     AdjustedResults,
-    DiagnosticResult,
+    GraphResult,
     ImputationDiagnostic,
-    MarginsResult,
     TestResult,
     adjust,
     pool_imputations,
 )
 from ._transforms import drop_outliers, reimpute, trim
-from .margins import Margins
+from .estimators import GComputation
 from .matching import PysmatchClient
 from .scenarios import (
     all_pairwise,
@@ -78,12 +76,11 @@ from .scenarios import (
 from .survey import SurveyDesign
 
 __all__ = [
-    # Main entry point
-    "Margins",
+    # Main entry point (v0.4.0+)
+    "GComputation",
     # Result types
-    "MarginsResult",
+    "GraphResult",
     "TestResult",
-    "DiagnosticResult",
     "AdjustedResults",
     "adjust",
     "pool_imputations",
@@ -119,6 +116,8 @@ __all__ = [
     "reimpute",
     "drop_outliers",
     "trim",
+    # Wiring verbs
+    "steps",
     # Package metadata
     "__version__",
 ]

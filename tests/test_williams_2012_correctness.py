@@ -1,13 +1,12 @@
 """Correctness tests against independent reference implementations.
 
 These tests replicate the analyses from demo/williams_2012_demo.py and
-compare pymargins (forced to delta method) against reference values
-computed with:
+compare pymargins (delta method) against reference values computed with:
   - StatsModels get_margeff() (delta method)
   - R marginaleffects (delta method by default)
 
-The delta method is forced in pymargins via kappa_threshold=inf so that
-inference is apples-to-apples with the reference implementations.
+The delta method is used by default in the new engine; inference is
+apples-to-apples with the reference implementations.
 
 Reference values were verified to agree across both independent
 implementations (within expected numerical tolerances).
@@ -22,7 +21,7 @@ import statsmodels.formula.api as smf
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins import Margins
+from pymargins import GComputation
 
 # ---------------------------------------------------------------------------
 # Fixture: exact data from Williams 2012 demo
@@ -178,7 +177,7 @@ def _assert_ci(result, expected_lo, expected_hi, abs_tol=1e-3):
 
 
 def test_apm_point_estimates(fit_logit):
-    m = Margins.log_scale(fit_logit, at="typical", kappa_threshold=float("inf"))
+    m = GComputation(fit_logit, at="typical", scale="log")
     apm = m.predict(atexog={"agegrp": list(range(1, 7))})
 
     assert apm.estimate.shape == (6,)
@@ -192,7 +191,7 @@ def test_apm_point_estimates(fit_logit):
 
 
 def test_aap_point_estimates(fit_logit):
-    m = Margins.log_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
+    m = GComputation(fit_logit, at="overall", scale="log")
     aap = m.predict(atexog={"agegrp": list(range(1, 7))})
 
     assert aap.estimate.shape == (6,)
@@ -206,7 +205,7 @@ def test_aap_point_estimates(fit_logit):
 
 
 def test_repr_values_point_estimates(fit_logit):
-    m = Margins.log_scale(fit_logit, at="typical", kappa_threshold=float("inf"))
+    m = GComputation(fit_logit, at="typical", scale="log")
     repr_pred = m.predict(atexog={"age": [20, 50, 70]})
 
     assert repr_pred.estimate.shape == (3,)
@@ -220,7 +219,7 @@ def test_repr_values_point_estimates(fit_logit):
 
 
 def test_mem_age_point_estimate_and_ci(fit_logit):
-    m = Margins.log_scale(fit_logit, at="typical", kappa_threshold=float("inf"))
+    m = GComputation(fit_logit, at="typical", scale="log")
     mem = m.dydx("age")
 
     _assert_point_estimate(mem, MEM_AGE_EXPECTED, abs_tol=1e-4)
@@ -234,7 +233,7 @@ def test_mem_age_point_estimate_and_ci(fit_logit):
 
 
 def test_ame_age_point_estimate_and_ci(fit_logit):
-    m = Margins.log_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
+    m = GComputation(fit_logit, at="overall", scale="log")
     ame = m.dydx("age")
 
     _assert_point_estimate(ame, AME_AGE_EXPECTED, abs_tol=1e-4)
@@ -247,7 +246,7 @@ def test_ame_age_point_estimate_and_ci(fit_logit):
 
 
 def test_discrete_black_risk_ratio_and_ci(fit_logit):
-    m = Margins.log_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
+    m = GComputation(fit_logit, at="overall", scale="log")
     disc = m.contrasts(
         scenarios=[
             {"atexog": {"black": 1}, "label": "black=1"},
@@ -260,7 +259,7 @@ def test_discrete_black_risk_ratio_and_ci(fit_logit):
 
 
 def test_discrete_female_at_typical_risk_ratio_and_ci(fit_logit):
-    m = Margins.log_scale(fit_logit, at="typical", kappa_threshold=float("inf"))
+    m = GComputation(fit_logit, at="typical", scale="log")
     disc = m.contrasts(
         scenarios=[
             {"atexog": {"female": 1}, "label": "female=1"},
@@ -278,7 +277,7 @@ def test_discrete_female_at_typical_risk_ratio_and_ci(fit_logit):
 
 
 def test_mer_black_female0_risk_ratio_and_ci(fit_logit):
-    m = Margins.log_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
+    m = GComputation(fit_logit, at="overall", scale="log")
     mer = m.contrasts(
         scenarios=[
             {"atexog": {"black": 1, "female": 0}, "label": "black=1, female=0"},
@@ -291,7 +290,7 @@ def test_mer_black_female0_risk_ratio_and_ci(fit_logit):
 
 
 def test_mer_black_female1_risk_ratio_and_ci(fit_logit):
-    m = Margins.log_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
+    m = GComputation(fit_logit, at="overall", scale="log")
     mer = m.contrasts(
         scenarios=[
             {"atexog": {"black": 1, "female": 1}, "label": "black=1, female=1"},
@@ -310,7 +309,7 @@ def test_mer_black_female1_risk_ratio_and_ci(fit_logit):
 
 def test_direct_ratio_black_matches_log_scale_point_estimate(fit_logit):
     """Direct ratio via evaluate() should match log_scale RR point estimate."""
-    m = Margins.linear_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
+    m = GComputation(fit_logit, at="overall", scale="identity")
     ratio = m.evaluate(
         scenarios=[
             {"atexog": {"black": 1}},
@@ -322,7 +321,7 @@ def test_direct_ratio_black_matches_log_scale_point_estimate(fit_logit):
 
 
 def test_direct_ratio_female_matches_log_scale_point_estimate(fit_logit):
-    m = Margins.linear_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
+    m = GComputation(fit_logit, at="overall", scale="identity")
     ratio = m.evaluate(
         scenarios=[
             {"atexog": {"female": 1}},
@@ -339,7 +338,7 @@ def test_direct_ratio_female_matches_log_scale_point_estimate(fit_logit):
 
 
 def test_true_lift_black_from_log_scale(fit_logit):
-    m = Margins.log_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
+    m = GComputation(fit_logit, at="overall", scale="log")
     rr = m.contrasts(
         scenarios=[
             {"atexog": {"black": 1}},
@@ -357,7 +356,7 @@ def test_true_lift_black_from_log_scale(fit_logit):
 
 
 def test_true_lift_female_from_log_scale(fit_logit):
-    m = Margins.log_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
+    m = GComputation(fit_logit, at="overall", scale="log")
     rr = m.contrasts(
         scenarios=[
             {"atexog": {"female": 1}},
@@ -397,7 +396,7 @@ def test_evaluate_lift_black_matches_manual_and_rr_minus_one(fit_logit, df_willi
     manual_lift = (p1 - p0) / p0
 
     # evaluate() lift on linear_scale
-    m = Margins.linear_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
+    m = GComputation(fit_logit, at="overall", scale="identity")
     lift_eval = m.evaluate(
         scenarios=[
             {"atexog": {"black": 1}, "label": "black=1"},
@@ -418,7 +417,7 @@ def test_evaluate_lift_black_matches_manual_and_rr_minus_one(fit_logit, df_willi
     )
 
     # Also matches RR - 1 from log_scale (point estimate only)
-    m_rr = Margins.log_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
+    m_rr = GComputation(fit_logit, at="overall", scale="log")
     rr = m_rr.contrasts(
         scenarios=[
             {"atexog": {"black": 1}},
@@ -440,7 +439,7 @@ def test_evaluate_lift_female_matches_manual_and_rr_minus_one(fit_logit, df_will
     pf0 = fit_logit.predict(tmp_f0).mean()
     manual_lift = (pf1 - pf0) / pf0
 
-    m = Margins.linear_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
+    m = GComputation(fit_logit, at="overall", scale="identity")
     lift_eval = m.evaluate(
         scenarios=[
             {"atexog": {"female": 1}, "label": "female=1"},
@@ -457,7 +456,7 @@ def test_evaluate_lift_female_matches_manual_and_rr_minus_one(fit_logit, df_will
         lift_eval, EVALUATE_LIFT_FEMALE_CI[0], EVALUATE_LIFT_FEMALE_CI[1], abs_tol=1e-3
     )
 
-    m_rr = Margins.log_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
+    m_rr = GComputation(fit_logit, at="overall", scale="log")
     rr = m_rr.contrasts(
         scenarios=[
             {"atexog": {"female": 1}},
@@ -475,7 +474,7 @@ def test_evaluate_lift_female_matches_manual_and_rr_minus_one(fit_logit, df_will
 
 
 def test_ols_mem_age_matches_coefficient_and_ci(fit_ols):
-    m = Margins.linear_scale(fit_ols, at="typical", kappa_threshold=float("inf"))
+    m = GComputation(fit_ols, at="typical", scale="identity")
     mem = m.dydx("age")
     _assert_point_estimate(mem, OLS_AGE_COEF_EXPECTED, abs_tol=1e-4)
     _assert_ci(mem, OLS_AGE_CI[0], OLS_AGE_CI[1], abs_tol=1e-2)
@@ -483,7 +482,7 @@ def test_ols_mem_age_matches_coefficient_and_ci(fit_ols):
 
 
 def test_ols_ame_age_matches_coefficient_and_ci(fit_ols):
-    m = Margins.linear_scale(fit_ols, at="overall", kappa_threshold=float("inf"))
+    m = GComputation(fit_ols, at="overall", scale="identity")
     ame = m.dydx("age")
     _assert_point_estimate(ame, OLS_AGE_COEF_EXPECTED, abs_tol=1e-4)
     _assert_ci(ame, OLS_AGE_CI[0], OLS_AGE_CI[1], abs_tol=1e-2)

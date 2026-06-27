@@ -11,25 +11,22 @@ kernelspec:
 ---
 
 # Inference scales and the κ diagnostic
+The estimator-level `phi` / `phi_inv` pair picks the *inference scale*:
+the scale on which the delta method is computed, and the scale whose
+CI endpoints get back-transformed to the report.
 
-The session-level `phi` / `phi_inv` pair picks the *inference scale*:
-the scale on which the delta method and the κ diagnostic are
-computed, and the scale whose CI endpoints get back-transformed to
-the report.
+Common scale choices:
 
-Common scale helpers:
-
-| Helper                          | `phi`       | When to use                            |
-|---------------------------------|-------------|----------------------------------------|
-| `Margins.linear_scale(...)`     | identity    | additive contrasts; AME on response    |
-| `Margins.log_scale(...)`        | `exp`       | rate ratios, risk ratios, hazard ratios |
-| `Margins.logit_scale(...)`      | `expit`     | odds ratios, probabilities             |
-| `Margins.correlation_scale(...)` | `tanh`     | Fisher-z transformed correlations      |
+| Constructor keyword                     | Back-transform | When to use                            |
+|-----------------------------------------|----------------|----------------------------------------|
+| `scale="identity"`                      | identity       | additive contrasts; AME on response    |
+| `scale="log"`                           | `exp`          | rate ratios, risk ratios, hazard ratios |
+| `scale="logit"`                         | `expit`        | odds ratios, probabilities             |
+| `scale=(jnp.tanh, jnp.arctanh)`         | `tanh`         | Fisher-z transformed correlations      |
 
 The rule of thumb: pick the scale on which the *contrast* is most
-nearly linear in `β`. That keeps κ small, the symmetric Wald CI
-honest, and the back-transformed reporting CI asymmetric in the right
-direction.
+nearly linear in `β`. That keeps the symmetric Wald CI honest and the
+back-transformed reporting CI asymmetric in the right direction.
 
 ```{code-cell} python
 import numpy as np
@@ -37,7 +34,7 @@ import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(0)
 n = 1500
@@ -47,16 +44,17 @@ df["y"] = rng.binomial(1, 1 / (1 + np.exp(-lp)))
 fit = smf.glm("y ~ x", data=df, family=sm.families.Binomial()).fit()
 ```
 
-## κ as a pre-flight diagnostic
+## Comparing scales on the same estimand
 
 ```{code-cell} python
-print(Margins.linear_scale(fit, at="overall").diagnose().summary())
-print(Margins.log_scale(fit, at="overall").diagnose().summary())
-print(Margins.logit_scale(fit, at="overall").diagnose().summary())
+print(GComputation(fit, at="overall", scale="identity").dydx("x").summary())
+print(GComputation(fit, at="overall", scale="log").dydx("x").summary())
+print(GComputation(fit, at="overall", scale="logit").dydx("x").summary())
 ```
 
-When κ exceeds the session threshold (`kappa_threshold=0.3` by
-default), the next call auto-falls-back to simulation. The summary
-on every result tells you which inference path was actually used.
+The point estimate and CI width change with the scale. Choose the
+scale that makes the contrast most interpretable for your audience,
+and switch to `method="simulation"` or `method="bootstrap"` if you
+suspect the delta-method linearization is poor.
 
-See [](../explanations/kappa_diagnostic.md) for the math.
+See [](../explanations/kappa_diagnostic.md) for the curvature math.

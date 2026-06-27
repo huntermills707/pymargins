@@ -11,7 +11,7 @@ from lifelines import CoxPHFitter
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins._adapter import auto_detect_adapter
 from pymargins._adapters.lifelines_coxph import LifelinesCoxPHAdapter
 
@@ -190,20 +190,20 @@ def test_variable_metadata_is_cached(coxph_fit_formula, df_survival):
 
 
 # ---------------------------------------------------------------------------
-# End-to-end via Margins session
+# End-to-end via GComputation
 # ---------------------------------------------------------------------------
 
 
 def test_margins_predict(coxph_fit_formula, df_survival):
     adapter = LifelinesCoxPHAdapter(coxph_fit_formula, training_data=df_survival)
-    m = Margins.log_scale(coxph_fit_formula, adapter=adapter)
+    m = GComputation(coxph_fit_formula, adapter=adapter, scale="log")
     res = m.predict()
     assert res.estimate.size == 1
 
 
 def test_margins_dydx(coxph_fit_formula, df_survival):
     adapter = LifelinesCoxPHAdapter(coxph_fit_formula, training_data=df_survival)
-    m = Margins.log_scale(coxph_fit_formula, adapter=adapter)
+    m = GComputation(coxph_fit_formula, adapter=adapter, scale="log")
     res = m.dydx("x1")
     assert res.estimate.size == 1
     assert np.isfinite(float(res.estimate))
@@ -216,13 +216,14 @@ def test_margins_dydx(coxph_fit_formula, df_survival):
 
 def test_bootstrap_end_to_end(coxph_fit_formula, df_survival):
     adapter = LifelinesCoxPHAdapter(coxph_fit_formula, training_data=df_survival)
-    m = Margins.log_scale(
+    m = GComputation(
         coxph_fit_formula,
         adapter=adapter,
+        scale="log",
         at="typical",
         method="bootstrap",
-        n_boot=50,
-        rng_seed=42,
+        B=50,
+        seed=42,
     )
     rd = m.dydx("x1")
     assert rd.method == "bootstrap"
@@ -241,7 +242,7 @@ def test_attach_rejects_unsupported_vcov_string(coxph_fit_formula, df_survival):
     with pytest.raises(
         ValueError, match="LifelinesCoxPHAdapter does not support vcov='HC0'"
     ):
-        Margins(coxph_fit_formula, adapter=adapter, vcov="HC0")
+        GComputation(coxph_fit_formula, adapter=adapter, vcov="HC0")
 
 
 def test_attach_rejects_unsupported_vcov_dict(coxph_fit_formula, df_survival):
@@ -249,7 +250,7 @@ def test_attach_rejects_unsupported_vcov_dict(coxph_fit_formula, df_survival):
     with pytest.raises(
         ValueError, match="LifelinesCoxPHAdapter does not support vcov dict"
     ):
-        Margins(
+        GComputation(
             coxph_fit_formula,
             adapter=adapter,
             vcov={"type": "cluster", "groups": df_survival["E"]},
@@ -259,12 +260,13 @@ def test_attach_rejects_unsupported_vcov_dict(coxph_fit_formula, df_survival):
 def test_attach_accepts_supported_vcov(coxph_fit_formula, df_survival):
     adapter = LifelinesCoxPHAdapter(coxph_fit_formula, training_data=df_survival)
     # default (None)
-    m1 = Margins.log_scale(coxph_fit_formula, adapter=adapter)
-    assert m1.vcov_spec is None
+    m1 = GComputation(coxph_fit_formula, adapter=adapter, scale="log")
+    assert m1.plan.vcov is None
     # ndarray
     cov = np.eye(len(coxph_fit_formula.params_))
-    m2 = Margins(coxph_fit_formula, adapter=adapter, vcov=cov)
-    assert m2.vcov_spec is cov
+    m2 = GComputation(coxph_fit_formula, adapter=adapter, vcov=cov)
+    assert isinstance(m2.plan.vcov, dict)
+    assert m2.plan.vcov.get("kind") == "user_ndarray"
 
 
 # ---------------------------------------------------------------------------

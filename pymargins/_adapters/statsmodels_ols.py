@@ -78,6 +78,15 @@ class StatsmodelsOLSAdapter(LinearPredictionAdapter):
     def coefficients(self) -> jnp.ndarray:
         return jnp.asarray(self.results.params)
 
+    def influence(self) -> jnp.ndarray | None:
+        """Per-observation influence of β̂: ψ^β = score_obs @ cov_params.
+
+        Reuses the same bread and scores as the survey linearization path.
+        """
+        scores = np.asarray(self.score_obs())
+        cov = np.asarray(self.covariance())
+        return jnp.asarray(scores @ cov)
+
     def score_obs(self) -> np.ndarray:
         """Per-observation score ∂ℓ_i/∂β = w_i x_i (y_i − x_iᵀβ̂) / σ̂², shape (n, p).
 

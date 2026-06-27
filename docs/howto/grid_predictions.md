@@ -12,13 +12,12 @@ kernelspec:
 
 # Grid predictions
 
-
 ```{code-cell} python
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(42)
 n = 2000
@@ -31,7 +30,7 @@ df["y"] = rng.binomial(1, 1 / (1 + np.exp(-lp)))
 
 fit = smf.glm("y ~ age + treatment", data=df,
               family=sm.families.Binomial()).fit()
-m = Margins.log_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="log")
 ```
 
 
@@ -69,7 +68,7 @@ ax.set(xlabel="Age", ylabel="Treatment")
 fig.colorbar(im, ax=ax, label="P(y=1)")
 ```
 
-Variables not mentioned in `atexog` / `grid` follow the session's
+Variables not mentioned in `atexog` / `grid` follow the estimator's
 `at=` rule (`"overall"` averages over the sample, `"typical"` /
 `"mean"` hold them at a representative profile).
 
@@ -78,10 +77,10 @@ Variables not mentioned in `atexog` / `grid` follow the session's
 Every grid point materialises a full copy of the design matrix.  For
 a 10-point grid over a 1M-row dataset that is 10M rows.  Strategies:
 
-- Use a smaller representative sample at session construction
+- Use a smaller representative sample at estimator construction
   (`at="typical"`).
 - Pass explicit `data=` overrides on the call to override the source
   rows with a smaller representative sample.
-- Call `result.materialize()` promptly on results you intend to keep
+- Call `result` promptly on results you intend to keep
   long-term; this drops the heavy machinery (gradients, design
-  matrices, session refs).
+  matrices, Plan refs).

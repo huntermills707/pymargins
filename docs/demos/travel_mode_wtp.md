@@ -11,7 +11,6 @@ kernelspec:
 ---
 
 # Travel mode choice — the value of travel time (WTP)
-
 When a commuter chooses between modes, they trade money against time.
 The rate at which they are willing to substitute one for the other —
 how many dollars an hour of travel time is worth to them — is the
@@ -41,7 +40,7 @@ import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 # The TravelMode data ships in long form: one row per (traveller, mode),
 # 210 travellers × 4 modes (air / train / bus / car).
@@ -106,7 +105,7 @@ On the probability scale, each extra dollar of relative car cost and
 each extra minute of relative car time both lower P(choose car):
 
 ```{code-cell} python
-m = Margins.linear_scale(fit, vcov="HC3", at="overall")
+m = GComputation(fit, vcov="HC3", at="overall", scale="identity")
 
 print(m.dydx("cost_diff").summary())
 print(m.dydx("time_diff").summary())
@@ -142,10 +141,8 @@ watches. Re-running the same WTP under simulation shows how much the
 delta-method interval understates the asymmetry:
 
 ```{code-cell} python
-m_sim = Margins.linear_scale(
-    fit, vcov="HC3", at="overall",
-    method="simulation", n_sim=4000, rng_seed=0,
-)
+m_sim = GComputation(fit, vcov="HC3", at="overall",
+    method="simulation", n_sim=4000, seed=0, scale="identity")
 wtp_sim = m_sim.wtp("time_diff", "cost_diff")
 
 def ci_str(res):
@@ -154,7 +151,6 @@ def ci_str(res):
 
 print(f"delta      WTP/min = {float(wtp_minute.estimate):+.3f}  95% CI {ci_str(wtp_minute)}")
 print(f"simulation WTP/min = {float(wtp_sim.estimate):+.3f}  95% CI {ci_str(wtp_sim)}")
-print(f"\nκ on the ratio: {float(np.max(wtp_minute.kappa)):.3f}")
 ```
 
 The simulation interval is wider and skewed — the right behaviour for
@@ -168,7 +164,7 @@ linearization of something visibly curved.
 If subgroup κ values straddle the fallback threshold (so one slice
 falls back to simulation while another stays on the delta method),
 composition refuses to mix inference methods. Pin the method
-explicitly — `method="simulation"` on the session — whenever you
+explicitly — `method="simulation"` on the estimator — whenever you
 compute WTP across subgroups.
 ```
 

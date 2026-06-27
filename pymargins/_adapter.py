@@ -58,10 +58,10 @@ import jax.numpy as jnp
 if TYPE_CHECKING:
     import pandas as pd
 
-    from pymargins.margins import Margins
 import numpy as np
 
 from ._gradients import GradientBackend
+from ._tabular import fingerprint_frame
 
 # ---------------------------------------------------------------------------
 # Type aliases and small dataclasses
@@ -112,7 +112,7 @@ class ModelAdapter(abc.ABC):
 
     Concrete subclasses target specific frameworks (statsmodels,
     linearmodels, sklearn) and possibly specific model classes within them.
-    The Margins session calls only the methods defined here; all framework-
+    The engine calls only the methods defined here; all framework-
     specific knowledge is encapsulated in the adapter.
 
     Subclassing contract
@@ -177,15 +177,14 @@ class ModelAdapter(abc.ABC):
     # Session integration
     # -----------------------------------------------------------------------
 
-    def attach(self, session: Margins) -> None:
-        """Attach this adapter to a Margins session. Receive the session's
-        configuration (scale, vcov_spec, weights, etc.) and validate
-        compatibility.
+    def attach(self, session: Any) -> None:
+        """Attach this adapter to an estimator. Receive its configuration
+        (scale, vcov_spec, weights, etc.) and validate compatibility.
 
         Subclasses should raise ValueError or NotImplementedError with
-        a clear message if the session's configuration is not supportable.
+        a clear message if the configuration is not supportable.
         For example, a survival adapter that doesn't support log scale
-        would refuse a session with phi=exp.
+        would refuse a configuration with phi=exp.
 
         Base implementation validates that ``phi`` and ``phi_inv`` are
         approximate inverses when both are provided. Subclasses that
@@ -194,8 +193,8 @@ class ModelAdapter(abc.ABC):
 
         Parameters
         ----------
-        session : Margins
-            The session attaching this adapter.
+        session : object
+            The estimator configuration attaching this adapter.
         """
         phi = getattr(session, "phi", None)
         phi_inv = getattr(session, "phi_inv", None)
@@ -336,9 +335,8 @@ class ModelAdapter(abc.ABC):
     def training_data(self):
         """The training data used to fit the model.
 
-        Required for diagnose() and for scenario expansion when the session's
-        `at` setting is "overall". Adapters should expose this attribute
-        or override Margins._base_data.
+        Required for scenario expansion when the estimator's `at` setting is
+        "overall". Adapters should set this attribute in ``__init__``.
 
         Returns
         -------
@@ -347,8 +345,7 @@ class ModelAdapter(abc.ABC):
         """
         raise NotImplementedError(
             f"{type(self).__name__} does not expose training_data. "
-            "Either set self.training_data in __init__, or override "
-            "Margins._base_data."
+            "Set self.training_data in __init__."
         )
 
     @property
@@ -369,7 +366,7 @@ class ModelAdapter(abc.ABC):
         continuous variables that map to a single design column. For
         categorical or factor-expanded variables this should raise
         ``ValueError`` — slope is undefined for such variables, and
-        ``Margins.dydx`` validates ``var_type`` before calling this.
+        ``GComputation.dydx`` validates ``var_type`` before calling this.
 
         Parameters
         ----------
@@ -396,6 +393,32 @@ class ModelAdapter(abc.ABC):
             Should include all variables in the model's design.
         """
         ...
+
+    # -----------------------------------------------------------------------
+    # Influence function (optional)
+    # -----------------------------------------------------------------------
+
+    def influence(self) -> jnp.ndarray | None:
+        """Per-observation influence of β̂.
+
+        For sources with per-row scores (tier-1), returns ψ^β where row *i*
+        is ``score_obs[i] @ covariance().T``, shape ``(n_obs, n_params)``.
+        Rows are aligned to :attr:`training_data`'s index.
+
+        ``None`` means this source has no per-row score (tier 2/3).
+        """
+        return None
+
+    def data_fingerprint(self) -> str:
+        """Content hash of :attr:`training_data`.
+
+        Used for template-vs-wiring consistency checks and plan identity.
+        The result is cached on the instance.
+        """
+        if hasattr(self, "_data_fingerprint"):
+            return self._data_fingerprint
+        self._data_fingerprint = fingerprint_frame(self.training_data)
+        return self._data_fingerprint
 
     # -----------------------------------------------------------------------
     # Bootstrap support (optional)
@@ -466,7 +489,7 @@ class GLMAdapter(ModelAdapter):
     in the design docs.
     """
 
-    def attach(self, session: Margins) -> None:
+    def attach(self, session: Any) -> None:
         super().attach(session)
 
     @property
@@ -649,7 +672,7 @@ class BootstrapOnlyAdapter(ModelAdapter):
 def auto_detect_adapter(model, formula=None, data=None) -> ModelAdapter:
     """Inspect a fitted model and return an appropriate adapter.
 
-    Used by Margins() when no adapter is explicitly provided. Delegates to
+    Used by GComputation() when no adapter is explicitly provided. Delegates to
     the concrete dispatch table in _adapters to keep framework imports lazy.
 
     Parameters

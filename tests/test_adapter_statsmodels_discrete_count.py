@@ -10,7 +10,7 @@ import statsmodels.formula.api as smf
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins._adapter import auto_detect_adapter
 from pymargins._adapters.statsmodels_discrete_count import (
     StatsmodelsDiscreteCountAdapter,
@@ -185,22 +185,22 @@ def test_variable_metadata(poisson_fit_formula):
 
 
 # ---------------------------------------------------------------------------
-# End-to-end via Margins session
+# End-to-end via GComputation
 # ---------------------------------------------------------------------------
 
 
-def test_margins_predict_aap_poisson(poisson_fit_formula):
+def test_gcomputation_predict_aap_poisson(poisson_fit_formula):
     adapter = StatsmodelsDiscreteCountAdapter(poisson_fit_formula)
-    m = Margins.linear_scale(poisson_fit_formula, adapter=adapter)
-    res = m.predict()
+    est = GComputation(poisson_fit_formula, adapter=adapter)
+    res = est.predict()
     assert res.estimate.size == 1
     assert float(res.estimate) > 0
 
 
-def test_margins_dydx_poisson(poisson_fit_formula):
+def test_gcomputation_dydx_poisson(poisson_fit_formula):
     adapter = StatsmodelsDiscreteCountAdapter(poisson_fit_formula)
-    m = Margins.linear_scale(poisson_fit_formula, adapter=adapter)
-    res = m.dydx("x1")
+    est = GComputation(poisson_fit_formula, adapter=adapter)
+    res = est.dydx("x1")
     assert res.estimate.size == 1
     assert np.isfinite(float(res.estimate))
 

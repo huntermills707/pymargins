@@ -2,7 +2,6 @@
 
 from unittest.mock import MagicMock
 
-import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import pytest
@@ -340,21 +339,12 @@ def test_formulaspec_type_validation():
 # ---------------------------------------------------------------------------
 
 
-def test_run_inference_unsupported_method():
-    # MagicMock imported at top
-    from pymargins._inference._config import InferenceConfig
-    from pymargins._inference._dispatch import run_inference
-
-    adapter = MagicMock()
-    adapter.supported_inference_methods = {"delta", "simulation"}
-    adapter.coefficients.return_value = jnp.array([1.0, 2.0])
-    config = InferenceConfig(method="bootstrap")
-    with pytest.raises(ValueError, match="does not support method"):
-        run_inference(lambda b, X: b[0], adapter, config)
+# _inference._dispatch.run_inference was deleted in R7; run_test moved to
+# _result._intervals.
 
 
 def test_run_test_draws_greater():
-    from pymargins._inference._dispatch import run_test
+    from pymargins._result._intervals import run_test
 
     rng = np.random.default_rng(42)
     draws = rng.standard_normal((1000,))
@@ -370,7 +360,7 @@ def test_run_test_draws_greater():
 
 
 def test_run_test_draws_less():
-    from pymargins._inference._dispatch import run_test
+    from pymargins._result._intervals import run_test
 
     rng = np.random.default_rng(42)
     draws = rng.standard_normal((1000,))
@@ -412,20 +402,8 @@ def test_formulaspec_verify_fails():
 
 
 # ---------------------------------------------------------------------------
-# margins/_session validation errors
+# GComputation validation errors
 # ---------------------------------------------------------------------------
-
-
-def test_session_n_jobs_invalid():
-    import pandas as pd
-    import statsmodels.formula.api as smf
-
-    df = pd.DataFrame({"x": [1.0, 2.0, 3.0], "y": [1.0, 2.0, 3.0]})
-    fit = smf.ols("y ~ x", data=df).fit()
-    from pymargins import Margins
-
-    with pytest.raises(ValueError, match="n_jobs must be a positive integer"):
-        Margins.linear_scale(fit, n_jobs=0)
 
 
 def test_session_level_out_of_range():
@@ -434,10 +412,11 @@ def test_session_level_out_of_range():
 
     df = pd.DataFrame({"x": [1.0, 2.0, 3.0], "y": [1.0, 2.0, 3.0]})
     fit = smf.ols("y ~ x", data=df).fit()
-    from pymargins import Margins
+    from pymargins import GComputation
 
+    est = GComputation(fit, level=1.5)
     with pytest.raises(ValueError, match="level must be in"):
-        Margins.linear_scale(fit, level=1.5)
+        est.predict()
 
 
 def test_session_n_sim_invalid():
@@ -446,10 +425,10 @@ def test_session_n_sim_invalid():
 
     df = pd.DataFrame({"x": [1.0, 2.0, 3.0], "y": [1.0, 2.0, 3.0]})
     fit = smf.ols("y ~ x", data=df).fit()
-    from pymargins import Margins
+    from pymargins import GComputation
 
     with pytest.raises(ValueError, match="n_sim must be a positive integer"):
-        Margins.linear_scale(fit, method="simulation", n_sim=-1)
+        GComputation(fit, method="simulation", n_sim=-1)
 
 
 def test_session_n_boot_invalid():
@@ -458,10 +437,10 @@ def test_session_n_boot_invalid():
 
     df = pd.DataFrame({"x": [1.0, 2.0, 3.0], "y": [1.0, 2.0, 3.0]})
     fit = smf.ols("y ~ x", data=df).fit()
-    from pymargins import Margins
+    from pymargins import GComputation
 
-    with pytest.raises(ValueError, match="n_boot must be a positive integer"):
-        Margins.linear_scale(fit, method="bootstrap", n_boot=-1)
+    with pytest.raises(ValueError, match="must be a positive integer"):
+        GComputation(fit, method="bootstrap", B=-1)
 
 
 def test_session_fd_step_invalid():
@@ -470,10 +449,11 @@ def test_session_fd_step_invalid():
 
     df = pd.DataFrame({"x": [1.0, 2.0, 3.0], "y": [1.0, 2.0, 3.0]})
     fit = smf.ols("y ~ x", data=df).fit()
-    from pymargins import Margins
+    from pymargins import GComputation
 
-    with pytest.raises(ValueError, match="fd_step must be a positive finite float"):
-        Margins.linear_scale(fit, fd_step=-0.01)
+    est = GComputation(fit, fd_step=-0.01)
+    with pytest.raises(ValueError, match="fd_step must be positive"):
+        est.dydx("x")
 
 
 def test_session_phi_without_phi_inv():
@@ -482,7 +462,10 @@ def test_session_phi_without_phi_inv():
 
     df = pd.DataFrame({"x": [1.0, 2.0, 3.0], "y": [1.0, 2.0, 3.0]})
     fit = smf.ols("y ~ x", data=df).fit()
-    from pymargins import Margins
+    from pymargins import GComputation
 
-    with pytest.raises(ValueError, match="phi and phi_inv must be provided together"):
-        Margins(fit, phi=lambda x: x)
+    with pytest.raises(
+        ValueError,
+        match="scale= must be a named scale string or a \\(phi, phi_inv\\) callable pair",
+    ):
+        GComputation(fit, scale=lambda x: x)

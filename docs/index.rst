@@ -1,12 +1,12 @@
 pymargins
 =========
 
-Expert-mode marginal effects for Python. Session-level analytical
-pre-commitment, JAX-native autodiff, and a κ-driven simulation
-fallback when the delta method is unsafe.
+Expert-mode marginal effects for Python. Functional wiring graphs,
+constructor-bound analysis plans, JAX-native autodiff, and a soundness
+layer that refuses statistically unsound compositions at compile time.
 
-``pymargins`` wraps a fitted statistical model in a :class:`~pymargins.Margins`
-session, then computes adjusted predictions, slopes, contrasts, and
+``pymargins`` wraps a fitted statistical model in a :class:`~pymargins.GComputation`
+estimator, then computes adjusted predictions, slopes, contrasts, and
 arbitrary differentiable estimands — with uncertainty from the delta
 method, Krinsky–Robb simulation, or bootstrap — across statsmodels,
 linearmodels, lifelines, and scikit-learn model classes.
@@ -26,6 +26,7 @@ linearmodels, lifelines, and scikit-learn model classes.
     :maxdepth: 1
     :caption: Tutorials — learning by doing
 
+    tutorials/graph_quickstart
     tutorials/getting_started
     tutorials/glm_logit
     tutorials/glm_poisson
@@ -102,7 +103,8 @@ linearmodels, lifelines, and scikit-learn model classes.
     :caption: Explanations — theory and design
 
     math
-    explanations/session_precommitment
+    explanations/computation_graph
+    explanations/plan_pre_registration
     explanations/inference_scale
     explanations/kappa_diagnostic
     explanations/gradient_backend
@@ -110,6 +112,7 @@ linearmodels, lifelines, and scikit-learn model classes.
     explanations/scenarios_model
     explanations/adapter_pattern
     explanations/vs_marginaleffects
+    explanations/session_precommitment
 
 Indices
 -------

@@ -11,7 +11,6 @@ kernelspec:
 ---
 
 # Instrumental variables (2SLS / LIML / GMM)
-
 `linearmodels.IV2SLS`, `IVLIML`, `IVGMM`, and friends are supported
 through the linearmodels IV adapter. The fitted second-stage
 coefficients enter `pymargins` just like an OLS fit, with the IV
@@ -22,7 +21,7 @@ import numpy as np
 import pandas as pd
 from linearmodels.iv import IV2SLS
 
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(2)
 n = 2000
@@ -40,7 +39,7 @@ fit = IV2SLS(df["y"], df[["const"]], df[["x"]], df[["z"]]).fit()
 ## AME of the endogenous regressor
 
 ```{code-cell} python
-m = Margins.linear_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="identity")
 print(m.dydx("x").summary())
 ```
 

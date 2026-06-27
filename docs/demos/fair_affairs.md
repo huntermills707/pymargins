@@ -11,7 +11,6 @@ kernelspec:
 ---
 
 # Fair (1978) — Extramarital affairs, two ways
-
 The Fair affairs survey records the *number* of extramarital
 encounters reported by 6,366 respondents, alongside age, years
 married, religiousness, education, and a marriage-rating scale. The
@@ -23,7 +22,7 @@ same dataset supports two distinct analyses:
   encounters do we expect from a respondent at this profile?"
 
 Both are useful. The point of this demo is to run them through one
-`pymargins` session each and contrast how they answer the same
+`pymargins` estimator each and contrast how they answer the same
 substantive questions on different scales.
 
 ```{code-cell} python
@@ -32,7 +31,7 @@ import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from pymargins import Margins, pairwise
+from pymargins import GComputation, pairwise  # 0.4.0: Margins -> GComputation
 
 raw = sm.datasets.fair.load_pandas().data.copy()
 raw["had_affair"] = (raw["affairs"] > 0).astype(int)
@@ -49,7 +48,7 @@ logit = smf.glm(
     family=sm.families.Binomial(),
 ).fit()
 
-m_logit = Margins.linear_scale(logit, vcov="HC3", at="overall")
+m_logit = GComputation(logit, vcov="HC3", at="overall", scale="identity")
 print(m_logit.dydx(["age", "yrs_married", "religious",
                     "rate_marriage", "educ"]).summary())
 ```
@@ -68,7 +67,7 @@ pois = smf.glm(
     family=sm.families.Poisson(),
 ).fit()
 
-m_pois = Margins.linear_scale(pois, vcov="HC3", at="overall")
+m_pois = GComputation(pois, vcov="HC3", at="overall", scale="identity")
 print(m_pois.dydx(["age", "yrs_married", "religious",
                    "rate_marriage", "educ"]).summary())
 ```
@@ -98,13 +97,13 @@ contrast gives the corresponding gap in expected count.
 
 ## 4. Scale matters — log vs linear inference for the Poisson
 
-The Poisson canonical link is log. Opening the session on the log
+The Poisson canonical link is log. Using `scale="log"`
 scale gives a *rate ratio* interpretation with an asymmetric CI that
 is multiplicative on the count scale, which is usually what readers
 expect for count models:
 
 ```{code-cell} python
-m_pois_log = Margins.log_scale(pois, vcov="HC3", at="overall")
+m_pois_log = GComputation(pois, vcov="HC3", at="overall", scale="log")
 rr = m_pois_log.contrasts(scenarios=scen, contrasts=w)
 print(rr.summary())
 ```
@@ -117,7 +116,8 @@ The κ diagnostic checks whether the estimand surface is well
 linearized on the chosen scale:
 
 ```{code-cell} python
-print(m_pois_log.diagnose().summary())
+print(rr.kappa)
+print(m_pois_log.plan.describe())
 ```
 
 A small κ confirms the delta method is safe on the log scale; a

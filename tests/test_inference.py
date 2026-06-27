@@ -14,7 +14,6 @@ from pymargins._adapters.statsmodels_glm import StatsmodelsGLMAdapter
 from pymargins._inference import (
     InferenceConfig,
     _run_simulation,
-    run_inference,
 )
 
 
@@ -74,92 +73,6 @@ def test_simulation_vmap_path_executes(fit_logit, monkeypatch):
     assert np.isfinite(float(result["estimate"]))
 
 
-def test_delta_fallback_sets_kappa(fit_logit):
-    """When delta falls back to simulation, kappa should be present."""
-    adapter = StatsmodelsGLMAdapter(fit_logit)
-
-    def h(b):
-        return jax.scipy.special.expit(jnp.array([1.0, 50.0, 1.0]) @ b)
-
-    # Force fallback by setting very low kappa threshold
-    config = InferenceConfig(
-        method="delta",
-        kappa_threshold=0.0,
-        diagnostics=True,
-        n_sim=100,
-        rng_seed=42,
-    )
-    result = run_inference(h, adapter, config)
-    assert result["fallback_triggered"] is True
-    assert result["kappa"] is not None
-    assert np.isfinite(float(result["kappa"]))
-
-
-def test_simulation_direct_includes_kappa(fit_logit):
-    """Direct simulation path should include kappa when diagnostics=True."""
-    adapter = StatsmodelsGLMAdapter(fit_logit)
-
-    def h(b):
-        return jax.scipy.special.expit(jnp.array([1.0, 50.0, 1.0]) @ b)
-
-    config = InferenceConfig(
-        method="simulation",
-        n_sim=100,
-        rng_seed=42,
-        diagnostics=True,
-    )
-    result = run_inference(h, adapter, config)
-    assert result["method"] == "simulation"
-    assert result["kappa"] is not None
-    assert np.isfinite(float(result["kappa"]))
-
-
-def test_simulation_non_differentiable_estimand(fit_logit):
-    """Simulation must not crash for non-JAX-differentiable estimands."""
-    adapter = StatsmodelsGLMAdapter(fit_logit)
-
-    def h(b):
-        # Python conditional on a tracer value makes this non-differentiable
-        arr = np.asarray(b)
-        return float(arr[0]) if arr[0] > 0 else float(arr[1])
-
-    config = InferenceConfig(
-        method="simulation",
-        n_sim=50,
-        rng_seed=42,
-        diagnostics=True,
-    )
-    result = run_inference(h, adapter, config)
-    assert result["method"] == "simulation"
-    assert np.isfinite(float(result["estimate"]))
-    assert float(result["conf_int_lower"]) < float(result["conf_int_upper"])
-    # kappa should be None because h is not JAX-differentiable
-    assert result["kappa"] is None
-
-
-def test_simulation_concretization_falls_back_to_loop(fit_logit):
-    """ConcretizationTypeError from vmap must trigger the Python-loop fallback."""
-    adapter = StatsmodelsGLMAdapter(fit_logit)
-
-    def h(b):
-        # Python `if` on a tracer raises ConcretizationTypeError under vmap
-        if b[0] > 0:
-            return jnp.exp(b[0])
-        return jnp.exp(b[1])
-
-    config = InferenceConfig(
-        method="simulation",
-        n_sim=20,
-        rng_seed=42,
-        diagnostics=False,
-    )
-    # Should not raise — the fallback handles ConcretizationTypeError
-    result = run_inference(h, adapter, config)
-    assert result["draws"] is not None
-    assert result["draws"].shape == (20,)
-    assert np.isfinite(float(result["estimate"]))
-
-
 def test_is_jax_differentiable_detects_vmap_failure():
     """Probe must reject estimands that pass jax.grad but fail under vmap.
 
@@ -187,27 +100,3 @@ def test_is_jax_differentiable_accepts_clean_estimand():
 
     beta = jnp.array([0.5, -0.3, 1.0])
     assert is_jax_differentiable(h, beta) is True
-
-
-def test_bootstrap_includes_kappa_for_differentiable_h(fit_logit):
-    """Bootstrap path computes κ at β̂ when h is JAX-differentiable."""
-    adapter = StatsmodelsGLMAdapter(fit_logit)
-
-    def h(b):
-        return jax.scipy.special.expit(jnp.array([1.0, 50.0, 1.0]) @ b)
-
-    config = InferenceConfig(
-        method="bootstrap",
-        n_boot=20,
-        rng_seed=42,
-        diagnostics=True,
-    )
-    result = run_inference(
-        h,
-        adapter,
-        config,
-        h_factory=lambda new_adapter: h,
-    )
-    assert result["method"] == "bootstrap"
-    assert result["kappa"] is not None
-    assert np.isfinite(float(result["kappa"]))

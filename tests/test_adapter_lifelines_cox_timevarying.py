@@ -10,7 +10,7 @@ from lifelines import CoxTimeVaryingFitter
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins._adapter import auto_detect_adapter
 from pymargins._adapters.lifelines_cox_timevarying import (
     LifelinesCoxTimeVaryingSurvivalAdapter,
@@ -107,15 +107,15 @@ def test_bootstrap_end_to_end(ctv_fit, df_survival_tv):
     adapter = LifelinesCoxTimeVaryingSurvivalAdapter(
         ctv_fit, training_data=df_survival_tv
     )
-    m = Margins(
+    est = GComputation(
         ctv_fit,
         adapter=adapter,
         at="typical",
         method="bootstrap",
-        n_boot=50,
-        rng_seed=42,
+        B=50,
+        seed=42,
     )
-    rd = m.predict()
+    rd = est.predict()
     assert rd.method == "bootstrap"
     assert np.isfinite(float(rd.estimate))
     assert 0 <= float(rd.estimate) <= 1

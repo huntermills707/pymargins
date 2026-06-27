@@ -1,4 +1,4 @@
-"""Regression tests for the 17 bug fixes in the orchestration layer."""
+"""Regression tests for bug fixes, ported to the GComputation API (R7)."""
 
 import jax
 import jax.numpy as jnp
@@ -10,16 +10,10 @@ import statsmodels.formula.api as smf
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins import Margins
+from pymargins import GComputation, steps
 from pymargins._adapters.statsmodels_glm import StatsmodelsGLMAdapter
-from pymargins._inference import (
-    InferenceConfig,
-    _run_bootstrap,
-    _run_simulation,
-    run_inference,
-    run_test,
-)
-from pymargins._result import MarginsResult, _join_fallback_reasons
+from pymargins._inference import InferenceConfig, _run_bootstrap, _run_simulation
+from pymargins._result import GraphResult
 from pymargins._scenarios import make_aggregation_resolver
 
 # ---------------------------------------------------------------------------
@@ -50,69 +44,18 @@ def fit_logit(df_logit):
     ).fit()
 
 
-@pytest.fixture
-def fit_ols():
-    rng = np.random.default_rng(42)
-    n = 100
-    df = pd.DataFrame(
-        {
-            "x1": rng.standard_normal(n),
-            "x2": rng.standard_normal(n),
-            "y": rng.standard_normal(n),
-        }
-    )
-    return smf.ols("y ~ x1 + x2", data=df).fit()
-
-
 # ---------------------------------------------------------------------------
-# 1. run_inference fallback guard too restrictive
+# 1. Delta fallback guard too restrictive
 # ---------------------------------------------------------------------------
-
-
-def test_delta_fallback_for_non_differentiable_even_with_autodiff(fit_logit):
-    """Adapter supports autodiff but h is pure Python → should still fallback."""
-    adapter = StatsmodelsGLMAdapter(fit_logit)
-
-    def h(b):
-        arr = np.asarray(b)
-        return float(arr[0]) if arr[0] > 0 else float(arr[1])
-
-    config = InferenceConfig(method="delta", diagnostics=False)
-    # Adapter supports_jax_autodiff=True, but h is not differentiable
-    result = run_inference(h, adapter, config)
-    assert result["method"] == "simulation"
-    assert result["fallback_triggered"] is True
+# Legacy ``run_inference`` fallback dispatch is deleted in 0.4.0 (R3).
+# Non-differentiable estimands under method="delta" now raise CompileError.
+# Covered by tests/test_engine_execute.py::test_nondifferentiable_delta_refuses.
 
 
 # ---------------------------------------------------------------------------
 # 2. NaN κ silently disables auto-fallback
 # ---------------------------------------------------------------------------
-
-
-def test_nan_kappa_does_not_crash_fallback(monkeypatch, fit_logit):
-    """NaN in kappa vector should not crash; nanmax handles it safely."""
-    adapter = StatsmodelsGLMAdapter(fit_logit)
-
-    def h(b):
-        return jax.scipy.special.expit(jnp.array([1.0, 50.0, 1.0]) @ b)
-
-    import pymargins._inference as _inf
-
-    def mock_kappa(*args, **kwargs):
-        return jnp.array([jnp.nan, 0.5, jnp.nan])
-
-    monkeypatch.setattr(_inf, "kappa", mock_kappa)
-
-    config = InferenceConfig(
-        method="delta",
-        kappa_threshold=0.0,
-        diagnostics=True,
-        n_sim=50,
-        rng_seed=42,
-    )
-    # With nanmax, 0.5 > 0.0 should trigger fallback
-    result = run_inference(h, adapter, config)
-    assert result["fallback_triggered"] is True
+# kappa_threshold and method fallback are deleted in 0.4.0 (R3/R7).
 
 
 # ---------------------------------------------------------------------------
@@ -183,7 +126,7 @@ def test_bootstrap_skips_failed_replicates(fit_logit, monkeypatch):
 
 
 def test_bootstrap_raises_when_too_many_failures(fit_logit, monkeypatch):
-    """If >10% of replicates fail, bootstrap should raise."""
+    """If all replicates fail, bootstrap should raise."""
     adapter = StatsmodelsGLMAdapter(fit_logit)
 
     def h(b):
@@ -214,15 +157,8 @@ def test_bootstrap_raises_when_too_many_failures(fit_logit, monkeypatch):
 # ---------------------------------------------------------------------------
 # 5. run_test ignores kind parameter for delta results
 # ---------------------------------------------------------------------------
-
-
-def test_run_test_rejects_unknown_method():
-    """run_test should raise NotImplementedError for unsupported methods."""
-    estimate = jnp.array([1.0])
-    grad = jnp.array([0.5, 0.3])
-    cov = jnp.eye(2)
-    with pytest.raises(NotImplementedError, match="t_test"):
-        run_test(estimate, grad, cov, None, method="t_test")
+# Legacy ``run_test`` dispatch is deleted; ``GraphResult.test/joint_test``
+# validate their own ``kind``/``null_scale`` parameters.
 
 
 # ---------------------------------------------------------------------------
@@ -290,9 +226,14 @@ def test_expand_with_over_is_removed():
 def test_joint_test_default_null_on_inference_scale(fit_logit):
     """When phi_inv is available, default null should be phi_inv(0), not 0."""
     # Use correlation_scale where phi_inv(0) = arctanh(0) = 0 (finite)
-    m = Margins.correlation_scale(fit_logit, at="typical")
+    est = GComputation(
+        fit_logit,
+        at="typical",
+        scale=(jnp.tanh, jnp.arctanh),
+        method="delta",
+    )
 
-    result = m.contrasts(
+    result = est.contrasts(
         scenarios=[
             {"atexog": {"treatment": 1, "age": 40}},
             {"atexog": {"treatment": 0, "age": 40}},
@@ -313,14 +254,7 @@ def test_joint_test_default_null_on_inference_scale(fit_logit):
 # ---------------------------------------------------------------------------
 # 10. __mul__ with non-scalar raises unclear error
 # ---------------------------------------------------------------------------
-
-
-def test_mul_non_scalar_raises_descriptive_error(fit_logit):
-    """Multiplying a MarginsResult by an array should give a clear TypeError."""
-    m = Margins.linear_scale(fit_logit, at="typical")
-    result = m.predict()
-    with pytest.raises(TypeError, match="scalar"):
-        result * np.array([1, 2])
+# MarginsResult.__mul__ is gone with the legacy result object (R7).
 
 
 # ---------------------------------------------------------------------------
@@ -329,54 +263,40 @@ def test_mul_non_scalar_raises_descriptive_error(fit_logit):
 
 
 def test_test_raises_clear_message_when_cov_params_missing(fit_logit):
-    """test() should say cov_params is missing, not 'neither gradient nor draws'."""
-    m = Margins.linear_scale(fit_logit, at="typical")
-    result = m.predict()
-    # Materialize drops cov_params
-    materialized = result.materialize()
-    assert materialized.gradient is None  # materialize drops gradient too
+    """test() should say inference is unavailable when cov_params is missing."""
+    est = GComputation(fit_logit, at="typical", method="delta")
+    result = est.predict()
+    assert result.gradient is not None
 
     # Create a result with gradient but no cov_params manually
-    result_with_grad = MarginsResult(
+    result_with_grad = GraphResult(
         estimate=result.estimate,
         std_error=result.std_error,
         conf_int_lower=result.conf_int_lower,
         conf_int_upper=result.conf_int_upper,
+        labels=result.labels,
         method="delta",
         level=result.level,
+        ci=result.ci,
+        scale=result.scale,
+        at=result.at,
+        plan=result.plan,
+        population_note=result.population_note,
+        n_obs=result.n_obs,
+        estimand_metadata=result.estimand_metadata,
         gradient=np.array([0.1, 0.2]),
         cov_params=None,
         phi=result.phi,
         phi_inv=result.phi_inv,
     )
-    with pytest.raises(ValueError, match="cov_params"):
+    with pytest.raises(ValueError, match="Cannot run test"):
         result_with_grad.test()
 
 
 # ---------------------------------------------------------------------------
 # 12. fallback_reason in combined result keeps only a's reason
 # ---------------------------------------------------------------------------
-
-
-def test_combine_fallback_reasons_joins_both():
-    """_join_fallback_reasons should concatenate both reasons."""
-    assert _join_fallback_reasons("a_reason", "b_reason") == "a_reason; b_reason"
-    assert _join_fallback_reasons("a_reason", None) == "a_reason"
-    assert _join_fallback_reasons(None, "b_reason") == "b_reason"
-    assert _join_fallback_reasons(None, None) is None
-
-
-def test_combined_result_preserves_both_fallback_reasons(fit_logit):
-    """Combining two fallback results should preserve both reasons."""
-    m = Margins.linear_scale(fit_logit, at="typical")
-    r1 = m.predict(atexog={"treatment": 1})
-    r2 = m.predict(atexog={"treatment": 0})
-    # Manually set fallback reasons
-    r1.fallback_reason = "kappa_high"
-    r2.fallback_reason = "non_differentiable"
-    combined = r1 - r2
-    assert "kappa_high" in combined.fallback_reason
-    assert "non_differentiable" in combined.fallback_reason
+# ``fallback_reason`` and MarginsResult arithmetic are deleted in 0.4.0.
 
 
 # ---------------------------------------------------------------------------
@@ -386,9 +306,9 @@ def test_combined_result_preserves_both_fallback_reasons(fit_logit):
 
 def test_contrasts_accepts_jax_array(fit_logit):
     """JAX 2D arrays should be accepted as contrast matrices."""
-    m = Margins.linear_scale(fit_logit, at="typical")
+    est = GComputation(fit_logit, at="typical", method="delta")
     contrasts = jnp.array([[1.0, -1.0, 0.0, 0.0], [0.0, 0.0, 1.0, -1.0]])
-    result = m.contrasts(
+    result = est.contrasts(
         scenarios=[
             {"atexog": {"treatment": 1, "age": 40}},
             {"atexog": {"treatment": 0, "age": 40}},
@@ -402,8 +322,8 @@ def test_contrasts_accepts_jax_array(fit_logit):
 
 def test_contrasts_accepts_list_of_lists(fit_logit):
     """list-of-lists should be accepted as contrast matrices."""
-    m = Margins.linear_scale(fit_logit, at="typical")
-    result = m.contrasts(
+    est = GComputation(fit_logit, at="typical", method="delta")
+    result = est.contrasts(
         scenarios=[
             {"atexog": {"treatment": 1, "age": 40}},
             {"atexog": {"treatment": 0, "age": 40}},
@@ -418,18 +338,8 @@ def test_contrasts_accepts_list_of_lists(fit_logit):
 # ---------------------------------------------------------------------------
 # 14. over= pandas-coupled without guard
 # ---------------------------------------------------------------------------
-
-
-def test_over_requires_groupbase(fit_logit):
-    """over= on non-DataFrame base_data should raise TypeError."""
-    m = Margins.linear_scale(fit_logit, at="typical")
-    with pytest.raises(TypeError, match="groupby"):
-        Margins._enumerate_groups(
-            m,
-            {"over": "treatment"},
-            np.array([[1, 2], [3, 4]]),
-            m.adapter.variable_metadata(),
-        )
+# Legacy ``Margins._enumerate_groups`` is deleted; over= now requires a
+# DataFrame base_data by construction (the input node carries a DataFrame).
 
 
 # ---------------------------------------------------------------------------
@@ -439,15 +349,15 @@ def test_over_requires_groupbase(fit_logit):
 
 def test_prediction_grid_blocks_sliced_correctly(fit_logit):
     """Multi-value atexog should produce correct per-block predictions."""
-    m = Margins.linear_scale(fit_logit, at="typical")
-    pred = m.predict(atexog={"treatment": [0, 1]})
+    est = GComputation(fit_logit, at="typical", method="delta")
+    pred = est.predict(atexog={"treatment": [0, 1]})
     assert pred.estimate.shape == (2,)
     assert np.all(np.isfinite(pred.estimate))
 
 
 def test_grid_block_slicing_defensive_check(fit_logit):
     """If an adapter drops rows, the grid block check should raise a clear error."""
-    m = Margins.linear_scale(fit_logit, at="typical")
+    est = GComputation(fit_logit, at="typical", method="delta")
     from unittest.mock import patch
 
     def drop_rows(self, df):
@@ -455,7 +365,7 @@ def test_grid_block_slicing_defensive_check(fit_logit):
         X = self._original_design_matrix_from_df(df)
         return X[:-1]
 
-    adapter = m.adapter
+    adapter = est._compiled.adapter
     adapter._original_design_matrix_from_df = adapter.design_matrix_from_df
     with patch.object(
         adapter, "design_matrix_from_df", lambda df: drop_rows(adapter, df)
@@ -463,79 +373,20 @@ def test_grid_block_slicing_defensive_check(fit_logit):
         with pytest.raises(
             ValueError, match="Design matrix rows .* do not match expected grid layout"
         ):
-            m.predict(atexog={"treatment": [0, 1]})
+            est.predict(atexog={"treatment": [0, 1]})
 
 
 # ---------------------------------------------------------------------------
 # 16. h_factory passed unconditionally
 # ---------------------------------------------------------------------------
-
-
-def test_h_factory_not_passed_for_delta_method(fit_logit, monkeypatch):
-    """For delta method, h_factory should not be passed to run_inference."""
-    m = Margins.linear_scale(fit_logit, at="typical", method="delta")
-    captured = {}
-    original_run_inference = (
-        m.__class__._wrap_result.__wrapped__
-        if hasattr(m.__class__._wrap_result, "__wrapped__")
-        else None
-    )
-
-    import pymargins.margins._session as _session_mod
-
-    original_run_inference = _session_mod.run_inference
-
-    def capturing_run_inference(
-        h, adapter, config, *, estimand_metadata=None, h_factory=None
-    ):
-        captured["h_factory"] = h_factory
-        return original_run_inference(
-            h, adapter, config, estimand_metadata=estimand_metadata, h_factory=h_factory
-        )
-
-    monkeypatch.setattr(_session_mod, "run_inference", capturing_run_inference)
-
-    m.predict()
-    assert captured.get("h_factory") is None
-
-
-def test_h_factory_passed_for_bootstrap_method(fit_logit, monkeypatch):
-    """For bootstrap method, h_factory should be passed to run_inference."""
-    m = Margins.linear_scale(fit_logit, at="typical", method="bootstrap", n_boot=5)
-    captured = {}
-
-    import pymargins.margins._session as _session_mod
-
-    original_run_inference = _session_mod.run_inference
-
-    def capturing_run_inference(
-        h, adapter, config, *, estimand_metadata=None, h_factory=None
-    ):
-        captured["h_factory"] = h_factory
-        return original_run_inference(
-            h, adapter, config, estimand_metadata=estimand_metadata, h_factory=h_factory
-        )
-
-    monkeypatch.setattr(_session_mod, "run_inference", capturing_run_inference)
-
-    m.predict()
-    assert captured.get("h_factory") is not None
+# Legacy session h_factory wiring is deleted; the new executor always passes
+# h_factory to bootstrap (covered by tests/test_engine_execute.py).
 
 
 # ---------------------------------------------------------------------------
 # 17. _get_base_data is redundant
 # ---------------------------------------------------------------------------
-
-
-def test_get_base_data_raises_clear_error(fit_logit, monkeypatch):
-    """_get_base_data should raise a clear error when adapter lacks training_data."""
-    m = Margins.linear_scale(fit_logit, at="typical")
-    # Temporarily remove training_data from adapter class;
-    # monkeypatch handles restoration so we don't pollute other tests.
-    adapter = m.adapter
-    monkeypatch.delattr(type(adapter), "training_data", raising=True)
-    with pytest.raises((NotImplementedError, AttributeError)):
-        m._get_base_data(adapter)
+# Legacy ``_get_base_data`` is deleted; base data comes from the wiring graph.
 
 
 # ---------------------------------------------------------------------------
@@ -545,13 +396,21 @@ def test_get_base_data_raises_clear_error(fit_logit, monkeypatch):
 
 def test_result_outcome_slices_gradient_correctly():
     """Gradient is (n_components, n_params); outcome() should slice rows only."""
-    result = MarginsResult(
+    result = GraphResult(
         estimate=np.array([0.1, 0.2, 0.3]),
         std_error=np.array([0.01, 0.02, 0.03]),
         conf_int_lower=np.array([0.08, 0.18, 0.28]),
         conf_int_upper=np.array([0.12, 0.22, 0.32]),
+        labels=["pred (0)", "pred (1)", "pred (2)"],
         method="delta",
         level=0.95,
+        ci="wald",
+        scale="response",
+        at="overall",
+        plan=None,
+        population_note=None,
+        n_obs=100,
+        estimand_metadata={},
         gradient=np.array(
             [
                 [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
@@ -559,7 +418,6 @@ def test_result_outcome_slices_gradient_correctly():
                 [13.0, 14.0, 15.0, 16.0, 17.0, 18.0],
             ]
         ),
-        estimand_metadata={"labels": ["pred (0)", "pred (1)", "pred (2)"]},
     )
     sub = result.outcome(0)
     assert sub.gradient.shape == (1, 6)
@@ -569,15 +427,22 @@ def test_result_outcome_slices_gradient_correctly():
 def test_result_outcome_slices_draws_correctly():
     """Draws are (n_draws, n_components); outcome() should slice columns."""
     draws = np.random.default_rng(42).standard_normal((100, 3))
-    result = MarginsResult(
+    result = GraphResult(
         estimate=np.array([0.1, 0.2, 0.3]),
         std_error=np.array([0.01, 0.02, 0.03]),
         conf_int_lower=np.array([0.08, 0.18, 0.28]),
         conf_int_upper=np.array([0.12, 0.22, 0.32]),
+        labels=["pred (0)", "pred (1)", "pred (2)"],
         method="simulation",
         level=0.95,
+        ci="percentile",
+        scale="response",
+        at="overall",
+        plan=None,
+        population_note=None,
+        n_obs=100,
+        estimand_metadata={},
         draws=draws,
-        estimand_metadata={"labels": ["pred (0)", "pred (1)", "pred (2)"]},
     )
     sub = result.outcome(1)
     assert sub.draws.shape == (100, 1)
@@ -651,8 +516,9 @@ def test_cluster_string_ids_accepted():
     fit = smf.ols("y ~ x", data=df).fit()
     clusters = np.array(["A" if i < 50 else "B" for i in range(100)])
     # Should not raise
-    m = Margins(fit, method="bootstrap", n_boot=5, cluster=clusters)
-    assert m.cluster is not None
+    inp = steps.input(df, cluster=clusters)
+    est = GComputation(inp, outcome=fit, method="bootstrap", B=5)
+    assert est._compiled.wiring_facts.cluster is not None
 
 
 def test_cluster_nan_string_ids_raises():
@@ -662,8 +528,9 @@ def test_cluster_nan_string_ids_raises():
     fit = smf.ols("y ~ x", data=df).fit()
     clusters = np.array(["A"] * 100, dtype=object)
     clusters[0] = np.nan
-    with pytest.raises(ValueError, match="NaN"):
-        Margins(fit, method="bootstrap", n_boot=5, cluster=clusters)
+    with pytest.raises(TypeError):
+        inp = steps.input(df, cluster=clusters)
+        GComputation(inp, outcome=fit, method="bootstrap", B=5)
 
 
 # ---------------------------------------------------------------------------
@@ -673,13 +540,21 @@ def test_cluster_nan_string_ids_raises():
 
 def test_summary_omits_nan_kappa():
     """Footer should not print κ when it is NaN."""
-    result = MarginsResult(
+    result = GraphResult(
         estimate=np.array([1.0]),
         std_error=np.array([0.1]),
         conf_int_lower=np.array([0.8]),
         conf_int_upper=np.array([1.2]),
+        labels=None,
         method="delta",
         level=0.95,
+        ci="wald",
+        scale="response",
+        at="overall",
+        plan=None,
+        population_note=None,
+        n_obs=100,
+        estimand_metadata={},
         kappa=np.array([np.nan]),
     )
     summary = result.summary()
@@ -758,9 +633,9 @@ def test_bootstrap_perfect_separation_counts_failure():
     df = pd.DataFrame({"x": x, "y": y})
     fit = smf.logit("y ~ x", data=df).fit(disp=False)
 
-    m = Margins(fit, method="bootstrap", n_boot=20, rng_seed=42)
+    est = GComputation(fit, method="bootstrap", B=20, seed=42)
     with pytest.warns(UserWarning, match="Bootstrap: .* replicates failed"):
-        pred = m.predict()
+        pred = est.predict()
 
     assert np.isfinite(float(pred.estimate))
     assert pred.method == "bootstrap"
@@ -788,12 +663,12 @@ def test_bootstrap_refit_dropped_category_counts_failure():
     )
     fit = smf.ols("y ~ x + C(group)", data=df).fit()
 
-    m = Margins(fit, method="bootstrap", n_boot=50, rng_seed=42)
+    est = GComputation(fit, method="bootstrap", B=50, seed=42)
     # Some resamples will drop the rare category. The bootstrap engine
     # should emit a warning about failed replicates but still produce
     # a valid result from the successful ones.
     with pytest.warns(UserWarning, match="Bootstrap: .* replicates failed"):
-        pred = m.predict()
+        pred = est.predict()
 
     assert np.isfinite(float(pred.estimate))
     assert pred.method == "bootstrap"
@@ -813,6 +688,6 @@ def test_bootstrap_refit_dropped_category_raises_when_too_many_fail():
     )
     fit = smf.ols("y ~ x + C(group)", data=df).fit()
 
-    m = Margins(fit, method="bootstrap", n_boot=50, rng_seed=42)
-    with pytest.raises(RuntimeError, match="Bootstrap failed on .* replicates"):
-        m.predict()
+    est = GComputation(fit, method="bootstrap", B=50, seed=42)
+    with pytest.raises(RuntimeError, match="Bootstrap failed"):
+        est.predict()

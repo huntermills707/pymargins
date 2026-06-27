@@ -11,17 +11,16 @@ kernelspec:
 ---
 
 # Cox proportional hazards
-
 `lifelines.CoxPHFitter` is supported through a dedicated adapter that
-exposes hazard ratios on the log-scale (`Margins.log_scale`) and
-survival probabilities at user-specified times.
+exposes hazard ratios on the log-scale (`scale="log"`) and survival
+probabilities at user-specified times.
 
 ```{code-cell} python
 import numpy as np
 import pandas as pd
 from lifelines import CoxPHFitter
 
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(0)
 n = 2000
@@ -47,7 +46,7 @@ we pass the training data explicitly to the adapter:
 from pymargins.adapters import LifelinesCoxPHAdapter
 
 _adapter = LifelinesCoxPHAdapter(cph, training_data=df)
-m = Margins.log_scale(cph, adapter=_adapter, at="overall")
+m = GComputation(cph, adapter=_adapter, at="overall", scale="log")
 print(m.contrasts(
     scenarios=[
         {"atexog": {"treated": 1}, "label": "treated"},
@@ -60,14 +59,14 @@ print(m.contrasts(
 ## Marginal HR per unit of `biomarker`
 
 ```{code-cell} python
-print(Margins.log_scale(cph, adapter=_adapter, at="overall").dydx("biomarker").summary())
+print(GComputation(cph, adapter=_adapter, at="overall", scale="log").dydx("biomarker").summary())
 ```
 
-Because the session is on the **log scale**, `dydx` returns the
+Because the estimator is on the **log scale**, `dydx` returns the
 change in `log(HR)` per unit of biomarker.  For a Cox model this is
 numerically close to the coefficient itself (the difference arises
 from the covariate centering lifelines applies internally).  If you
-want the change in the raw HR, use `Margins.linear_scale(...)` and
+want the change in the raw HR, use `GComputation(..., scale="identity")` and
 interpret the AME as the absolute change in the partial hazard ratio.
 
 ## Restricted mean survival time (RMST)
@@ -79,12 +78,12 @@ trapezoidal rule:
 ```{code-cell} python
 from pymargins.adapters import LifelinesCoxPHSurvivalAdapter
 
-m_surv = Margins(
+m_surv = GComputation(
     cph,
     adapter=LifelinesCoxPHSurvivalAdapter(cph, training_data=df, prediction_time=365),
     at="overall",
     method="bootstrap",
-    n_boot=100,
+    B=100,
 )
 
 # RMST at 3 years (1095 days) under treated and control
@@ -94,9 +93,15 @@ rmst_control = m_surv.rmst(horizon=1095, atexog={"treated": 0}, n_grid=40)
 print(rmst_treat.summary())
 print(rmst_control.summary())
 
-# Difference with joint inference
-rmst_diff = rmst_treat - rmst_control
-print(rmst_diff.summary())
+# Both RMSTs come from the same estimator, so their bootstrap draws are paired
+# per replicate; the difference is a valid bootstrap estimand taken directly
+# from the aligned draws.  (Post-hoc result arithmetic was removed in 0.4.0;
+# cross-query joint composition returns with GComputation.joint in 0.5.0.)
+diff_draws = np.asarray(rmst_treat.draws_inf) - np.asarray(rmst_control.draws_inf)
+point = float(rmst_treat.estimate) - float(rmst_control.estimate)
+lo, hi = np.percentile(diff_draws, [2.5, 97.5])
+print(f"RMST difference (treated - control): {point:.1f} days, "
+      f"95% CI [{lo:.1f}, {hi:.1f}]")
 ```
 
 The default grid is `n_grid=80`. Increase it for a more accurate

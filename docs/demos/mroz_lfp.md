@@ -11,7 +11,6 @@ kernelspec:
 ---
 
 # Mroz (1987) — Female labor force participation
-
 The Mroz data is the canonical textbook example for a binary-choice
 labor model: 753 married women observed in 1975, with a binary
 indicator `inlf` for whether they participated in the labor force.
@@ -37,7 +36,7 @@ import statsmodels.api as sm
 import statsmodels.formula.api as smf
 from linearmodels.datasets import mroz
 
-from pymargins import Margins, pairwise
+from pymargins import GComputation, pairwise  # 0.4.0: Margins -> GComputation
 
 cols = ["inlf", "nwifeinc", "educ", "exper", "age", "kidslt6", "kidsge6"]
 df = mroz.load()[cols].dropna().copy()
@@ -65,8 +64,8 @@ participation rate near 0.5 the two are usually close; for rates near
 0 or 1 they can disagree by an order of magnitude.
 
 ```{code-cell} python
-m_ame = Margins.linear_scale(fit, vcov="HC3", at="overall")
-m_mem = Margins.linear_scale(fit, vcov="HC3", at="typical")
+m_ame = GComputation(fit, vcov="HC3", at="overall", scale="identity")
+m_mem = GComputation(fit, vcov="HC3", at="typical", scale="identity")
 
 print("AME (averaged over sample):")
 print(m_ame.dydx("educ").summary())
@@ -131,15 +130,13 @@ of any new parameter.
 
 ## 5. Bootstrap cross-check on the discrete change
 
-The session API lets you swap inference methods without re-stating
+The estimator API lets you swap inference methods without re-stating
 the estimand. Compare the delta-method CI from above to a paired
 bootstrap on the same contrast:
 
 ```{code-cell} python
-m_boot = Margins.linear_scale(
-    fit, vcov="HC3", at="overall",
-    method="bootstrap", n_boot=400, rng_seed=0,
-)
+m_boot = GComputation(fit, vcov="HC3", at="overall",
+    method="bootstrap", B=400, seed=0, scale="identity")
 print(m_boot.contrasts(scenarios=scen, contrasts=w).summary())
 ```
 

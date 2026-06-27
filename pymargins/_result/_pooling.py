@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import warnings
 from dataclasses import dataclass
 
 import numpy as np
 from scipy import stats
 
-from ._margins import MarginsResult, _phi_to_name
+from ._graphresult import GraphResult
+from ._scales import _phi_to_name
 
 # ---------------------------------------------------------------------------
 # Diagnostic carrier
@@ -20,7 +20,7 @@ class ImputationDiagnostic:
     """Diagnostic information from Rubin pooling.
 
     Each per-component field is a Python ``float`` for a scalar estimand and an
-    ``np.ndarray`` (shaped like ``MarginsResult.estimate``) for a vector one.
+    ``np.ndarray`` (shaped like ``GraphResult.estimate``) for a vector one.
 
     Attributes
     ----------
@@ -184,8 +184,12 @@ def _meta_equal(a: object, b: object) -> bool:
             return False
 
 
-def _validate_commensurable(results: list[MarginsResult]) -> None:
-    """Validate that all results can be pooled together."""
+def _validate_commensurable(results: list) -> None:
+    """Validate that all results can be pooled together.
+
+    Duck-typed: accepts any object exposing ``estimate/std_error/phi/phi_inv/
+    level/method/estimand_metadata``.
+    """
     if len(results) < 2:
         raise ValueError("pool_imputations requires at least two results.")
 
@@ -194,21 +198,6 @@ def _validate_commensurable(results: list[MarginsResult]) -> None:
     ref_level = ref.level
     ref_phi_name = _phi_to_name(ref.phi)
     ref_phi_inv_name = _phi_to_name(ref.phi_inv)
-
-    # Soft warning: same session reused
-    same_session = True
-    first_session = ref.session
-    for r in results[1:]:
-        if r.session is not first_session:
-            same_session = False
-            break
-    if same_session and first_session is not None:
-        warnings.warn(
-            "All results appear to come from the same session. "
-            "Pooling re-uses of one fit yields B≈0 and no MI value.",
-            UserWarning,
-            stacklevel=3,
-        )
 
     for i, r in enumerate(results):
         # Shape
@@ -268,6 +257,8 @@ def _validate_commensurable(results: list[MarginsResult]) -> None:
                 f"pool_imputations: result {i} has negative standard errors."
             )
 
+    return None
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -275,7 +266,7 @@ def _validate_commensurable(results: list[MarginsResult]) -> None:
 
 
 def pool_imputations(results, *, label="pooled", complete_df=None):
-    """Pool MarginsResult objects across imputations via Rubin's rules.
+    """Pool result objects across imputations via Rubin's rules.
 
     All results must be the same estimand (matching labels) on imputed
     copies of the same data, computed under a shared posture. Pools on
@@ -283,8 +274,9 @@ def pool_imputations(results, *, label="pooled", complete_df=None):
 
     Parameters
     ----------
-    results : list of MarginsResult
-        One result per imputation.
+    results : list
+        One ``GraphResult`` per imputation. The returned object is a
+        ``GraphResult``.
     label : str, default "pooled"
         Provenance tag for the pooled estimand, stored on the result as
         ``estimand_metadata["pooled_label"]`` for downstream bookkeeping. It
@@ -296,7 +288,7 @@ def pool_imputations(results, *, label="pooled", complete_df=None):
 
     Returns
     -------
-    MarginsResult
+    GraphResult
         A leaf result with ``method="pooled"`` and ``imputation_diagnostic`` set.
     """
     _validate_commensurable(results)
@@ -323,7 +315,6 @@ def pool_imputations(results, *, label="pooled", complete_df=None):
     )
     scalar = np.asarray(ref.estimate).ndim == 0
     sq = (lambda a: float(np.reshape(a, ()))) if scalar else (lambda a: np.asarray(a))
-    # Squeeze diagnostics to scalar when the estimand is scalar
     _sq_arr = (
         (lambda a: float(np.reshape(a, ()))) if scalar else (lambda a: np.asarray(a))
     )
@@ -338,7 +329,8 @@ def pool_imputations(results, *, label="pooled", complete_df=None):
         riv=_sq_arr(p["riv"]),
     )
     meta = {**ref.estimand_metadata, "pooled_label": label}
-    return MarginsResult(
+
+    kwargs = dict(
         estimate=sq(rep(p["qbar"])),
         std_error=sq(p["se"]),
         conf_int_lower=sq(rep(p["lo"])),
@@ -349,6 +341,17 @@ def pool_imputations(results, *, label="pooled", complete_df=None):
         estimand_metadata=meta,
         phi=phi,
         phi_inv=phi_inv,
-        session=None,
         imputation_diagnostic=diag,
+    )
+
+    return GraphResult(
+        **kwargs,
+        labels=meta.get("labels"),
+        ci="wald",
+        scale=ref.scale if hasattr(ref, "scale") else "response",
+        at=ref.at if hasattr(ref, "at") else "overall",
+        plan=ref.plan if hasattr(ref, "plan") else None,
+        population_note=ref.population_note
+        if hasattr(ref, "population_note")
+        else None,
     )

@@ -6,7 +6,7 @@ import pytest
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from pymargins import Margins
+from pymargins import GComputation, steps
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -55,19 +55,25 @@ def ols_fit_array(df_clustered):
 def test_cluster_nan_raises(ols_fit_formula, df_clustered):
     cluster_with_nan = df_clustered["cluster"].astype(float).copy()
     cluster_with_nan.iloc[0] = np.nan
+    est = GComputation(
+        steps.input(df_clustered, cluster=cluster_with_nan),
+        outcome=ols_fit_formula,
+        method="bootstrap",
+        B=50,
+    )
     with pytest.raises(ValueError, match="NaN"):
-        Margins(
-            ols_fit_formula, method="bootstrap", n_boot=50, cluster=cluster_with_nan
-        )
+        est.dydx("x1")
 
 
 def test_cluster_wrong_length_raises(ols_fit_formula, df_clustered):
+    # A cluster declaration of the wrong length is caught when the estimator
+    # freezes the cluster-robust covariance matrix at compile time.
     with pytest.raises(ValueError, match="length"):
-        Margins(
-            ols_fit_formula,
+        GComputation(
+            steps.input(df_clustered, cluster=df_clustered["cluster"].iloc[:-1]),
+            outcome=ols_fit_formula,
             method="bootstrap",
-            n_boot=50,
-            cluster=df_clustered["cluster"].iloc[:-1],
+            B=50,
         )
 
 
@@ -77,19 +83,20 @@ def test_cluster_wrong_length_raises(ols_fit_formula, df_clustered):
 
 
 def test_cluster_bootstrap_reproducible(ols_fit_formula, df_clustered):
-    m1 = Margins(
-        ols_fit_formula,
+    inp = steps.input(df_clustered, cluster=df_clustered["cluster"])
+    m1 = GComputation(
+        inp,
+        outcome=ols_fit_formula,
         method="bootstrap",
-        n_boot=100,
-        rng_seed=42,
-        cluster=df_clustered["cluster"],
+        B=100,
+        seed=42,
     )
-    m2 = Margins(
-        ols_fit_formula,
+    m2 = GComputation(
+        inp,
+        outcome=ols_fit_formula,
         method="bootstrap",
-        n_boot=100,
-        rng_seed=42,
-        cluster=df_clustered["cluster"],
+        B=100,
+        seed=42,
     )
     res1 = m1.dydx("x1")
     res2 = m2.dydx("x1")
@@ -104,14 +111,19 @@ def test_cluster_bootstrap_reproducible(ols_fit_formula, df_clustered):
 
 
 def test_cluster_bootstrap_differs_from_iid(ols_fit_formula, df_clustered):
-    m_cluster = Margins(
+    m_cluster = GComputation(
+        steps.input(df_clustered, cluster=df_clustered["cluster"]),
+        outcome=ols_fit_formula,
+        method="bootstrap",
+        B=200,
+        seed=42,
+    )
+    m_iid = GComputation(
         ols_fit_formula,
         method="bootstrap",
-        n_boot=200,
-        rng_seed=42,
-        cluster=df_clustered["cluster"],
+        B=200,
+        seed=42,
     )
-    m_iid = Margins(ols_fit_formula, method="bootstrap", n_boot=200, rng_seed=42)
     res_cluster = m_cluster.dydx("x1")
     res_iid = m_iid.dydx("x1")
     # SEs should differ; cluster bootstrap SE should be larger for clustered data
@@ -125,16 +137,16 @@ def test_cluster_bootstrap_differs_from_iid(ols_fit_formula, df_clustered):
 
 def test_cluster_bootstrap_se_matches_analytical(ols_fit_formula, df_clustered):
     """Cluster-bootstrap SE should be in the same ballpark as analytical cluster-robust SE."""
-    m_cluster = Margins(
-        ols_fit_formula,
+    m_cluster = GComputation(
+        steps.input(df_clustered, cluster=df_clustered["cluster"]),
+        outcome=ols_fit_formula,
         method="bootstrap",
-        n_boot=400,
-        rng_seed=42,
-        cluster=df_clustered["cluster"],
+        B=400,
+        seed=42,
     )
     res_cluster = m_cluster.dydx("x1")
 
-    m_analytical = Margins(
+    m_analytical = GComputation(
         ols_fit_formula,
         method="delta",
         vcov={"type": "cluster", "groups": df_clustered["cluster"]},
@@ -156,13 +168,13 @@ def test_cluster_bootstrap_array_fit(ols_fit_array, df_clustered):
     from pymargins._adapters.statsmodels_ols import StatsmodelsOLSAdapter
 
     adapter = StatsmodelsOLSAdapter(ols_fit_array, training_data=df_clustered)
-    m = Margins(
-        ols_fit_array,
-        method="bootstrap",
-        n_boot=100,
-        rng_seed=42,
-        cluster=df_clustered["cluster"],
+    m = GComputation(
+        steps.input(df_clustered, cluster=df_clustered["cluster"]),
+        outcome=ols_fit_array,
         adapter=adapter,
+        method="bootstrap",
+        B=100,
+        seed=42,
     )
     res = m.dydx("x1")
     assert np.isfinite(res.estimate)
@@ -174,7 +186,7 @@ def test_cluster_bootstrap_array_fit(ols_fit_array, df_clustered):
 # ---------------------------------------------------------------------------
 
 
-def test_cluster_bootstrap_multiplicity(ols_fit_formula, df_clustered):
+def test_cluster_bootstrap_multiplicity():
     """Verify that if a cluster is sampled twice, its rows appear twice."""
     # Use a tiny dataset for deterministic testing
     tiny_df = pd.DataFrame(
@@ -187,13 +199,7 @@ def test_cluster_bootstrap_multiplicity(ols_fit_formula, df_clustered):
     )
     fit = smf.ols("y ~ x1 + x2", data=tiny_df).fit()
 
-    # Force a specific resampling by controlling the RNG seed
-    # With seed=1 and 2 clusters, rng.choice([0,1], size=2, replace=True)
-    # will sample clusters; we just verify total rows in resampled data
-    Margins(fit, method="bootstrap", n_boot=1, rng_seed=1, cluster=tiny_df["cluster"])
-
-    # Access the internal inference to check resampled data size
-    # Instead, let's directly test the resampling logic
+    # Directly test the resampling logic via the bootstrap kernel.
     from pymargins._adapter import auto_detect_adapter
     from pymargins._inference import InferenceConfig, _run_bootstrap
 
@@ -224,22 +230,29 @@ def test_cluster_bootstrap_multiplicity(ols_fit_formula, df_clustered):
 
 
 # ---------------------------------------------------------------------------
-# Delta and simulation paths ignore cluster
+# Delta and simulation paths with a cluster declaration
 # ---------------------------------------------------------------------------
 
 
-def test_delta_ignores_cluster(ols_fit_formula, df_clustered):
-    """Delta method should work fine even when cluster is provided."""
-    m = Margins(ols_fit_formula, method="delta", cluster=df_clustered["cluster"])
+def test_delta_with_cluster(ols_fit_formula, df_clustered):
+    """Delta method should work fine when a cluster variable is declared."""
+    m = GComputation(
+        steps.input(df_clustered, cluster=df_clustered["cluster"]),
+        outcome=ols_fit_formula,
+        method="delta",
+    )
     res = m.dydx("x1")
     assert np.isfinite(res.estimate)
     assert np.isfinite(res.std_error)
 
 
-def test_simulation_ignores_cluster(ols_fit_formula, df_clustered):
-    """Simulation should work fine even when cluster is provided."""
-    m = Margins(
-        ols_fit_formula, method="simulation", n_sim=500, cluster=df_clustered["cluster"]
+def test_simulation_with_cluster(ols_fit_formula, df_clustered):
+    """Simulation should work fine when a cluster variable is declared."""
+    m = GComputation(
+        steps.input(df_clustered, cluster=df_clustered["cluster"]),
+        outcome=ols_fit_formula,
+        method="simulation",
+        n_sim=500,
     )
     res = m.dydx("x1")
     assert np.isfinite(res.estimate)

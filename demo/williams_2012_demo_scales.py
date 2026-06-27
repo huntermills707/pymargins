@@ -22,7 +22,7 @@ import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from pymargins import Margins
+from pymargins import GComputation
 
 
 def make_data(n=5000, seed=42):
@@ -92,7 +92,7 @@ if __name__ == "__main__":
     print("   Inference: log(p1) - log(p0)   |   Reported: exp(...)")
     print()
 
-    m_rr = Margins.log_scale(fit_logit, at="overall", kappa_threshold=float("inf"))
+    m_rr = GComputation(fit_logit, at="overall", scale="log")
     rr_black = m_rr.contrasts(
         scenarios=[
             {"atexog": {"black": 1}, "label": "black=1"},
@@ -120,9 +120,7 @@ if __name__ == "__main__":
     print("   Inference: p1 / p0 directly   |   Delta-method SE on ratio scale")
     print()
 
-    m_ratio = Margins.linear_scale(
-        fit_logit, at="overall", kappa_threshold=float("inf")
-    )
+    m_ratio = GComputation(fit_logit, at="overall", scale="identity")
     ratio_black = m_ratio.evaluate(
         scenarios=[
             {"atexog": {"black": 1}, "label": "black=1"},

@@ -31,7 +31,7 @@ import pytest
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins._adapters.statsmodels_gee import StatsmodelsGEEAdapter
 from pymargins._adapters.statsmodels_mixedlm import StatsmodelsMixedLMAdapter
 
@@ -81,8 +81,8 @@ def test_gee_logit_ame_matches_glm(df_gee_glm):
         cov_struct=sm.cov_struct.Independence(),
     ).fit()
 
-    m_glm = Margins(fit_glm)
-    m_gee = Margins(fit_gee)
+    m_glm = GComputation(fit_glm)
+    m_gee = GComputation(fit_gee)
 
     ame_glm = m_glm.dydx("x1")
     ame_gee = m_gee.dydx("x1")
@@ -111,8 +111,8 @@ def test_gee_poisson_ame_matches_glm(df_gee_glm):
         cov_struct=sm.cov_struct.Independence(),
     ).fit()
 
-    m_glm = Margins(fit_glm)
-    m_gee = Margins(fit_gee)
+    m_glm = GComputation(fit_glm)
+    m_gee = GComputation(fit_gee)
 
     ame_glm = m_glm.dydx("x1")
     ame_gee = m_gee.dydx("x1")
@@ -141,8 +141,8 @@ def test_gee_logit_contrast_matches_glm(df_gee_glm):
         cov_struct=sm.cov_struct.Independence(),
     ).fit()
 
-    m_glm = Margins(fit_glm)
-    m_gee = Margins(fit_gee)
+    m_glm = GComputation(fit_glm)
+    m_gee = GComputation(fit_gee)
 
     c_glm = m_glm.contrasts(
         scenarios=[
@@ -203,7 +203,7 @@ def test_mixedlm_dydx_equals_coefficient(df_mixedlm):
     df = df_mixedlm
     fit = smf.mixedlm("y ~ x1 + x2 + treatment", groups="group", data=df).fit()
 
-    m = Margins(fit)
+    m = GComputation(fit)
     ame_x1 = m.dydx("x1")
     ame_x2 = m.dydx("x2")
 
@@ -242,7 +242,7 @@ def test_mixedlm_contrast_equals_coefficient(df_mixedlm):
     df = df_mixedlm
     fit = smf.mixedlm("y ~ x1 + x2 + treatment", groups="group", data=df).fit()
 
-    m = Margins(fit)
+    m = GComputation(fit)
     c = m.contrasts(
         scenarios=[
             {"atexog": {"treatment": 1}},

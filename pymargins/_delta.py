@@ -450,9 +450,9 @@ def joint_covariance_of_results(
 
         Cov(gᵢ, gⱼ) = ∇gᵢ^T Σ̂ ∇gⱼ
 
-    This function returns the full n × n joint covariance matrix, used by
-    inter-call composability operators on MarginsResult to produce correct
-    joint inference (rather than treating the estimands as independent).
+    This function returns the full n × n joint covariance matrix, used to
+    produce correct joint inference across estimands (rather than treating
+    them as independent).
 
     Parameters
     ----------

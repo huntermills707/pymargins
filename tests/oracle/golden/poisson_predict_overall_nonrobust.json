@@ -1,0 +1,32 @@
+{
+  "case_id": "poisson_predict_overall_nonrobust",
+  "created": "2026-06-11",
+  "r_version": "R version 4.6.0 (2026-04-24)",
+  "packages": {
+    "marginaleffects": "0.32.0",
+    "sandwich": "3.1.1",
+    "survey": "4.5"
+  },
+  "data": "oracle_main.csv",
+  "model": {
+    "formula": "y_count ~ treat + x1 + x2",
+    "family": "poisson(log)",
+    "fit_control": "glm.control(epsilon = 1e-12, maxit = 200)"
+  },
+  "r_call": "avg_predictions(fit)",
+  "vcov": "nonrobust",
+  "ci_convention": {
+    "dist": "z",
+    "level": 0.95
+  },
+  "labels": {},
+  "quantities": {
+    "coefficients": [0.0875384085252045, 0.388882286775027, 0.283904007964743, -0.0832783168106232],
+    "estimate": 1.38,
+    "std_error": 0.0587366980831888,
+    "conf_low": 1.26487818718615,
+    "conf_high": 1.49512181281385
+  },
+  "tolerances": {},
+  "notes": ""
+}

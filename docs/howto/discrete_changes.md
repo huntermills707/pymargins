@@ -12,13 +12,12 @@ kernelspec:
 
 # Discrete changes for binary / categorical regressors
 
-
 ```{code-cell} python
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(42)
 n = 2000
@@ -35,7 +34,7 @@ df["y"] = rng.binomial(1, 1 / (1 + np.exp(-lp)))
 
 fit = smf.glm("y ~ age + female + treated + C(region)", data=df,
               family=sm.families.Binomial()).fit()
-m = Margins.log_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="log")
 ```
 
 
@@ -50,9 +49,9 @@ the two levels, holding everything else constant.
 Use `contrasts` with the `pairwise` helper:
 
 ```{code-cell} python
-from pymargins import Margins, pairwise
+from pymargins import GComputation, pairwise  # 0.4.0: Margins -> GComputation
 
-m = Margins.linear_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="identity")
 
 scen, w = pairwise("treated", [1, 0])
 print(m.contrasts(scenarios=scen, contrasts=w).summary())

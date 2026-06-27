@@ -35,7 +35,34 @@ __all__ = [
     "as_tabular",
     "concat_tables",
     "to_pandas_if_needed",
+    "fingerprint_frame",
 ]
+
+
+def fingerprint_frame(df: Any) -> str:
+    """Stable content fingerprint of a DataFrame-like object.
+
+    Used by the compiler and adapters so that template/wiring fingerprints are
+    computed from the same routine and cannot drift apart.
+    """
+    import hashlib
+
+    hasher = hashlib.sha256()
+    if hasattr(df, "shape"):
+        hasher.update(str(df.shape).encode("utf-8"))
+    if hasattr(df, "columns"):
+        for col in df.columns:
+            hasher.update(str(col).encode("utf-8"))
+            hasher.update(str(df[col].dtype).encode("utf-8"))
+            arr = df[col].to_numpy()
+            if arr.dtype == object:
+                for v in arr:
+                    hasher.update(str(v).encode("utf-8"))
+            else:
+                hasher.update(arr.tobytes())
+    else:
+        hasher.update(str(df).encode("utf-8"))
+    return hasher.hexdigest()
 
 
 # ---------------------------------------------------------------------------

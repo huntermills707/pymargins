@@ -1,2 +1,2 @@
-estimate,std_error,ci_lower,ci_upper,conf_level,n_obs,method,term,kind,label,statistic,p_value,kappa,fallback_triggered
-0.009036362,0.071119964,0.00786061,0.010387977,0.95,2000,delta,['age'],slope,"female=[0, 1], age",-66.176895,0.0,0.07898145839531677,False
+estimate,std_error,ci_lower,ci_upper,conf_level,n_obs,method,term,kind,label,statistic,p_value,kappa
+0.009036362,0.071119964,0.00786061,0.010387977,0.95,2000,delta,['age'],slope,"female=[0, 1], age",-66.176895,0.0,0.07898145839531677

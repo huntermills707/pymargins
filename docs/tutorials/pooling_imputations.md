@@ -1,5 +1,4 @@
 # Pooling precomputed imputations (``pool_imputations``)
-
 ``pool_imputations`` combines **M finished analyses** — one per completed
 dataset — into a single result using **Rubin's rules**.  It is the
 artifacts-side counterpart to [``reimpute``](mi_via_reimpute.md): where
@@ -10,13 +9,13 @@ the analytical fan-in.
 The package contributes the *combination*, not the imputation.  You generate
 the M completed datasets however you like — ``sklearn.IterativeImputer``,
 R ``mice`` exported to CSV, your own sampler — fit your model M times, compute
-the **same estimand** on each, then hand the M ``MarginsResult`` objects to
+the **same estimand** on each, then hand the M ``GraphResult`` objects to
 ``pool_imputations``.
 
 ## When to use this
 
 - You hold **M completed datasets** (imputer *outputs*), or M finished
-  ``MarginsResult`` objects — not a re-runnable imputer callable.  If you have
+  ``GraphResult`` objects — not a re-runnable imputer callable.  If you have
   a callable and want bootstrap inference, use [``reimpute``](mi_via_reimpute.md)
   instead.
 - You want a **pooled point estimate _and_ interval** — Rubin's ``Q̄`` with a
@@ -37,7 +36,7 @@ import statsmodels.formula.api as smf
 from sklearn.experimental import enable_iterative_imputer  # noqa: F401
 from sklearn.impute import IterativeImputer
 
-from pymargins import Margins, pool_imputations
+from pymargins import GComputation, pool_imputations  # 0.4.0: Margins -> GComputation
 
 # 1. Data with MAR missingness in x1
 rng = np.random.default_rng(0)
@@ -53,7 +52,7 @@ for seed in range(5):
     imp = IterativeImputer(sample_posterior=True, random_state=seed, max_iter=10)
     completed = pd.DataFrame(imp.fit_transform(df_nan), columns=df_nan.columns)
     fit = smf.ols("y ~ x1 + x2", data=completed).fit()
-    per_imputation.append(Margins.linear_scale(fit).dydx("x1"))
+    per_imputation.append(GComputation(fit, scale="identity").dydx("x1"))
 
 # 3. Pool via Rubin's rules
 pooled = pool_imputations(per_imputation)
@@ -62,7 +61,7 @@ print(pooled.summary())
 
 ```text
 =======================================================
-          Margins Result (pooled, level=0.95)
+          GComputation Result (pooled, level=0.95)
 =======================================================
     estimate  std err        t  P>|t|  [95% Conf. Int.]
 -------------------------------------------------------
@@ -120,7 +119,7 @@ pooled.estimate.shape``); for a scalar estimand they are plain floats.
 
 All M results must describe the **same estimand**: identical labels, ``kind``,
 ``at``-grid, ``scenarios``, confidence ``level``, and inference scale.  Build
-the M sessions identically and call the same estimand method on each.
+the M estimators identically and call the same estimand method on each.
 ``pool_imputations`` validates this up front and raises on the first mismatch:
 
 ```python
@@ -139,7 +138,7 @@ frame — changes from one imputation to the next.
 Rubin's rules assume approximate normality across imputations, so pooling is
 done on the **inference scale** (log, logit, …) and mapped back through ``φ``
 at the end — consistent with how the package handles non-identity scales
-everywhere.  Use the matching ``Margins.*_scale`` constructor on each fit and
+everywhere.  Use the matching ``GComputation(..., scale=...)`` constructor on each fit and
 ``pool_imputations`` does the rest:
 
 ```python
@@ -151,7 +150,7 @@ for seed in range(5):
     completed[["x1", "x2"]] = imp.fit_transform(df_bin[["x1", "x2"]])
     fit = smf.logit("bin ~ x1 + x2", data=completed).fit(disp=False)
     per_imp_logit.append(
-        Margins.logit_scale(fit).predict(atexog={"x1": 0.0, "x2": 0.0})
+        GComputation(fit, scale="logit").predict(atexog={"x1": 0.0, "x2": 0.0})
     )
 
 pooled_logit = pool_imputations(per_imp_logit)
@@ -160,7 +159,7 @@ print(pooled_logit.summary())
 
 ```text
 ===================================================================
-                Margins Result (pooled, level=0.95)
+                GComputation Result (pooled, level=0.95)
 ===================================================================
                 estimate  std err        t  P>|t|  [95% Conf. Int.]
 -------------------------------------------------------------------
@@ -182,8 +181,8 @@ Pooling reads only each branch's ``(estimate, std_error)``.  Each of the M
 analyses may have used delta, simulation, **or** bootstrap independently —
 ``W_m = se_m²`` is just whatever variance that branch produced — and they pool
 together fine.  This is why ``pool_imputations`` does **not** reuse the
-same-session composition machinery (``+`` / ``compose_results``): the M results
-come from M different sessions with M different ``Σ̂``.
+single-estimator contrast machinery (``GraphResult.contrast``): the M results
+come from M different estimators with M different ``Σ̂``.
 
 ### 4. Small-sample degrees of freedom (``complete_df``)
 
@@ -197,18 +196,17 @@ pooled = pool_imputations(per_imputation, complete_df=n - 3)
 
 ### 5. A pooled result is a leaf
 
-The M results came from M different sessions, so a pooled result carries no
-``session``, ``gradient``, or ``draws`` — it is a **terminal reduction**, like
-``materialize()``.  It still re-levels and tests itself from the stored Rubin
-df:
+The M results came from M different estimators, so a pooled result carries no
+Plan, gradient, or draws — it is a **terminal reduction**.  It still
+re-levels and tests itself from the stored Rubin df:
 
 ```python
-lo, hi = pooled.conf_int(level=0.90)        # recomputes the t-interval
+lo, hi = pooled.conf_int()  # level is fixed at construction; build a new GComputation to change it
 tr = pooled.test(value=0.0, null_scale="inference")  # pooled t-statistic
 ```
 
 Because it is a leaf, it cannot be composed further (``pooled - other`` raises
-the ordinary same-session error).  Pool as the **last** step.
+the ordinary same-estimator error).  Pool as the **last** step.
 
 ## ``pool_imputations`` vs ``reimpute``
 

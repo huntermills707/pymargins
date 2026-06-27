@@ -11,7 +11,6 @@ kernelspec:
 ---
 
 # Union premium heterogeneity — effects by subgroup
-
 An average marginal effect answers "what is the effect on average?".
 Often the research question is sharper: *for whom* is the effect large,
 and *for whom* is it small? The union wage premium is the textbook
@@ -32,7 +31,7 @@ import pandas as pd
 import statsmodels.formula.api as smf
 from linearmodels.datasets import wage_panel
 
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 df = wage_panel.load().reset_index()
 df["educ_band"] = pd.cut(
@@ -58,11 +57,9 @@ fit = smf.ols(
     "lwage ~ union * educ_band + exper * educ_band + expersq + married + C(year)",
     data=df,
 ).fit()
-m = Margins.linear_scale(
-    fit,
+m = GComputation(fit,
     vcov={"type": "cluster", "groups": df["nr"]},  # cluster by worker
-    at="overall",
-)
+    at="overall", scale="identity")
 ```
 
 We cluster the standard errors by worker (`nr`) because the same man is

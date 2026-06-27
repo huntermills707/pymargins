@@ -1,0 +1,34 @@
+{
+  "case_id": "survey_logit_ame_x1_linearized",
+  "created": "2026-06-11",
+  "r_version": "R version 4.6.0 (2026-04-24)",
+  "packages": {
+    "marginaleffects": "0.32.0",
+    "sandwich": "3.1.1",
+    "survey": "4.5"
+  },
+  "data": "oracle_main.csv",
+  "model": {
+    "formula": "y_bin ~ treat + x1 + x2",
+    "family": "quasibinomial(logit)",
+    "fit_control": "svyglm(..., family = quasibinomial())"
+  },
+  "r_call": "avg_slopes(fit, variables = 'x1')",
+  "vcov": "survey linearized",
+  "ci_convention": {
+    "dist": "z",
+    "level": 0.95
+  },
+  "labels": [
+    "x1"
+  ],
+  "quantities": {
+    "coefficients": [-0.52767072274085, 1.11372041542681, 0.561467002586071, -0.478300979079128],
+    "estimate": 0.119000500307888,
+    "std_error": 0.0200161343942179,
+    "conf_low": 0.0797695977855075,
+    "conf_high": 0.158231402830269
+  },
+  "tolerances": {},
+  "notes": ""
+}

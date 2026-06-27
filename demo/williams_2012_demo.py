@@ -25,7 +25,7 @@ import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from pymargins import Margins
+from pymargins import GComputation
 
 # ---------------------------------------------------------------------------
 # 0. Generate synthetic NHANES-like data
@@ -126,7 +126,7 @@ if __name__ == "__main__":
     print("   Stata equivalent: margins agegrp, atmeans")
     print("=" * 70)
 
-    m_apm = Margins.log_scale(fit_logit, at="typical")
+    m_apm = GComputation(fit_logit, at="typical", scale="log")
     apm = m_apm.predict(
         atexog={"agegrp": list(range(1, 7))},
     )
@@ -143,7 +143,7 @@ if __name__ == "__main__":
     print("   Stata equivalent: margins agegrp")
     print("=" * 70)
 
-    m_aap = Margins.log_scale(fit_logit, at="overall")
+    m_aap = GComputation(fit_logit, at="overall", scale="log")
     aap = m_aap.predict(
         atexog={"agegrp": list(range(1, 7))},
     )
@@ -160,7 +160,7 @@ if __name__ == "__main__":
     print("   Stata equivalent: margins, at(age=(20 50 70)) atmeans")
     print("=" * 70)
 
-    m_repr = Margins.log_scale(fit_logit, at="typical")
+    m_repr = GComputation(fit_logit, at="typical", scale="log")
     repr_pred = m_repr.predict(
         atexog={"age": [20, 50, 70]},
     )
@@ -176,7 +176,7 @@ if __name__ == "__main__":
     print("   Stata equivalent: margins, dydx(age) atmeans")
     print("=" * 70)
 
-    m_mem = Margins.log_scale(fit_logit, at="typical")
+    m_mem = GComputation(fit_logit, at="typical", scale="log")
     mem_age = m_mem.dydx("age")
     print(mem_age.summary(stars=True))
     print()
@@ -190,7 +190,7 @@ if __name__ == "__main__":
     print("   Stata equivalent: margins, dydx(age)")
     print("=" * 70)
 
-    m_ame = Margins.log_scale(fit_logit, at="overall")
+    m_ame = GComputation(fit_logit, at="overall", scale="log")
     ame_age = m_ame.dydx("age")
     print(ame_age.summary(stars=True))
     print()
@@ -209,7 +209,7 @@ if __name__ == "__main__":
     print("   Stata equivalent: margins, dydx(black)")
     print("=" * 70)
 
-    m_disc = Margins.log_scale(fit_logit, at="overall")
+    m_disc = GComputation(fit_logit, at="overall", scale="log")
     disc_black = m_disc.contrasts(
         scenarios=[
             {"atexog": {"black": 1}, "label": "black=1"},
@@ -226,7 +226,7 @@ if __name__ == "__main__":
     print("    Stata equivalent: margins, dydx(female) atmeans")
     print("-" * 70)
 
-    m_disc_mem = Margins.log_scale(fit_logit, at="typical")
+    m_disc_mem = GComputation(fit_logit, at="typical", scale="log")
     disc_female = m_disc_mem.contrasts(
         scenarios=[
             {"atexog": {"female": 1}, "label": "female=1"},
@@ -247,7 +247,7 @@ if __name__ == "__main__":
     print("   Stata equivalent: margins, dydx(black) at(female=(0 1))")
     print("=" * 70)
 
-    m_mer = Margins.log_scale(fit_logit, at="overall")
+    m_mer = GComputation(fit_logit, at="overall", scale="log")
     mer_female0 = m_mer.contrasts(
         scenarios=[
             {"atexog": {"black": 1, "female": 0}, "label": "black=1, female=0"},
@@ -284,14 +284,14 @@ if __name__ == "__main__":
     print()
 
     # MEM for OLS (linear model: MEM = AME = coefficient)
-    m_ols = Margins.linear_scale(fit_ols, at="typical")
+    m_ols = GComputation(fit_ols, at="typical", scale="identity")
     mem_ols_age = m_ols.dydx("age")
     print("MEM of age in OLS model (should match coefficient):")
     print(mem_ols_age.summary(stars=True))
     print()
 
     # AME for OLS (same as MEM in linear models)
-    m_ols_ame = Margins.linear_scale(fit_ols, at="overall")
+    m_ols_ame = GComputation(fit_ols, at="overall", scale="identity")
     ame_ols_age = m_ols_ame.dydx("age")
     print("AME of age in OLS model:")
     print(ame_ols_age.summary(stars=True))

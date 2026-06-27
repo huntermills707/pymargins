@@ -12,13 +12,12 @@ kernelspec:
 
 # Exporting and persisting results
 
-
 ```{code-cell} python
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(42)
 n = 2000
@@ -31,11 +30,11 @@ df["y"] = rng.binomial(1, 1 / (1 + np.exp(-lp)))
 
 fit = smf.glm("y ~ age + female", data=df,
               family=sm.families.Binomial()).fit()
-m = Margins.log_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="log")
 ```
 
 
-Every `MarginsResult` can be printed, framed, or serialized to LaTeX
+Every `GraphResult` can be printed, framed, or serialized to LaTeX
 / HTML for inclusion in papers and reports.
 
 ```{code-cell} python
@@ -66,37 +65,19 @@ without string parsing.
 ## Long-term storage with `to_disk` / `from_disk`
 
 For checkpointing or sharing results between scripts, use the built-in
-pickle persistence methods. They automatically materialize the result
-(so the saved object is self-contained) and include a version check on
-load:
+pickle persistence methods. The saved object is self-contained and
+includes a version check on load:
 
 ```{code-cell} python
 # Save
 res.to_disk("ame_results.pkl")
 
-# Load in another session
-from pymargins import MarginsResult
-loaded = MarginsResult.from_disk("ame_results.pkl")
+# Load in another script
+from pymargins import GraphResult
+loaded = GraphResult.from_disk("ame_results.pkl")
 print(loaded.summary())
 ```
 
-Materialised results support `.summary()`, `.to_frame()`, `.to_latex()`,
+Persisted results support `.summary()`, `.to_frame()`, `.to_latex()`,
 and `.to_html()`, but they **cannot** recompute CIs at new confidence
-levels or run new hypothesis tests because the gradient and session
-reference are dropped during materialisation.
-
-## In-memory slimming with `materialize`
-
-If you only need to reduce memory inside a single Python session (e.g.
-when accumulating many results in a loop), call `materialize()` directly:
-
-```{code-cell} python
-slim = res.materialize()           # estimates/SE/CI only; drops gradients
-print(slim.summary())
-```
-
-Materialised results still support arithmetic (`+`, `-`, `*`, `/`,
-`.scaled(by=...)`) for post-hoc combination.  The only thing you lose
-is the ability to call `.conf_int(level=...)` when the original
-session used the delta method (recomputing CIs at new levels requires
-the gradient, which is dropped).
+levels because the level is locked by the estimator Plan.

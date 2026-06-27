@@ -1,5 +1,4 @@
 # Multiple imputation via ``reimpute``
-
 The ``reimpute`` stage implements bootstrap-then-impute: one imputation per
 bootstrap replicate, with the imputer re-fit from scratch each time.  This
 injects imputation-model parameter uncertainty into the bootstrap
@@ -23,7 +22,7 @@ import statsmodels.formula.api as smf
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import IterativeImputer
 
-from pymargins import Margins, reimpute
+from pymargins import GComputation, steps  # 0.4.0: Margins -> GComputation
 
 # 1. Build data with MAR missingness
 rng = np.random.default_rng(42)
@@ -50,12 +49,12 @@ def imputer(frame):
     return pd.DataFrame(arr, columns=frame.columns)
 
 # 4. Run bootstrap-then-impute
-m = Margins(
-    fit,
-    transforms=[reimpute(imputer, incomplete=df_nan)],
+m = GComputation(
+    steps.reimpute(steps.input(df_nan), imputer),
+    outcome=fit,
     method="bootstrap",
-    n_boot=1000,
-    rng_seed=7,
+    B=1000,
+    seed=7,
 )
 r = m.predict(atexog={"x1": 0, "x2": 0})
 ```
@@ -76,7 +75,7 @@ You can suppress this with ``warn_on_deterministic=False``.
 
 ### 2. Seed the imputer for reproducibility
 
-The session ``rng_seed`` controls the bootstrap resample indices, but it does
+The estimator ``seed`` controls the bootstrap resample indices, but it does
 **not** automatically seed your imputer.  For reproducible draws you must set
 ``random_state`` on the imputer object itself:
 
@@ -87,14 +86,14 @@ imp = IterativeImputer(random_state=42, sample_posterior=True)
 If the imputer exposes ``random_state=None``, ``reimpute`` warns at
 construction.
 
-**Important:** create a fresh imputer object for each ``Margins`` session.
-Sharing a single imputer instance across sessions can leave internal state from
-the first session and break reproducibility, even with a fixed
-``random_state``.
+**Important:** create a fresh imputer object for each ``GComputation``
+estimator. Sharing a single imputer instance across estimators can leave
+internal state from the first estimator and break reproducibility, even with
+a fixed ``random_state``.
 
 ### 3. The point estimate is single-imputation
 
-The reported ``estimate`` comes from the model you passed to ``Margins``
+The reported ``estimate`` comes from the model you passed to ``GComputation``
 (fitted on the initial single imputation).  The bootstrap supplies
 imputation-aware **CIs**, not a pooled point estimate.  This matches how the
 package already treats bootstrap: the estimate is from the original fit, the
@@ -102,9 +101,10 @@ CI from the resample distribution.
 
 ### 4. Structural columns must be complete
 
-Columns that define the inference design — ``cluster=``, ``survey_design``
-PSU/strata, and ``weights=`` — must not contain missing values.  Only
-*substantive* columns may be imputed.
+Columns that define the inference design — ``steps.input(...,
+cluster=...)``, ``steps.input(..., design=...)`` PSU/strata, and
+``weights=`` — must not contain missing values.  Only *substantive*
+columns may be imputed.
 
 ### 5. Bootstrap only
 
@@ -127,7 +127,7 @@ missingness in their predictors are essentially unchanged.
   required, just the M completed frames.
 - **BCa CIs are rejected.** The BCa jackknife operates on the raw incomplete
   frame without re-imputing, producing an inconsistent acceleration parameter.
-  Use ``ci_method="percentile"`` (default) or ``"studentized"``.
-- **Survey designs are incompatible.** ``survey_design`` + ``reimpute`` raises
-  because the fixed-design assumption breaks when the source frame is
-  incomplete.
+  Use ``ci="percentile"`` (default) or ``"studentized"``.
+- **Survey designs are incompatible.** ``steps.input(..., design=...)`` +
+  ``steps.reimpute`` raises because the fixed-design assumption breaks when
+  the source frame is incomplete.

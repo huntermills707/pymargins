@@ -1,0 +1,167 @@
+{
+  "cells": [
+    {
+      "cell_id": "ols_delta_predict",
+      "constructor": "GComputation(fit_ols, at='overall', method='delta', seed=12345)",
+      "file": "tests/golden/ols_delta_predict.npz",
+      "package_version": "0.4.0",
+      "recorded": "2026-06-18T06:42:16.385698+00:00"
+    },
+    {
+      "cell_id": "ols_delta_dydx",
+      "constructor": "GComputation(fit_ols, at='overall', method='delta', seed=12345)",
+      "file": "tests/golden/ols_delta_dydx.npz",
+      "package_version": "0.4.0",
+      "recorded": "2026-06-18T06:42:17.048458+00:00"
+    },
+    {
+      "cell_id": "ols_simulation_predict",
+      "constructor": "GComputation(fit_ols, at='overall', method='simulation', seed=12345)",
+      "file": "tests/golden/ols_simulation_predict.npz",
+      "package_version": "0.4.0",
+      "recorded": "2026-06-18T06:42:17.140850+00:00"
+    },
+    {
+      "cell_id": "ols_simulation_dydx",
+      "constructor": "GComputation(fit_ols, at='overall', method='simulation', seed=12345)",
+      "file": "tests/golden/ols_simulation_dydx.npz",
+      "package_version": "0.4.0",
+      "recorded": "2026-06-18T06:42:17.301197+00:00"
+    },
+    {
+      "cell_id": "glm_delta_predict",
+      "constructor": "GComputation(fit_glm, at='overall', method='delta', seed=12345)",
+      "file": "tests/golden/glm_delta_predict.npz",
+      "package_version": "0.4.0",
+      "recorded": "2026-06-18T06:42:18.288125+00:00"
+    },
+    {
+      "cell_id": "glm_delta_dydx",
+      "constructor": "GComputation(fit_glm, at='overall', method='delta', seed=12345)",
+      "file": "tests/golden/glm_delta_dydx.npz",
+      "package_version": "0.4.0",
+      "recorded": "2026-06-18T06:42:18.458068+00:00"
+    },
+    {
+      "cell_id": "glm_simulation_predict",
+      "constructor": "GComputation(fit_glm, at='overall', method='simulation', seed=12345)",
+      "file": "tests/golden/glm_simulation_predict.npz",
+      "package_version": "0.4.0",
+      "recorded": "2026-06-18T06:42:18.614952+00:00"
+    },
+    {
+      "cell_id": "glm_simulation_dydx",
+      "constructor": "GComputation(fit_glm, at='overall', method='simulation', seed=12345)",
+      "file": "tests/golden/glm_simulation_dydx.npz",
+      "package_version": "0.4.0",
+      "recorded": "2026-06-18T06:42:18.691172+00:00"
+    },
+    {
+      "cell_id": "ols_bootstrap_predict",
+      "constructor": "GComputation(fit_ols, at='overall', method='bootstrap', B=200, seed=12345)",
+      "file": "tests/golden/ols_bootstrap_predict.npz",
+      "package_version": "0.4.0",
+      "recorded": "2026-06-18T06:42:20.979875+00:00"
+    },
+    {
+      "cell_id": "ols_bootstrap_dydx",
+      "constructor": "GComputation(fit_ols, at='overall', method='bootstrap', B=200, seed=12345)",
+      "file": "tests/golden/ols_bootstrap_dydx.npz",
+      "package_version": "0.4.0",
+      "recorded": "2026-06-18T06:42:22.453787+00:00"
+    },
+    {
+      "cell_id": "glm_bootstrap_predict",
+      "constructor": "GComputation(fit_glm, at='overall', method='bootstrap', B=200, seed=12345)",
+      "file": "tests/golden/glm_bootstrap_predict.npz",
+      "package_version": "0.4.0",
+      "recorded": "2026-06-18T06:42:24.769414+00:00"
+    },
+    {
+      "cell_id": "glm_bootstrap_dydx",
+      "constructor": "GComputation(fit_glm, at='overall', method='bootstrap', B=200, seed=12345)",
+      "file": "tests/golden/glm_bootstrap_dydx.npz",
+      "package_version": "0.4.0",
+      "recorded": "2026-06-18T06:42:26.424589+00:00"
+    },
+    {
+      "cell_id": "ols_cluster_bootstrap_predict",
+      "constructor": "GComputation(steps.input(df, cluster=cluster_ids), outcome=fit_ols, at='overall', method='bootstrap', B=200, seed=12345)",
+      "file": "tests/golden/ols_cluster_bootstrap_predict.npz",
+      "package_version": "0.4.0",
+      "recorded": "2026-06-18T06:42:28.574609+00:00"
+    },
+    {
+      "cell_id": "ols_cluster_bootstrap_dydx",
+      "constructor": "GComputation(steps.input(df, cluster=cluster_ids), outcome=fit_ols, at='overall', method='bootstrap', B=200, seed=12345)",
+      "file": "tests/golden/ols_cluster_bootstrap_dydx.npz",
+      "package_version": "0.4.0",
+      "recorded": "2026-06-18T06:42:29.994466+00:00"
+    },
+    {
+      "cell_id": "glm_cluster_bootstrap_predict",
+      "constructor": "GComputation(steps.input(df, cluster=cluster_ids), outcome=fit_glm, at='overall', method='bootstrap', B=200, seed=12345)",
+      "file": "tests/golden/glm_cluster_bootstrap_predict.npz",
+      "package_version": "0.4.0",
+      "recorded": "2026-06-18T06:42:32.234413+00:00"
+    },
+    {
+      "cell_id": "glm_cluster_bootstrap_dydx",
+      "constructor": "GComputation(steps.input(df, cluster=cluster_ids), outcome=fit_glm, at='overall', method='bootstrap', B=200, seed=12345)",
+      "file": "tests/golden/glm_cluster_bootstrap_dydx.npz",
+      "package_version": "0.4.0",
+      "recorded": "2026-06-18T06:42:33.969678+00:00"
+    },
+    {
+      "cell_id": "ols_delta_contrasts",
+      "constructor": "GComputation(fit_ols, at='overall', method='delta', seed=SEED)",
+      "file": "tests/golden/ols_delta_contrasts.npz",
+      "package_version": "0.4.0",
+      "recorded": "2026-06-18T06:42:34.483414+00:00"
+    },
+    {
+      "cell_id": "ols_delta_evaluate",
+      "constructor": "GComputation(fit_ols, at='overall', method='delta', seed=SEED)",
+      "file": "tests/golden/ols_delta_evaluate.npz",
+      "package_version": "0.4.0",
+      "recorded": "2026-06-18T06:42:34.971675+00:00"
+    },
+    {
+      "cell_id": "ols_delta_weights_predict",
+      "constructor": "GComputation(fit_ols, at='overall', method='delta', weights=w, seed=SEED)",
+      "file": "tests/golden/ols_delta_weights_predict.npz",
+      "package_version": "0.4.0",
+      "recorded": "2026-06-18T06:42:35.493248+00:00"
+    },
+    {
+      "cell_id": "ols_delta_elasticity_eyex",
+      "constructor": "GComputation(fit_ols, at='overall', method='delta', seed=SEED)",
+      "file": "tests/golden/ols_delta_elasticity_eyex.npz",
+      "package_version": "0.4.0",
+      "recorded": "2026-06-18T06:42:36.565155+00:00"
+    },
+    {
+      "cell_id": "ols_delta_elasticity_eydx",
+      "constructor": "GComputation(fit_ols, at='overall', method='delta', seed=SEED)",
+      "file": "tests/golden/ols_delta_elasticity_eydx.npz",
+      "package_version": "0.4.0",
+      "recorded": "2026-06-18T06:42:36.630059+00:00"
+    },
+    {
+      "cell_id": "ols_delta_elasticity_dyex",
+      "constructor": "GComputation(fit_ols, at='overall', method='delta', seed=SEED)",
+      "file": "tests/golden/ols_delta_elasticity_dyex.npz",
+      "package_version": "0.4.0",
+      "recorded": "2026-06-18T06:42:36.678201+00:00"
+    }
+  ],
+  "environment": {
+    "jax": "0.10.1",
+    "jaxlib": "0.10.1",
+    "numpy": "2.4.6",
+    "scipy": "1.17.1",
+    "statsmodels": "0.14.6"
+  },
+  "package_version": "0.4.0",
+  "recorded": "2026-06-18T06:42:36.678238+00:00"
+}

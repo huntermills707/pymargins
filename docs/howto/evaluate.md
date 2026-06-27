@@ -12,13 +12,12 @@ kernelspec:
 
 # Nonlinear estimands with `evaluate`
 
-
 ```{code-cell} python
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(42)
 n = 2000
@@ -35,11 +34,11 @@ df["y"] = rng.binomial(1, 1 / (1 + np.exp(-lp)))
 
 fit = smf.glm("y ~ age + treatment + dose + C(policy)", data=df,
               family=sm.families.Binomial()).fit()
-m = Margins.linear_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="identity")
 ```
 
 
-`Margins.evaluate` is the escape hatch for estimands that cannot be written
+`GComputation.evaluate` is the escape hatch for estimands that cannot be written
 as a weighted sum of scenario predictions.  Use it for reciprocals,
 custom utility functions, ratios of differences, or any other
 JAX-differentiable composition that is not linear in the predictions.
@@ -77,9 +76,9 @@ reciprocal, it cannot be written as a linear contrast and must go
 through `evaluate`:
 
 ```{code-cell} python
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
-m = Margins.linear_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="identity")
 
 scenarios = [
     {"atexog": {"treatment": 1}, "label": "treated"},
@@ -94,21 +93,22 @@ print(res.summary())
 ```
 
 If the risk difference crosses zero, the denominator can change sign
-and κ will be large.  In that case `pymargins` auto-falls back to
-simulation, which is the safe thing to do for a reciprocal.
+and the delta method can be unreliable.  In that case use
+`method="simulation"`, which is the safe thing to do for a
+reciprocal.
 
 ## Raw ratio on the linear scale
 
-A risk ratio is usually computed with `contrasts` on a `log_scale`
-session (`log(p₁) − log(p₀)` back-transformed with `exp`).  That is the
-preferred path because the log-ratio is linear and the delta method is
-exact.
+A risk ratio is usually computed with `contrasts` on a `scale="log"`
+estimator (`log(p₁) − log(p₀)` back-transformed with `exp`).  That is
+the preferred path because the log-ratio is linear and the delta method
+is exact.
 
 Use `evaluate` for the raw ratio `p₁ / p₀` only when your field or
 journal explicitly requires inference on the ratio scale itself:
 
 ```{code-cell} python
-m = Margins.linear_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="identity")
 
 scenarios = [
     {"atexog": {"treatment": 1}, "label": "treated"},
@@ -153,7 +153,7 @@ expected utility difference between two policy regimes:
 ```{code-cell} python
 import jax.numpy as jnp
 
-m = Margins.linear_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="identity")
 
 scenarios = [
     {"atexog": {"policy": "A"}, "label": "regime_A"},
@@ -171,7 +171,7 @@ print(res.summary())
 
 If `compose` uses Python control flow (`if`, `for`) on tracer values,
 JAX cannot differentiate it and the delta method is impossible.
-`pymargins` catches the error and silently reroutes to the session's
+`pymargins` catches the error and silently reroutes to the estimator's
 simulation or bootstrap method.  The result records the realized
 method, so the audit trail is still complete.
 

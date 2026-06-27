@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 from linearmodels.panel import FamaMacBeth
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins._adapters.linearmodels_panel import LinearmodelsPanelAdapter
 
 
@@ -31,16 +31,16 @@ def panel_df():
 def test_auto_detect_famamacbeth(panel_df):
     mod = FamaMacBeth.from_formula("y ~ x1", data=panel_df)
     res = mod.fit()
-    m = Margins(res)
-    assert isinstance(m.adapter, LinearmodelsPanelAdapter)
+    est = GComputation(res)
+    assert isinstance(est._compiled.adapter, LinearmodelsPanelAdapter)
 
 
 def test_margins_predict(panel_df):
     mod = FamaMacBeth.from_formula("y ~ x1", data=panel_df)
     res = mod.fit()
-    m = Margins(res)
+    est = GComputation(res)
 
-    pred = m.predict()
+    pred = est.predict()
     native_pred = res.predict(exog=panel_df[["x1"]])
     assert np.isclose(
         float(pred.estimate), float(native_pred.mean().iloc[0]), rtol=1e-4
@@ -50,9 +50,9 @@ def test_margins_predict(panel_df):
 def test_margins_dydx(panel_df):
     mod = FamaMacBeth.from_formula("y ~ x1", data=panel_df)
     res = mod.fit()
-    m = Margins(res)
+    est = GComputation(res)
 
-    slope = m.dydx("x1")
+    slope = est.dydx("x1")
     assert np.isclose(float(slope.estimate), float(res.params["x1"]), rtol=2e-2)
 
 
@@ -70,8 +70,8 @@ def test_refit_famamacbeth(panel_df):
 def test_bootstrap_famamacbeth(panel_df):
     mod = FamaMacBeth.from_formula("y ~ x1", data=panel_df)
     res = mod.fit()
-    m = Margins(res, method="bootstrap", n_boot=20, rng_seed=42)
-    pred = m.predict()
+    est = GComputation(res, method="bootstrap", B=20, seed=42)
+    pred = est.predict()
     assert np.isfinite(float(pred.estimate))
     assert np.isfinite(float(pred.std_error))
 
@@ -79,7 +79,7 @@ def test_bootstrap_famamacbeth(panel_df):
 def test_custom_vcov_famamacbeth(panel_df):
     mod = FamaMacBeth.from_formula("y ~ x1", data=panel_df)
     res = mod.fit()
-    m = Margins(res, vcov="robust")
-    pred = m.predict()
+    est = GComputation(res, vcov="robust")
+    pred = est.predict()
     assert np.isfinite(float(pred.estimate))
     assert np.isfinite(float(pred.std_error))

@@ -11,7 +11,6 @@ kernelspec:
 ---
 
 # Spector & Mazzeo (1980) — Did PSI work?
-
 Thirty-two economics students. Three covariates: incoming GPA, a
 diagnostic test score (`TUCE`), and a binary indicator `PSI` for
 whether the student was taught via Personalized System of
@@ -29,7 +28,7 @@ import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from pymargins import Margins, pairwise
+from pymargins import GComputation, pairwise  # 0.4.0: Margins -> GComputation
 
 data = sm.datasets.spector.load_pandas()
 df = data.exog.copy()
@@ -57,7 +56,7 @@ between PSI=1 and PSI=0:
 ```{code-cell} python
 scen, w = pairwise("PSI", [1, 0])
 
-m_delta = Margins.linear_scale(fit, vcov="HC1", at="overall")
+m_delta = GComputation(fit, vcov="HC1", at="overall", scale="identity")
 print("Delta method:")
 print(m_delta.contrasts(scenarios=scen, contrasts=w).summary())
 ```
@@ -66,10 +65,8 @@ With only 32 observations the delta-method CI is wide. A Krinsky–Robb
 simulation is the cleanest cross-check that does not require refits:
 
 ```{code-cell} python
-m_sim = Margins.linear_scale(
-    fit, vcov="HC1", at="overall",
-    method="simulation", n_sim=2000, rng_seed=0,
-)
+m_sim = GComputation(fit, vcov="HC1", at="overall",
+    method="simulation", n_sim=2000, seed=0, scale="identity")
 print("Krinsky–Robb simulation:")
 print(m_sim.contrasts(scenarios=scen, contrasts=w).summary())
 ```
@@ -82,7 +79,9 @@ diagnostic gives the analytical reason the delta and simulation
 intervals agree:
 
 ```{code-cell} python
-print(m_delta.diagnose().summary())
+res_delta = m_delta.contrasts(scenarios=scen, contrasts=w)
+print(res_delta.kappa)
+print(m_delta.plan.describe())
 ```
 
 A small κ confirms the response surface is essentially linear in the

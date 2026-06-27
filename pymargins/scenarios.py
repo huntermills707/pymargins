@@ -2,7 +2,7 @@
 pymargins.scenarios — Helper functions for building scenario lists and contrast weights.
 
 These are pure factories that return data structures accepted by
-`Margins.contrasts()`, `Margins.evaluate()`, and `Margins.predict()`.
+`GComputation.contrasts()`, `GComputation.evaluate()`, and `GComputation.predict()`.
 They keep common contrast patterns (pairwise, reference-level, diff-in-diff,
 grid predictions) explicit and less error-prone.
 

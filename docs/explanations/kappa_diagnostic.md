@@ -3,8 +3,8 @@
 The delta method is a first-order Taylor approximation. The
 approximation breaks when the estimand is too curved in `β` for the
 local linearization to track the true sampling distribution. The κ
-diagnostic measures that curvature and, when it crosses a threshold,
-auto-falls-back to simulation.
+diagnostic measures that curvature; when it is large, switch to
+`method="simulation"` or `method="bootstrap"`.
 
 ## Definition
 
@@ -35,34 +35,13 @@ literature:
 |--------------|---------------------------------------------|
 | κ < 0.1      | delta method is highly reliable             |
 | 0.1 ≤ κ < 0.3 | borderline; delta usable but report κ      |
-| κ ≥ 0.3      | delta unsafe; auto-fall-back to simulation  |
+| κ ≥ 0.3      | delta unsafe; use simulation or bootstrap   |
 
-These are configurable via `kappa_threshold=` on the session.
-
-## What the fallback does
-
-When κ exceeds the threshold and the session was constructed with
-`method="delta"`, the call recomputes inference via Krinsky–Robb
-simulation. The result records:
-
-- the realized inference method (`"simulation"`, not the requested
-  `"delta"`);
-- the fallback reason (`"kappa exceeded"`);
-- the κ value itself, surfaced on `result.summary()`.
-
-This is meant to be loud. `pymargins`' position is that silent
-delta-method use on highly curved estimands is the most common
-inference bug in published applied work, and that a tool that just
-computes the delta number — as Stata's `margins` and R's
-`marginaleffects` both do — gives the analyst no way to know they
-should have used something else.
-
-## Disabling
-
-- `kappa_threshold=float("inf")` — keep the requested method, never
-  fall back.
-- `diagnostics=False` — skip κ entirely (useful in tight loops where
-  the second derivative is expensive).
+Every `GraphResult` carries `result.kappa` — the worst-case curvature of
+the estimand on the inference scale. Under `method="auto"`, κ is computed
+at compile and used once to choose between delta and simulation; under an
+explicit `method=`, κ is still recorded for transparency but does not
+change the method.
 
 See [](inference_scale.md) for why picking the right scale is the
-first move before tightening κ tolerance.
+first move before judging delta-method reliability.

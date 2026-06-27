@@ -10,7 +10,7 @@ from lifelines import GeneralizedGammaRegressionFitter
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins._adapter import auto_detect_adapter
 from pymargins._adapters.lifelines_generalized_gamma import (
     LifelinesGeneralizedGammaAdapter,
@@ -82,13 +82,13 @@ def test_supported_inference_methods(gg_fit, df_survival):
 
 def test_bootstrap_end_to_end(gg_fit, df_survival):
     adapter = LifelinesGeneralizedGammaAdapter(gg_fit, training_data=df_survival)
-    m = Margins(
+    m = GComputation(
         gg_fit,
         adapter=adapter,
         at="typical",
         method="bootstrap",
-        n_boot=50,
-        rng_seed=42,
+        B=50,
+        seed=42,
     )
     rd = m.predict()
     assert rd.method == "bootstrap"

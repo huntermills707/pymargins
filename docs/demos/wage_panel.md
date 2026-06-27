@@ -11,7 +11,6 @@ kernelspec:
 ---
 
 # Wage panel — union premium with entity fixed effects
-
 The `wage_panel` data from `linearmodels` follows 545 young men
 across 1980–1987 with annual observations on log wages, education,
 experience, union membership, and marital status. The substantive
@@ -32,7 +31,7 @@ import pandas as pd
 from linearmodels.panel import PanelOLS
 from linearmodels.datasets import wage_panel
 
-from pymargins import Margins, pairwise
+from pymargins import GComputation, pairwise  # 0.4.0: Margins -> GComputation
 
 raw = wage_panel.load()
 df = raw.set_index(["nr", "year"]).copy()
@@ -62,22 +61,22 @@ worker.)
 
 `lwage` is log wages and `union` is binary, so the natural estimand
 is a *contrast* (union vs non-union) rather than a slope. On a
-linear-scale session that contrast is the gap in log wages — i.e.,
+linear-scale estimator that contrast is the gap in log wages — i.e.,
 the union premium expressed as a log-point gap:
 
 ```{code-cell} python
-m = Margins.linear_scale(fe, at="overall")
+m = GComputation(fe, at="overall", scale="identity")
 scen, w = pairwise("union", [1, 0])
 print(m.contrasts(scenarios=scen, contrasts=w).summary())
 ```
 
 For policy reporting it's clearer to express this as a percentage
-gap. Switch to a log session and ask for the same contrast — the
+gap. Switch to a log estimator and ask for the same contrast — the
 back-transform turns the log-difference into a multiplicative
 premium:
 
 ```{code-cell} python
-m_log = Margins.log_scale(fe, at="overall")
+m_log = GComputation(fe, at="overall", scale="log")
 print(m_log.contrasts(scenarios=scen, contrasts=w).summary())
 ```
 
@@ -98,10 +97,8 @@ simulation, which draws coefficient vectors from the fitted MVN and
 re-evaluates the estimand:
 
 ```{code-cell} python
-m_sim = Margins.log_scale(
-    fe, at="overall",
-    method="simulation", n_sim=2000, rng_seed=0,
-)
+m_sim = GComputation(fe, at="overall",
+    method="simulation", n_sim=2000, seed=0, scale="log")
 print(m_sim.contrasts(scenarios=scen, contrasts=w).summary())
 ```
 

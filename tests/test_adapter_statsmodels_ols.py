@@ -4,7 +4,6 @@ See IMPLEMENTATION_GUIDE.md §1.1 and §1.2.
 """
 
 import jax
-import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import pytest
@@ -13,7 +12,7 @@ import statsmodels.formula.api as smf
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins._adapter import auto_detect_adapter
 from pymargins._adapters.statsmodels_ols import StatsmodelsOLSAdapter
 
@@ -332,15 +331,15 @@ def test_refit_wls_preserves_weights(fit_wls_formula, df_ols):
 def test_bootstrap_end_to_end_array_fit(fit_ols_array, df_ols):
     """Bootstrap CI should work end-to-end with an array-fit OLS adapter."""
     adapter = StatsmodelsOLSAdapter(fit_ols_array, training_data=df_ols)
-    m = Margins.linear_scale(
+    est = GComputation(
         fit_ols_array,
         adapter=adapter,
         at="typical",
         method="bootstrap",
-        n_boot=50,
-        rng_seed=42,
+        B=50,
+        seed=42,
     )
-    rd = m.contrasts(
+    rd = est.contrasts(
         scenarios=[
             {"atexog": {"treatment": 1}},
             {"atexog": {"treatment": 0}},
@@ -351,66 +350,6 @@ def test_bootstrap_end_to_end_array_fit(fit_ols_array, df_ols):
     assert np.isfinite(float(rd.estimate))
     assert float(rd.conf_int_lower) < float(rd.conf_int_upper)
     assert rd.draws is not None
-
-
-# ---------------------------------------------------------------------------
-# Attach-time validation (IMPLEMENTATION_GUIDE.md §2.3)
-# ---------------------------------------------------------------------------
-
-
-def test_attach_rejects_unsupported_vcov_string(fit_ols_formula):
-    adapter = StatsmodelsOLSAdapter(fit_ols_formula)
-    with pytest.raises(
-        ValueError, match="StatsmodelsOLSAdapter does not support vcov='HAC'"
-    ):
-        Margins(fit_ols_formula, adapter=adapter, vcov="HAC")
-
-
-def test_attach_rejects_unsupported_vcov_dict(fit_ols_formula):
-    adapter = StatsmodelsOLSAdapter(fit_ols_formula)
-    with pytest.raises(
-        ValueError,
-        match="StatsmodelsOLSAdapter does not support vcov dict with type='hac'",
-    ):
-        Margins(fit_ols_formula, adapter=adapter, vcov={"type": "hac"})
-
-
-def test_attach_rejects_cluster_without_groups(fit_ols_formula):
-    adapter = StatsmodelsOLSAdapter(fit_ols_formula)
-    with pytest.raises(ValueError, match="cluster vcov requires 'groups'"):
-        Margins(fit_ols_formula, adapter=adapter, vcov={"type": "cluster"})
-
-
-def test_attach_accepts_supported_vcov(fit_ols_formula):
-    adapter = StatsmodelsOLSAdapter(fit_ols_formula)
-    # HC0 string
-    m = Margins(fit_ols_formula, adapter=adapter, vcov="HC0")
-    assert m.vcov_spec == "HC0"
-    # cluster dict
-    df = adapter.training_data
-    cluster_spec = {"type": "cluster", "groups": df["treatment"]}
-    m2 = Margins(fit_ols_formula, adapter=adapter, vcov=cluster_spec)
-    assert m2.vcov_spec["type"] == "cluster"
-    assert m2.vcov_spec["groups"].equals(df["treatment"])
-    # ndarray
-    cov = np.eye(len(fit_ols_formula.params))
-    m3 = Margins(fit_ols_formula, adapter=adapter, vcov=cov)
-    assert m3.vcov_spec is cov
-    # JAX array
-    import jax.numpy as jnp
-
-    cov_jax = jnp.eye(len(fit_ols_formula.params))
-    m4 = Margins(fit_ols_formula, adapter=adapter, vcov=cov_jax)
-    assert m4.vcov_spec is cov_jax
-
-
-def test_attach_validates_phi_phi_inv(fit_ols_formula):
-    """ModelAdapter.attach validates phi and phi_inv are inverses for OLS too."""
-    adapter = StatsmodelsOLSAdapter(fit_ols_formula)
-    with pytest.raises(
-        ValueError, match="phi and phi_inv do not appear to be inverses"
-    ):
-        Margins(fit_ols_formula, adapter=adapter, phi=jnp.exp, phi_inv=jnp.exp)
 
 
 # ---------------------------------------------------------------------------

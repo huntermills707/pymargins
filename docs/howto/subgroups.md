@@ -11,7 +11,6 @@ kernelspec:
 ---
 
 # Effects by subgroup with `over=`
-
 `over=` partitions the sample and computes the estimand *within* each
 group, returning one row per group with a shared covariance. It works
 on `predict` and `dydx` (the aggregating estimands); for discrete
@@ -24,7 +23,7 @@ import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(42)
 n = 4000
@@ -38,7 +37,7 @@ df["y"] = rng.binomial(1, 1 / (1 + np.exp(-lp)))
 
 fit = smf.glm("y ~ age * treated + C(region)", data=df,
               family=sm.families.Binomial()).fit()
-m = Margins.linear_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="identity")
 ```
 
 ## AME within each subgroup
@@ -88,7 +87,7 @@ term**:
 # Drop the interaction: age enters additively, treated only shifts the level.
 fit_add = smf.glm("y ~ age + treated + C(region)", data=df,
                   family=sm.families.Binomial()).fit()
-m_add = Margins.linear_scale(fit_add, at="overall")
+m_add = GComputation(fit_add, at="overall", scale="identity")
 print(m_add.dydx("age", over="treated").summary())
 ```
 
@@ -96,8 +95,8 @@ The two slopes still differ: the treated group sits higher on the
 logistic curve, where the same change in the linear predictor maps to a
 different change in probability. This is genuine link-driven
 heterogeneity, not a modelling artefact — but note it is a property of
-the *probability* scale. On a `log_scale` or `logit_scale` session the
-subgroup effects of an additive model would instead coincide.
+the *probability* scale. On a `scale="log"` or `scale="logit"` estimator
+the subgroup effects of an additive model would instead coincide.
 
 ## Discrete contrasts by subgroup
 

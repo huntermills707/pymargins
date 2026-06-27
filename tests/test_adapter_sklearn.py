@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 from sklearn.linear_model import LinearRegression
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins._adapters.sklearn_bootstrap import SklearnBootstrapAdapter
 
 
@@ -82,7 +82,7 @@ def test_adapter_with_formula_correct_dydx(fit_sklearn_linear, df_sklearn):
         data=df_sklearn,
         target_name="y",
     )
-    m = Margins(model, adapter=adapter, method="bootstrap", n_boot=30, rng_seed=42)
+    m = GComputation(model, adapter=adapter, method="bootstrap", B=30, seed=42)
     slope = m.dydx("age")
     # Expected slope at mean age: 0.2 + 0.001 * 2 * mean(age)
     expected = 0.2 + 0.001 * 2 * df_sklearn["age"].mean()
@@ -100,7 +100,7 @@ def test_adapter_without_formula_raises_on_derived_terms(df_sklearn):
     model = LinearRegression()
     model.fit(X, y)
     adapter = SklearnBootstrapAdapter(model, X_train=X, y_train=y)
-    m = Margins(model, adapter=adapter, method="bootstrap", n_boot=10, rng_seed=42)
+    m = GComputation(model, adapter=adapter, method="bootstrap", B=10, seed=42)
     with pytest.raises(ValueError, match="derived terms"):
         m.dydx("age")
 
@@ -113,7 +113,7 @@ def test_adapter_without_formula_raises_on_derived_terms(df_sklearn):
 def test_bootstrap_predict(fit_sklearn_linear, df_sklearn):
     model, X, y = fit_sklearn_linear
     adapter = SklearnBootstrapAdapter(model, X_train=X, y_train=y)
-    m = Margins(model, adapter=adapter, method="bootstrap", n_boot=20, rng_seed=42)
+    m = GComputation(model, adapter=adapter, method="bootstrap", B=20, seed=42)
     pred = m.predict(atexog={"age": 50, "treat": 1})
     assert np.isfinite(float(pred.estimate))
     assert np.isfinite(float(pred.std_error))
@@ -142,7 +142,7 @@ def test_formula_verification_catches_intercept_mismatch(df_sklearn):
         target_name="y",
     )
     with pytest.raises(ValueError, match="Formula verification failed"):
-        Margins(model, adapter=adapter, method="bootstrap", n_boot=10)
+        adapter._verify_formula_spec()
 
 
 # ---------------------------------------------------------------------------

@@ -9,7 +9,6 @@ import numpy as np
 from .._delta import delta_confint, delta_se
 from .._gradients import gradient
 from .._kappa import delta_simulation_disagreement, kappa, kappa_vector
-from ._simulation import _run_simulation
 
 
 def _run_delta(h, adapter, config, estimand_metadata):
@@ -32,25 +31,8 @@ def _run_delta(h, adapter, config, estimand_metadata):
                 h, beta, Sigma, backend=config.gradient_backend, fd_step=config.fd_step
             )
 
-        max_k = float(k) if jnp.ndim(k) == 0 else float(jnp.nanmax(jnp.asarray(k)))
-        if max_k > config.kappa_threshold:
-            # Auto-fallback to simulation
-            warnings.warn(
-                f"Delta-method curvature κ={max_k:.3f} exceeds threshold "
-                f"({config.kappa_threshold}, stacklevel=2); falling back to simulation.",
-                UserWarning,
-                stacklevel=3,
-            )
-            sim_result = _run_simulation(
-                h,
-                adapter,
-                config,
-                estimand_metadata,
-                fallback_reason=f"kappa={max_k:.3f}>threshold={config.kappa_threshold}",
-                skip_kappa=True,
-            )
-            sim_result["kappa"] = np.asarray(k) if k is not None else None
-            return sim_result
+        # Doctrine (R3): kappa_threshold is always +inf on the new path, so
+        # the legacy κ-flip branch is dead. The diagnostic is still recorded in k.
 
     # Construct CI on inference scale, then back-transform via phi
     lower, upper = delta_confint(
@@ -65,7 +47,7 @@ def _run_delta(h, adapter, config, estimand_metadata):
     # Optional comparison against simulation. Works for scalar and vector
     # estimands; for vectors it returns the max per-component disagreement.
     delta_sim_disagreement = None
-    if config.diagnostics:
+    if config.diagnostics and config.n_sim > 0:
         try:
             delta_sim_disagreement = delta_simulation_disagreement(
                 estimate,
@@ -78,7 +60,7 @@ def _run_delta(h, adapter, config, estimand_metadata):
                 rng_seed=config.rng_seed,
                 phi=config.phi,
             )
-        except (ValueError, TypeError, jax.errors.JAXTypeError) as exc:
+        except (ValueError, TypeError, IndexError, jax.errors.JAXTypeError) as exc:
             warnings.warn(
                 f"delta-simulation diagnostic failed: {exc}",
                 RuntimeWarning,

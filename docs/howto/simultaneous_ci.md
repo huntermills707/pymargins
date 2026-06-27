@@ -1,5 +1,4 @@
 # Simultaneous confidence intervals and multiple-testing correction
-
 When you ask for `m` margins in one call, the per-margin CIs are
 *pointwise* by default. Family-wise coverage requires a wider
 critical value.
@@ -14,10 +13,10 @@ strictly tighter than Bonferroni:
 ```python
 res = m.predict(atexog={"age": [25, 35, 45, 55, 65]})
 
-res.conf_int(level=0.95)                       # pointwise
-res.conf_int(level=0.95, method="bonferroni")  # works with any method
-res.conf_int(level=0.95, method="sidak")
-res.conf_int(level=0.95, method="sup-t")       # requires draws (sim/bootstrap)
+res.conf_int()                                # pointwise
+res.conf_int(simultaneous=True)               # default simultaneous
+res.conf_int(method="bonferroni")             # Bonferroni, any method
+res.conf_int(method="sup-t")                  # requires draws (sim/bootstrap)
 ```
 
 ### Choosing a method
@@ -44,7 +43,7 @@ scen, W = all_pairwise("region", ["N", "S", "E", "W"])
 res = m.contrasts(scenarios=scen, contrasts=W)
 
 # sup-t uses the joint bootstrap/simulation draws
-res.conf_int(level=0.95, method="sup-t")
+res.conf_int(method="sup-t")
 ```
 
 ## Independent results: multiple-comparison adjustment
@@ -69,7 +68,7 @@ print(adj.to_frame())
 
 `adjust` wraps `statsmodels.stats.multitest.multipletests` and accepts
 any of its method names (`"bonferroni"`, `"holm"`, `"sidak"`,
-`"fdr_bh"`, etc.). Pass a single `MarginsResult`, a list, or a dict.
+`"fdr_bh"`, etc.). Pass a single `GraphResult`, a list, or a dict.
 
 ## Subgroup equality tests via pairwise contrasts
 
@@ -123,5 +122,5 @@ applied automatically.
   inference is exact.
 
 * **`adjust(...)`** — several independent results that do not share a
-  session or Σ̂. The only option when results come from different models
+  estimator or Σ̂. The only option when results come from different models
   or non-overlapping samples.

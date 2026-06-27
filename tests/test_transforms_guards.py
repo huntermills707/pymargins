@@ -1,4 +1,4 @@
-"""Tests for structural guards (Phase 4)."""
+"""Tests for structural guards on the new wiring surface."""
 
 from __future__ import annotations
 
@@ -7,60 +7,12 @@ import pandas as pd
 import pytest
 import statsmodels.formula.api as smf
 
-from pymargins import Margins, drop_outliers, reimpute
-from pymargins._transforms import IdentityStage
+from pymargins import GComputation, steps
+from pymargins._graph._compile import CompileError
 
 # ---------------------------------------------------------------------------
-# G4: survey_design + source_data override or row-altering stage
+# G4: survey_design still works alone
 # ---------------------------------------------------------------------------
-
-
-def test_survey_design_plus_reimpute_raises():
-    rng = np.random.default_rng(42)
-    n = 50
-    df = pd.DataFrame(
-        {
-            "x": rng.normal(size=n),
-            "y": 1.0 + 0.5 * rng.normal(size=n),
-        }
-    )
-    fit = smf.ols("y ~ x", data=df).fit()
-
-    from pymargins.survey import SurveyDesign
-
-    sd = SurveyDesign(weights=np.ones(n))
-
-    with pytest.raises(ValueError, match="survey_design is not compatible"):
-        Margins(
-            fit,
-            survey_design=sd,
-            transforms=[reimpute(lambda d: d.fillna(0), incomplete=df)],
-            method="bootstrap",
-        )
-
-
-def test_survey_design_plus_drop_raises():
-    rng = np.random.default_rng(42)
-    n = 50
-    df = pd.DataFrame(
-        {
-            "x": rng.normal(size=n),
-            "y": 1.0 + 0.5 * rng.normal(size=n),
-        }
-    )
-    fit = smf.ols("y ~ x", data=df).fit()
-
-    from pymargins.survey import SurveyDesign
-
-    sd = SurveyDesign(weights=np.ones(n))
-
-    with pytest.raises(ValueError, match="survey_design is not compatible"):
-        Margins(
-            fit,
-            survey_design=sd,
-            transforms=[drop_outliers(lambda f: f["x"].abs() > 3)],
-            method="bootstrap",
-        )
 
 
 def test_survey_design_alone_unaffected():
@@ -77,13 +29,19 @@ def test_survey_design_alone_unaffected():
     from pymargins.survey import SurveyDesign
 
     sd = SurveyDesign(weights=np.ones(n))
-    m = Margins(fit, survey_design=sd, method="bootstrap", n_boot=10, rng_seed=1)
-    r = m.predict()
+    est = GComputation(
+        steps.input(df, design=sd),
+        outcome=fit,
+        method="bootstrap",
+        B=10,
+        seed=1,
+    )
+    r = est.predict()
     assert np.isfinite(r.estimate)
 
 
 # ---------------------------------------------------------------------------
-# G5: matching + transforms raises
+# G5: matching + row-filter stage refused
 # ---------------------------------------------------------------------------
 
 
@@ -91,12 +49,13 @@ class _FakeMatcher:
     def __init__(self, n):
         self.matched_data = pd.DataFrame({"x": range(n), "y": range(n)})
         self.cluster_ids = np.arange(n)
+        self.population_note = "matched sample"
 
     def rematch(self, data):
         return data
 
 
-def test_matching_plus_transforms_raises():
+def test_matching_plus_row_filter_refused():
     rng = np.random.default_rng(42)
     n = 50
     df = pd.DataFrame(
@@ -107,19 +66,16 @@ def test_matching_plus_transforms_raises():
     )
     fit = smf.ols("y ~ x", data=df).fit()
 
-    with pytest.raises(
-        ValueError, match="matching= and transforms= cannot be used together"
-    ):
-        Margins(
-            fit,
-            matching=_FakeMatcher(n),
-            transforms=[IdentityStage()],
-            method="bootstrap",
-        )
+    wiring = steps.drop_outliers(
+        steps.match(steps.input(df), _FakeMatcher(n)),
+        rule=lambda f: f["x"].abs() > 3,
+    )
+    with pytest.raises(CompileError, match=r"match \+ row-filter"):
+        GComputation(wiring, outcome=fit, method="bootstrap")
 
 
 # ---------------------------------------------------------------------------
-# Strict mode: transforms is NOT required
+# G6: BCa refused with a transform pipeline
 # ---------------------------------------------------------------------------
 
 
@@ -134,54 +90,13 @@ def test_bca_with_transforms_raises():
     )
     fit = smf.ols("y ~ x", data=df).fit()
 
-    m = Margins(
-        fit,
-        transforms=[IdentityStage()],
+    est = GComputation(
+        steps.drop_outliers(steps.input(df), rule=lambda f: f["x"].abs() > 3),
+        outcome=fit,
         method="bootstrap",
-        n_boot=10,
-        rng_seed=1,
-        bootstrap_config={"ci_method": "bca"},
+        B=10,
+        seed=1,
+        ci="bca",
     )
     with pytest.raises(ValueError, match="ci_method='bca' is not supported"):
-        m.predict()
-
-
-def test_strict_mode_transforms_not_required():
-    rng = np.random.default_rng(42)
-    n = 50
-    df = pd.DataFrame(
-        {
-            "x": rng.normal(size=n),
-            "y": 1.0 + 0.5 * rng.normal(size=n),
-        }
-    )
-    fit = smf.ols("y ~ x", data=df).fit()
-
-    # Should succeed without specifying transforms
-    m = Margins(
-        fit,
-        strict=True,
-        phi=None,
-        phi_inv=None,
-        vcov=None,
-        weights=None,
-        at="overall",
-        level=0.95,
-        method="delta",
-        kappa_threshold=0.3,
-        rng_seed=None,
-        n_sim=4000,
-        n_boot=1000,
-        n_jobs=1,
-        gradient_backend="autodiff",
-        fd_step=1e-6,
-        diagnostics=True,
-        cluster=None,
-        block_size=None,
-        bootstrap_config=None,
-        progress_bar=False,
-        matching=None,
-        formula=None,
-        data=None,
-    )
-    assert m.transforms is None
+        est.predict()

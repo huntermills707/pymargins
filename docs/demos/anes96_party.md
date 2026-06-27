@@ -11,7 +11,6 @@ kernelspec:
 ---
 
 # ANES96 — Multinomial logit on party identification
-
 The 1996 American National Election Study records party
 identification (`PID`) on a 7-point scale from strong Democrat (0)
 to strong Republican (6), along with demographics and a 7-point
@@ -40,7 +39,7 @@ import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 raw = sm.datasets.anes96.load_pandas().data.copy()
 # 7-point PID coded 0..6. Keep covariates compact for the demo.
@@ -73,7 +72,7 @@ is exactly why marginal-effects machinery exists.
 ```{code-cell} python
 import matplotlib.pyplot as plt
 
-m = Margins.linear_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="identity")
 lr_grid = list(range(1, 8))  # selfLR scale 1..7
 res = m.predict(atexog={"selfLR": lr_grid})
 

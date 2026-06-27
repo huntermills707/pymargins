@@ -9,7 +9,7 @@ from statsmodels.duration.hazard_regression import PHReg
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins._adapter import auto_detect_adapter
 from pymargins._adapters.statsmodels_phreg import StatsmodelsPHRegAdapter
 
@@ -182,20 +182,20 @@ def test_variable_metadata_is_cached(phreg_fit, df_survival):
 
 
 # ---------------------------------------------------------------------------
-# End-to-end via Margins session
+# End-to-end via GComputation
 # ---------------------------------------------------------------------------
 
 
 def test_margins_predict(phreg_fit, df_survival):
     adapter = StatsmodelsPHRegAdapter(phreg_fit, training_data=df_survival)
-    m = Margins.log_scale(phreg_fit, adapter=adapter)
+    m = GComputation(phreg_fit, adapter=adapter, scale="log")
     res = m.predict()
     assert res.estimate.size == 1
 
 
 def test_margins_dydx(phreg_fit, df_survival):
     adapter = StatsmodelsPHRegAdapter(phreg_fit, training_data=df_survival)
-    m = Margins.log_scale(phreg_fit, adapter=adapter)
+    m = GComputation(phreg_fit, adapter=adapter, scale="log")
     res = m.dydx("x1")
     assert res.estimate.size == 1
     assert np.isfinite(float(res.estimate))
@@ -208,13 +208,14 @@ def test_margins_dydx(phreg_fit, df_survival):
 
 def test_bootstrap_end_to_end(phreg_fit, df_survival):
     adapter = StatsmodelsPHRegAdapter(phreg_fit, training_data=df_survival)
-    m = Margins.log_scale(
+    m = GComputation(
         phreg_fit,
         adapter=adapter,
         at="typical",
         method="bootstrap",
-        n_boot=50,
-        rng_seed=42,
+        scale="log",
+        B=50,
+        seed=42,
     )
     rd = m.dydx("x1")
     assert rd.method == "bootstrap"
@@ -233,7 +234,7 @@ def test_attach_rejects_unsupported_vcov_string(phreg_fit, df_survival):
     with pytest.raises(
         ValueError, match="StatsmodelsPHRegAdapter does not support vcov='HC0'"
     ):
-        Margins(phreg_fit, adapter=adapter, vcov="HC0")
+        GComputation(phreg_fit, adapter=adapter, vcov="HC0")
 
 
 def test_attach_rejects_unsupported_vcov_dict(phreg_fit, df_survival):
@@ -241,7 +242,7 @@ def test_attach_rejects_unsupported_vcov_dict(phreg_fit, df_survival):
     with pytest.raises(
         ValueError, match="StatsmodelsPHRegAdapter does not support vcov dict"
     ):
-        Margins(
+        GComputation(
             phreg_fit,
             adapter=adapter,
             vcov={"type": "cluster", "groups": df_survival["E"]},
@@ -251,12 +252,13 @@ def test_attach_rejects_unsupported_vcov_dict(phreg_fit, df_survival):
 def test_attach_accepts_supported_vcov(phreg_fit, df_survival):
     adapter = StatsmodelsPHRegAdapter(phreg_fit, training_data=df_survival)
     # default (None)
-    m1 = Margins.log_scale(phreg_fit, adapter=adapter)
-    assert m1.vcov_spec is None
+    m1 = GComputation(phreg_fit, adapter=adapter, scale="log")
+    assert m1.plan.vcov is None
     # ndarray
     cov = np.eye(len(phreg_fit.params))
-    m2 = Margins(phreg_fit, adapter=adapter, vcov=cov)
-    assert m2.vcov_spec is cov
+    m2 = GComputation(phreg_fit, adapter=adapter, vcov=cov)
+    assert m2.plan.vcov["kind"] == "user_ndarray"
+    assert "fingerprint" in m2.plan.vcov
 
 
 # ---------------------------------------------------------------------------

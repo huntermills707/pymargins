@@ -11,7 +11,6 @@ kernelspec:
 ---
 
 # Contrasts and difference-in-differences
-
 Pairwise contrasts, reference-level contrasts, and 2×2 DiD all reduce
 to a list of scenarios plus a contrast weight vector.
 
@@ -21,7 +20,7 @@ import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from pymargins import Margins, pairwise, reference, did
+from pymargins import GComputation, pairwise, reference, did  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(8)
 n = 4000
@@ -40,7 +39,7 @@ fit = smf.glm(
     data=df,
     family=sm.families.Binomial(),
 ).fit()
-m = Margins.linear_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="identity")
 ```
 
 ## Pairwise risk difference

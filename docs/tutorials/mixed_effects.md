@@ -11,7 +11,6 @@ kernelspec:
 ---
 
 # Linear Mixed Effects
-
 `statsmodels.MixedLM` fits random-intercept and random-slope models.
 `pymargins` uses the fixed-effects coefficients and their covariance
 for population-averaged marginal effects and predictions.  Random
@@ -23,7 +22,7 @@ import numpy as np
 import pandas as pd
 import statsmodels.formula.api as smf
 
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(42)
 n = 400
@@ -51,7 +50,7 @@ fit = smf.mixedlm(
 ## AME of `age`
 
 ```{code-cell} python
-m = Margins.linear_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="identity")
 print(m.dydx("age").summary())
 ```
 
@@ -123,13 +122,13 @@ If you fit with `sm.MixedLM(y, X, groups=...)` instead of
 from pymargins.adapters import StatsmodelsMixedLMAdapter
 
 adapter = StatsmodelsMixedLMAdapter(fit_array, training_data=df)
-m = Margins.linear_scale(fit_array, adapter=adapter, at="overall")
+m = GComputation(fit_array, adapter=adapter, at="overall", scale="identity")
 ```
 
 ## Notes on bootstrap inference
 
 Mixed-model covariance is already cluster-aware through the random
-effects structure.  If you still want a bootstrap, open the session
-with `method="bootstrap"` and a modest `n_boot=` — refitting MixedLM
+effects structure.  If you still want a bootstrap, build the estimator
+with `method="bootstrap"` and a modest `B=` — refitting MixedLM
 is slower than OLS or GLM, so keep the replicate count low for
 exploration and raise it only for final reporting.

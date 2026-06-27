@@ -7,7 +7,9 @@ import pandas as pd
 import pytest
 import statsmodels.formula.api as smf
 
-from pymargins import Margins, reimpute
+from pymargins import GComputation, reimpute, steps
+from pymargins._graph._node import Node
+from pymargins._tabular import fingerprint_frame
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -26,12 +28,42 @@ def _make_incomplete_df(rng, n=200, prop_missing=0.15):
     missing = rng.uniform(size=n) < prop_missing * (1 / (1 + np.exp(-df["x2"])))
     df_nan = df.copy()
     df_nan.loc[missing, "x1"] = np.nan
-    return df, df_nan
+    df_init = df_nan.fillna(df_nan.mean())
+    return df_init, df_nan
 
 
 def _mean_imputer(df):
     """Deterministic conditional-mean imputer (triggers G3 warning)."""
     return df.fillna(df.mean())
+
+
+def _iterative_imputer(*, max_iter, random_state, sample_posterior):
+    """Return a seeded sklearn IterativeImputer, enabling the experimental API."""
+    from sklearn.experimental import enable_iterative_imputer  # noqa: F401
+    from sklearn.impute import IterativeImputer
+
+    return IterativeImputer(
+        max_iter=max_iter,
+        random_state=random_state,
+        sample_posterior=sample_posterior,
+    )
+
+
+def _reimpute_node(df_base, df_incomplete, imputer, *, cluster=None):
+    """Build a reimpute node whose point output is *df_base* but whose
+    bootstrap resampling source is *df_incomplete*.
+
+    This mirrors the legacy ``transforms=[reimpute(imputer, incomplete=...)]``
+    semantics, because ``steps.reimpute`` derives the incomplete frame from the
+    parent node's collected output.
+    """
+    stage = reimpute(imputer, incomplete=df_incomplete)
+    return Node(
+        kind="reimpute",
+        inputs=(steps.input(df_base, cluster=cluster),),
+        alters_rows=False,
+        _payload=stage,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -41,12 +73,14 @@ def _mean_imputer(df):
 
 def test_reimpute_with_delta_raises():
     rng = np.random.default_rng(42)
-    df, df_nan = _make_incomplete_df(rng)
-    fit = smf.ols("y ~ x1 + x2", data=df_nan.fillna(df_nan.mean())).fit()
+    df_init, df_nan = _make_incomplete_df(rng)
+    fit = smf.ols("y ~ x1 + x2", data=df_init).fit()
 
     with pytest.raises(ValueError, match="method='delta' is not compatible"):
-        Margins(
-            fit, transforms=[reimpute(_mean_imputer, incomplete=df_nan)], method="delta"
+        GComputation(
+            _reimpute_node(df_init, df_nan, _mean_imputer),
+            outcome=fit,
+            method="delta",
         )
 
 
@@ -57,15 +91,16 @@ def test_reimpute_with_delta_raises():
 
 def test_deterministic_imputer_warns():
     rng = np.random.default_rng(42)
-    df, df_nan = _make_incomplete_df(rng)
-    fit = smf.ols("y ~ x1 + x2", data=df_nan.fillna(df_nan.mean())).fit()
+    df_init, df_nan = _make_incomplete_df(rng)
+    fit = smf.ols("y ~ x1 + x2", data=df_init).fit()
 
     with pytest.warns(UserWarning, match="deterministic"):
-        Margins(
-            fit,
-            transforms=[reimpute(_mean_imputer, incomplete=df_nan)],
+        GComputation(
+            _reimpute_node(df_init, df_nan, _mean_imputer),
+            outcome=fit,
             method="bootstrap",
-            n_boot=10,
+            B=10,
+            n_jobs=1,
         )
 
 
@@ -76,20 +111,22 @@ def test_deterministic_imputer_warns():
 
 def test_reimpute_with_nan_cluster_raises():
     rng = np.random.default_rng(42)
-    df, df_nan = _make_incomplete_df(rng, n=50)
-    fit = smf.ols("y ~ x1 + x2", data=df_nan.fillna(df_nan.mean())).fit()
+    df_init, df_nan = _make_incomplete_df(rng, n=50)
+    fit = smf.ols("y ~ x1 + x2", data=df_init).fit()
 
     cluster = np.arange(len(df_nan), dtype=float)
     cluster[0] = np.nan
 
+    est = GComputation(
+        _reimpute_node(df_init, df_nan, _mean_imputer, cluster=cluster),
+        outcome=fit,
+        method="bootstrap",
+        B=10,
+        n_jobs=1,
+    )
+
     with pytest.raises(ValueError, match="cluster IDs must not contain NaN"):
-        Margins(
-            fit,
-            transforms=[reimpute(_mean_imputer, incomplete=df_nan)],
-            cluster=cluster,
-            method="bootstrap",
-            n_boot=10,
-        )
+        est.predict()
 
 
 # ---------------------------------------------------------------------------
@@ -99,20 +136,18 @@ def test_reimpute_with_nan_cluster_raises():
 
 def test_reimpute_end_to_end_predict():
     rng = np.random.default_rng(42)
-    df, df_nan = _make_incomplete_df(rng)
-    # Fit on once-imputed data (the user's initial imputation)
-    df_init = df_nan.fillna(df_nan.mean())
+    df_init, df_nan = _make_incomplete_df(rng)
     fit = smf.ols("y ~ x1 + x2", data=df_init).fit()
 
-    m = Margins(
-        fit,
-        transforms=[reimpute(_mean_imputer, incomplete=df_nan)],
+    est = GComputation(
+        _reimpute_node(df_init, df_nan, _mean_imputer),
+        outcome=fit,
         method="bootstrap",
-        n_boot=50,
+        B=50,
         n_jobs=1,
-        rng_seed=7,
+        seed=7,
     )
-    r = m.predict(atexog={"x1": 0, "x2": 0})
+    r = est.predict(atexog={"x1": 0, "x2": 0})
     assert np.isfinite(r.estimate)
     assert np.isfinite(r.std_error)
     assert r.conf_int_lower < r.conf_int_upper
@@ -124,35 +159,37 @@ def test_reimpute_end_to_end_predict():
 # ---------------------------------------------------------------------------
 
 
+def _bootstrap_states(est):
+    """Return the cached list of successful bootstrap states."""
+    # BankSet stores the successful states list directly in _states_bank.
+    return next(iter(est._banks._states_bank.values()))
+
+
 def test_reimpute_freshness_across_replicates():
     """A stochastic imputer should produce different fills on repeated calls."""
     pytest.importorskip("sklearn")
-    from sklearn.impute import IterativeImputer
 
     rng = np.random.default_rng(42)
-    df, df_nan = _make_incomplete_df(rng, n=120)
-    df_init = df_nan.fillna(df_nan.mean())
+    df_init, df_nan = _make_incomplete_df(rng, n=120)
     fit = smf.ols("y ~ x1 + x2", data=df_init).fit()
 
-    imp = IterativeImputer(max_iter=5, random_state=0, sample_posterior=True)
+    imp = _iterative_imputer(max_iter=5, random_state=0, sample_posterior=True)
 
     def _imputer(frame):
         arr = imp.fit_transform(frame)
         return pd.DataFrame(arr, columns=frame.columns)
 
-    m = Margins(
-        fit,
-        transforms=[reimpute(_imputer, incomplete=df_nan)],
+    est = GComputation(
+        _reimpute_node(df_init, df_nan, _imputer),
+        outcome=fit,
         method="bootstrap",
-        n_boot=30,
+        B=30,
         n_jobs=1,
-        rng_seed=7,
+        seed=7,
     )
-    _ = m.predict()
+    _ = est.predict()
 
-    from pymargins.margins._inference_glue import _bootstrap_states_bank
-
-    states, _, _ = _bootstrap_states_bank(m)
+    states = _bootstrap_states(est)
     assert len(states) > 0
 
     # The mere fact that bootstrap refits succeeded with different data
@@ -175,10 +212,9 @@ def test_reimpute_freshness_across_replicates():
 
 
 def test_reimpute_reproducible_with_fresh_seeded_imputer():
-    """Two fresh sessions with the same seeded imputer and rng_seed must
+    """Two fresh sessions with the same seeded imputer and seed must
     produce identical bootstrap draws."""
     pytest.importorskip("sklearn")
-    from sklearn.impute import IterativeImputer
 
     rng = np.random.default_rng(42)
     n = 200
@@ -196,7 +232,7 @@ def test_reimpute_reproducible_with_fresh_seeded_imputer():
     fit = smf.ols("y ~ x1 + x2", data=df_init).fit()
 
     def make_imputer():
-        imp = IterativeImputer(max_iter=5, random_state=42, sample_posterior=True)
+        imp = _iterative_imputer(max_iter=5, random_state=42, sample_posterior=True)
 
         def _imputer(frame):
             arr = imp.fit_transform(frame)
@@ -204,25 +240,25 @@ def test_reimpute_reproducible_with_fresh_seeded_imputer():
 
         return _imputer
 
-    m1 = Margins(
-        fit,
-        transforms=[reimpute(make_imputer(), incomplete=df_nan)],
+    est1 = GComputation(
+        _reimpute_node(df_init, df_nan, make_imputer()),
+        outcome=fit,
         method="bootstrap",
-        n_boot=20,
+        B=20,
         n_jobs=1,
-        rng_seed=7,
+        seed=7,
     )
-    r1 = m1.predict(atexog={"x1": 0, "x2": 0})
+    r1 = est1.predict(atexog={"x1": 0, "x2": 0})
 
-    m2 = Margins(
-        fit,
-        transforms=[reimpute(make_imputer(), incomplete=df_nan)],
+    est2 = GComputation(
+        _reimpute_node(df_init, df_nan, make_imputer()),
+        outcome=fit,
         method="bootstrap",
-        n_boot=20,
+        B=20,
         n_jobs=1,
-        rng_seed=7,
+        seed=7,
     )
-    r2 = m2.predict(atexog={"x1": 0, "x2": 0})
+    r2 = est2.predict(atexog={"x1": 0, "x2": 0})
 
     assert np.allclose(r1.draws_inf, r2.draws_inf), (
         "Two fresh sessions with identical seeds should produce identical draws"
@@ -234,7 +270,6 @@ def test_reimpute_widens_se_on_affected_coefficient():
     large as plain-bootstrap SE on the completed data, because MI injects
     imputation-model uncertainty."""
     pytest.importorskip("sklearn")
-    from sklearn.impute import IterativeImputer
 
     rng = np.random.default_rng(42)
     n = 400
@@ -252,30 +287,37 @@ def test_reimpute_widens_se_on_affected_coefficient():
     df_init = df_nan.fillna(df_nan.mean())
     fit = smf.ols("y ~ x1 + x2", data=df_init).fit()
 
-    imp = IterativeImputer(max_iter=10, random_state=0, sample_posterior=True)
+    imp = _iterative_imputer(max_iter=10, random_state=0, sample_posterior=True)
 
     def _imputer(frame):
         arr = imp.fit_transform(frame)
         return pd.DataFrame(arr, columns=frame.columns)
 
-    m_mi = Margins(
-        fit,
-        transforms=[reimpute(_imputer, incomplete=df_nan)],
+    est_mi = GComputation(
+        _reimpute_node(df_init, df_nan, _imputer),
+        outcome=fit,
         method="bootstrap",
-        n_boot=200,
+        B=200,
         n_jobs=1,
-        rng_seed=7,
+        seed=7,
     )
     # We inspect the bootstrap coefficient draws directly
-    from pymargins.margins._inference_glue import _bootstrap_states_bank
-
-    states_mi, _, _ = _bootstrap_states_bank(m_mi)
+    _ = est_mi.predict()
+    states_mi = _bootstrap_states(est_mi)
     assert len(states_mi) > 100
     coefs_mi = np.stack([np.asarray(s[1].coefficients()) for s in states_mi])
     se_mi_x1 = np.std(coefs_mi[:, 1], ddof=1)
 
-    m_plain = Margins(fit, method="bootstrap", n_boot=200, n_jobs=1, rng_seed=7)
-    states_plain, _, _ = _bootstrap_states_bank(m_plain)
+    est_plain = GComputation(
+        steps.input(df_init),
+        outcome=fit,
+        method="bootstrap",
+        B=200,
+        n_jobs=1,
+        seed=7,
+    )
+    _ = est_plain.predict()
+    states_plain = _bootstrap_states(est_plain)
     assert len(states_plain) > 100
     coefs_plain = np.stack([np.asarray(s[1].coefficients()) for s in states_plain])
     se_plain_x1 = np.std(coefs_plain[:, 1], ddof=1)
@@ -295,34 +337,118 @@ def test_reimpute_draws_differ_from_plain_bootstrap():
     """MI bootstrap draws must differ from plain-bootstrap draws, proving
     that imputation uncertainty is injected into the distribution."""
     pytest.importorskip("sklearn")
-    from sklearn.impute import IterativeImputer
 
     rng = np.random.default_rng(42)
-    df, df_nan = _make_incomplete_df(rng, n=300, prop_missing=0.25)
-    df_init = df_nan.fillna(df_nan.mean())
+    df_init, df_nan = _make_incomplete_df(rng, n=300, prop_missing=0.25)
     fit = smf.ols("y ~ x1 + x2", data=df_init).fit()
 
-    imp = IterativeImputer(max_iter=10, random_state=0, sample_posterior=True)
+    imp = _iterative_imputer(max_iter=10, random_state=0, sample_posterior=True)
 
     def _imputer(frame):
         arr = imp.fit_transform(frame)
         return pd.DataFrame(arr, columns=frame.columns)
 
-    m_mi = Margins(
-        fit,
-        transforms=[reimpute(_imputer, incomplete=df_nan)],
+    est_mi = GComputation(
+        _reimpute_node(df_init, df_nan, _imputer),
+        outcome=fit,
         method="bootstrap",
-        n_boot=100,
+        B=100,
         n_jobs=1,
-        rng_seed=7,
+        seed=7,
     )
-    r_mi = m_mi.predict(atexog={"x1": 0, "x2": 0})
+    r_mi = est_mi.predict(atexog={"x1": 0, "x2": 0})
 
-    m_plain = Margins(fit, method="bootstrap", n_boot=100, n_jobs=1, rng_seed=7)
-    r_plain = m_plain.predict(atexog={"x1": 0, "x2": 0})
+    est_plain = GComputation(
+        steps.input(df_init),
+        outcome=fit,
+        method="bootstrap",
+        B=100,
+        n_jobs=1,
+        seed=7,
+    )
+    r_plain = est_plain.predict(atexog={"x1": 0, "x2": 0})
 
     # The draw arrays should not be identical
     assert not np.allclose(r_mi.draws_inf, r_plain.draws_inf), (
         "MI bootstrap draws are identical to plain bootstrap draws — "
         "imputation uncertainty is not being injected"
     )
+
+
+# ---------------------------------------------------------------------------
+# F4 hardening: per-instance collect() memo shares one stochastic imputation
+# between the template fit and the estimand grid
+# ---------------------------------------------------------------------------
+
+
+class _StochasticFillImputer:
+    """Fills NaNs with a fresh random draw on every call.
+
+    Has no ``random_state`` attribute and re-draws each call, so two calls on
+    the same frame return different data. This makes the equality assertions
+    below meaningful: they can only hold if a *single* imputation is reused.
+    """
+
+    def __init__(self):
+        self._rng = np.random.default_rng()
+
+    def __call__(self, frame):
+        out = frame.copy()
+        for col in out.columns:
+            mask = out[col].isna()
+            if mask.any():
+                out.loc[mask, col] = self._rng.normal(size=int(mask.sum()))
+        return out
+
+
+def test_reimpute_node_collect_memo_is_stable():
+    """The per-instance ``Node.collect()`` memo returns the identical object on
+    repeated calls for a stochastic stage — the mechanism F4 relies on. Without
+    it, a stochastic ``reimpute`` would re-impute on every ``collect()``."""
+    df = pd.DataFrame({"x": [1.0, np.nan, 3.0, np.nan, 5.0]})
+    node = steps.reimpute(steps.input(df), imputer=_StochasticFillImputer())
+    first = node.collect()
+    second = node.collect()
+    assert first is second  # memoized, not recomputed
+
+
+def test_reimpute_memo_shares_imputation_between_fit_and_grid():
+    """F4 hardening: the template adapter's training data and the estimand
+    ``base_data`` must be the *same* stochastic imputation.
+
+    Spec-form (``outcome="..."``) fits on ``wiring.collect()`` while ``compile``
+    reuses the same node instance's memo for ``base_data``. If same-instance
+    reuse is ever lost (e.g. reverting to a cache that recomputes a stochastic
+    stage per call), the fit and the grid diverge and the point estimate
+    becomes incoherent. This guards that invariant.
+    """
+    rng = np.random.default_rng(0)
+    n = 80
+    df = pd.DataFrame(
+        {"x": rng.normal(size=n), "y": (rng.uniform(size=n) < 0.5).astype(float)}
+    )
+    df.loc[::5, "x"] = np.nan
+
+    imputer = _StochasticFillImputer()
+    # Precondition: the imputer really is stochastic (two calls differ), so the
+    # fingerprint equality below is not vacuously true.
+    mask = df["x"].isna().to_numpy()
+    first = imputer(df)["x"].to_numpy()[mask]
+    second = imputer(df)["x"].to_numpy()[mask]
+    assert not np.allclose(first, second)
+
+    est = GComputation(
+        steps.reimpute(steps.input(df), imputer=imputer),
+        outcome="y ~ x",
+        method="bootstrap",
+        B=10,
+        seed=1,
+    )
+    fit_fp = fingerprint_frame(est._compiled.adapter.training_data)
+    grid_fp = fingerprint_frame(est._compiled.base_data)
+    assert fit_fp == grid_fp, (
+        "Template fit and estimand grid saw different imputations — the "
+        "per-instance collect() memo is not being shared (F4 regression)."
+    )
+    # The imputation actually ran: no missing cells reached the model/grid.
+    assert not np.isnan(np.asarray(est._compiled.base_data["x"], dtype=float)).any()

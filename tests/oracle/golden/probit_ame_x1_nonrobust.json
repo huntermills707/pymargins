@@ -1,0 +1,36 @@
+{
+  "case_id": "probit_ame_x1_nonrobust",
+  "created": "2026-06-11",
+  "r_version": "R version 4.6.0 (2026-04-24)",
+  "packages": {
+    "marginaleffects": "0.32.0",
+    "sandwich": "3.1.1",
+    "survey": "4.5"
+  },
+  "data": "oracle_main.csv",
+  "model": {
+    "formula": "y_bin ~ treat + x1 + x2",
+    "family": "binomial(probit)",
+    "fit_control": "glm.control(epsilon = 1e-12, maxit = 200)"
+  },
+  "r_call": "avg_slopes(fit, variables = 'x1')",
+  "vcov": "nonrobust",
+  "ci_convention": {
+    "dist": "z",
+    "level": 0.95
+  },
+  "labels": [
+    "x1"
+  ],
+  "quantities": {
+    "coefficients": [-0.337312211056748, 0.639719591482093, 0.33361801907719, -0.278481345764905],
+    "estimate": 0.117367504247528,
+    "std_error": 0.0227924976433649,
+    "conf_low": 0.0726950297488186,
+    "conf_high": 0.162039978746237
+  },
+  "tolerances": {
+    "std_error": 0.007
+  },
+  "notes": "probit nonrobust SE: R uses expected (Fisher) information, statsmodels uses observed information for non-canonical link; ~0.5% gap"
+}

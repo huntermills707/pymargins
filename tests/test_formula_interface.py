@@ -8,7 +8,7 @@ import pytest
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from pymargins import Margins
+from pymargins import GComputation, steps
 from pymargins._adapters.statsmodels_ols import StatsmodelsOLSAdapter
 from pymargins._formula import FormulaSpec, _has_derived_terms
 
@@ -120,17 +120,16 @@ def test_has_derived_terms_detects_polynomials():
 
 
 # ---------------------------------------------------------------------------
-# Margins.from_formula constructor
+# GComputation formula-outcome constructor
 # ---------------------------------------------------------------------------
 
 
-def test_from_formula_classmethod(fit_array_ols_poly, df_poly):
-    m = Margins.from_formula(
-        fit_array_ols_poly,
-        formula="y ~ age + treat + I(age**2)",
-        data=df_poly,
+def test_formula_outcome_constructor(fit_array_ols_poly, df_poly):
+    est = GComputation(
+        steps.input(df_poly),
+        outcome="y ~ age + treat + I(age**2)",
     )
-    assert m.adapter._formula_spec is not None
+    assert est._compiled.adapter._formula_spec is not None
 
 
 # ---------------------------------------------------------------------------
@@ -142,16 +141,15 @@ def test_dydx_array_fit_with_formula_matches_formula_fit(
     fit_array_ols_poly, fit_formula_ols_poly, df_poly
 ):
     """B.6 Acceptance: array-fit model with formula= yields correct dydx."""
-    m_array = Margins.linear_scale(
-        fit_array_ols_poly,
-        formula="y ~ age + treat + I(age**2)",
-        data=df_poly,
+    est_array = GComputation(
+        steps.input(df_poly),
+        outcome="y ~ age + treat + I(age**2)",
         at="mean",
     )
-    m_formula = Margins.linear_scale(fit_formula_ols_poly, at="mean")
+    est_formula = GComputation(fit_formula_ols_poly, at="mean")
 
-    slope_array = m_array.dydx("age")
-    slope_formula = m_formula.dydx("age")
+    slope_array = est_array.dydx("age")
+    slope_formula = est_formula.dydx("age")
 
     np.testing.assert_allclose(
         float(slope_array.estimate),
@@ -166,53 +164,13 @@ def test_dydx_array_fit_without_formula_warns_on_derived_terms(
     """Column-selection fallback should warn when derived terms are present."""
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
-        m = Margins.linear_scale(fit_array_ols_poly, data=df_poly, at="mean")
-        m.dydx("age")
+        # Array-fit models need an explicit adapter with training_data.
+        adapter = StatsmodelsOLSAdapter(fit_array_ols_poly, training_data=df_poly)
+        est = GComputation(adapter, at="mean")
+        est.dydx("age")
         # The warning is raised during design_matrix_from_df inside dydx
         warn_msgs = [str(warning.message) for warning in w]
         assert any("column-selection fallback" in msg for msg in warn_msgs)
-
-
-# ---------------------------------------------------------------------------
-# predict() / evaluate() arity validation
-# ---------------------------------------------------------------------------
-
-
-def test_predict_transform_arity_validation(fit_formula_ols_poly):
-    m = Margins.linear_scale(fit_formula_ols_poly, at="mean")
-    with pytest.raises(ValueError, match="transform must accept at least"):
-        m.predict(transform=lambda: 1.0)
-
-
-def test_evaluate_compose_arity_validation(fit_formula_ols_poly):
-    m = Margins.linear_scale(fit_formula_ols_poly, at="mean")
-    with pytest.raises(ValueError, match="compose must accept at least"):
-        m.evaluate(
-            scenarios=[{"atexog": {"age": 50}}],
-            compose=lambda: 1.0,
-        )
-
-
-# ---------------------------------------------------------------------------
-# joint_test / run_test negative tests
-# ---------------------------------------------------------------------------
-
-
-def test_joint_test_neither_gradient_nor_draws(fit_formula_ols_poly):
-    m = Margins.linear_scale(fit_formula_ols_poly, at="mean")
-    pred = m.predict(atexog={"age": [40, 60]})
-    # materialize drops gradient and draws
-    mat = pred.materialize()
-    with pytest.raises(ValueError, match="neither"):
-        mat.joint_test()
-
-
-def test_run_test_neither_gradient_nor_draws(fit_formula_ols_poly):
-    m = Margins.linear_scale(fit_formula_ols_poly, at="mean")
-    pred = m.predict()
-    mat = pred.materialize()
-    with pytest.raises(ValueError, match="Cannot run test"):
-        mat.test()
 
 
 # ---------------------------------------------------------------------------

@@ -7,214 +7,145 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.0] — 2026-06-06
+## [0.4.0] — 2026-06-18 — BREAKING: the `Margins` session is removed
+
+### Removed
+
+- **`Margins` and `MarginsResult`** — the session/result API from 0.3.x and
+  earlier is deleted. The facade/shim architecture that kept `Margins` alive
+  while `GComputation` grew underneath it was the source of the silent-wrong
+  bugs listed under *Corrections*; 0.4.0 removes it rather than patching it.
+- **`from_posterior`** — constructing estimators from MCMC posterior draws was
+  tied to the legacy session. It may re-enter as its own small front-end later
+  (design §3.9), but there is no equivalent in 0.4.0.
+- **`strict=True`** — the constructor now *is* strict mode: unknown kwargs are
+  a `TypeError`, and every analysis-defining parameter is bound once at
+  construction.
+- **`diagnostics=False`** — diagnostics are always on and routed by severity
+  (refuse / warn / note) into the `CompileReport` and result metadata.
+- **`bootstrap_config={...}`** — the dict is dissolved into explicit constructor
+  and `steps.input(...)` parameters (`ci=`, `B=`, `seed=`, `block_type=`).
+- **Result post-hoc algebra** — `MarginsResult` operators (`+`, `-`, `*`, `/`),
+  `compose_results()`, and `materialize()` are gone. `scaled()` and within-result
+  `contrast()` / `pairwise_contrasts()` remain as readouts of a single result.
+- **`MarginsResult.conf_int(level=...)`** — the confidence level is locked at
+  estimator construction. Calling `result.conf_int(level=...)` now raises
+  `TypeError` with a steer to re-declare the estimator.
+
+### Migration
+
+Every shipped 0.3.x spelling has a new home:
+
+| 0.3.x | 0.4.0 |
+|---|---|
+| `Margins(model)` | `GComputation(model)` (implicit input) |
+| `phi=f, phi_inv=g` | `scale=(f, g)` or a named scale |
+| `Margins.log_scale(m)` | `GComputation(m, scale="log")` |
+| `vcov=` | unchanged; `ndarray` forces tier-2 inference |
+| `weights=` | unchanged (known weights only) |
+| `at=`, `level=`, `method=` | same names, constructor-bound |
+| `kappa_threshold=x` | choose `method="delta"` or `method="simulation"` explicitly; user-tunable constants overrides are compile-level only in 0.4.0 |
+| `rng_seed=` / `n_sim=` / `n_boot=` | `seed=` / `n_sim=` / `B=` |
+| `n_jobs=` / `progress_bar=` | execution knobs, not plan fields |
+| `gradient_backend=` / `fd_step=` | engine options, now in the Plan |
+| `cluster=` / `block_size=` | `steps.input(df, cluster=...)` / `steps.input(df, block=...)` |
+| `survey_design=` | `steps.input(df, design=...)` |
+| `matching=` | `steps.match(node, matcher)` |
+| `transforms=` | `steps.trim` / `steps.drop_outliers` / `steps.reimpute` chain |
+| `formula=`/`data=` (`from_formula`) | spec form of `outcome=` on a wiring node |
+| `Margins(model).predict(...)` | `GComputation(model).predict(...)` |
+| `Margins(model).dydx(...)` | `GComputation(model).dydx(...)` |
+| `Margins(model).contrasts(...)` | `GComputation(model).contrasts(...)` |
+| `Margins(model).evaluate(...)` | `GComputation(model).evaluate(...)` |
+| `Margins(model).rmst(...)` | `GComputation(model).rmst(...)` |
+| `session.diagnose()` | `est.plan.describe()` + `CompileReport` |
+| `pool_imputations(results, ...)` | unchanged (now returns a `GraphResult`) |
+| `adjust(result, ...)` | unchanged (accepts `GraphResult`) |
+
+See the updated tutorials and how-to guides for worked examples.
+
+### Corrections
+
+These are numbers that changed on purpose — 0.4.0 ships the oracle-correct
+value rather than the 0.3.x value. Each entry cites the oracle evidence in
+`tests/oracle/` or `tests/test_analytic.py`.
+
+- **D4/D8 — cluster covariance no longer silently dropped.** Passing
+  `cluster=g` to the legacy session did not reach the delta-path covariance
+  estimator; 0.3.x returned the non-robust SE. In 0.4.0 cluster/block/design
+  declarations live on `steps.input(...)` and route to both the analytic
+  covariance and the resampler. Oracle: R `sandwich::vcovCL(cluster = ~g,
+  type = "HC1")`; explicit `vcov={"type": "cluster", "groups": g}` now matches.
+- **D9 — GLM HC1 finite-sample correction restored.** `StatsmodelsGLMAdapter`
+  now scales the HC0 sandwich by `nobs / df_resid` so that `vcov="HC1"` matches
+  R `sandwich::vcovHC(type = "HC1")`. Oracle:
+  `tests/oracle/golden/logit_ame_x1_hc1.json` and
+  `tests/oracle/golden/poisson_ame_x1_hc1.json`.
+- **D16 — `weights=` + `over=` computes per-group weighted means.** In 0.3.x
+  this combination raised a shape error. In 0.4.0 each `over=` group uses only
+  its positional subset of `weights=`, producing a weighted group mean. Oracle:
+  `marginaleffects::avg_predictions(by = ..., wts = ...)`; test:
+  `tests/test_engine_queries.py::test_predict_weights_plus_over_weighted_group_means`.
+- **D17 — `contrasts()` and `evaluate()` honor declared weights.** In 0.3.x
+  per-scenario aggregation ignored `weights=`, so weighted and unweighted
+  sessions returned identical contrast values. In 0.4.0 scenario-level
+  predictions are weighted before the linear combination / compose. Oracle:
+  `marginaleffects::avg_comparisons(wts = ...)`; tests:
+  `tests/test_engine_queries.py::test_contrasts_weights_honored_in_aggregation`
+  and `test_evaluate_weights_honored_in_aggregation`.
+- **D19 — `GraphResult.influence()` includes the bread matrix.** The per-query
+  influence function is now `ψ^h = ∇h · Σ̂ · score_obs`, consistent with the
+  influence-variance identity. Test:
+  `tests/test_psi_h_includes_bread_scale_equivariance`.
+
+Other ledgered items (D1/D3/D6/D7/D10/D11/D15/D18/D20/D21) are fixes,
+label-only changes, R-script resyncs, golden regenerations, environment-fidelity
+notes, or implementation deviations with no user-visible numeric change.
+D2/D5/D12/D13/D14 are precursor/superseded entries whose resolutions are cited
+above.
+
+### Reproducibility
+
+- Same-seed simulation and bootstrap draw streams may differ from 0.3.0.
+  Seed-tree ownership moved from the legacy session into the engine (`BankSet`
+  keyed by `(plan_hash, branch_id, seed)`), and the M=1 derivation was reviewed
+  at R1. Determinism is enforced by the regression golden suite in
+  `tests/golden/`.
 
 ### Added
 
-- Transform pipeline (`Margins(transforms=[...])`) for bootstrap inference.
-  Stages apply `frame → frame` transforms that are re-derived on every
-  bootstrap replicate.  v1 stages:
-  - `reimpute(imputer, incomplete=df)` — bootstrap-then-impute multiple
-    imputation.  The imputer is fit-and-imputed fresh each replicate,
-    injecting imputation-model uncertainty into the bootstrap distribution.
-    Produces an ordinary bootstrap `MarginsResult`; no Rubin combinator.
-  - `drop_outliers(rule)` — row filter re-applied per replicate.
-  - `trim(lower=, upper=, columns=)` — bound-based row filter re-applied
-    per replicate.
-- Structural guards: `survey_design` × row-altering/source-overriding stages
-  are rejected; `matching=` and `transforms=` are mutually exclusive;
-  `requires_resampling=True` stages force `method='bootstrap'`; weighted
-  aggregation + row-altering stages are rejected (3b) to prevent silent
-  misalignment.
-- `pool_imputations(results, *, label=, complete_df=)` — Rubin's-rules
-  combinator over M `MarginsResult` objects from precomputed imputations, the
-  artifacts-side counterpart to the bootstrap `reimpute` stage. Pools on the
-  inference scale and reports through `φ`; uses a Student-*t* interval on the
-  Rubin (1987) degrees of freedom, with an optional Barnard–Rubin (1999)
-  small-sample correction via `complete_df=`. Inference-method-agnostic: each
-  branch's `W_m = se_m²` may have come from delta, simulation, or bootstrap.
-  Validates cross-imputation commensurability (labels, `kind`, `at`,
-  `scenarios`, level, scale) and fails loudly on mismatch. Surfaces a new
-  `ImputationDiagnostic` (FMI, relative efficiency, degrees of freedom, and the
-  within/between/total variances) on `MarginsResult.imputation_diagnostic` and
-  in the `summary()` footer. Pooled results recompute their interval at a new
-  `conf_int(level=)` and report a pooled *t*-test from `test()`.
-- New tutorial `docs/tutorials/pooling_imputations.md` (precomputed-frames MI),
-  the artifacts twin of `mi_via_reimpute.md`.
+- **`GComputation`** — the new estimator noun. It compiles a wiring graph (or
+  an implicit input from a hand-fit model) into an immutable `Plan` and runs
+  queries through the real engine.
+- **`steps.*` wiring verbs** — `input`, `match`, `trim`, `drop_outliers`,
+  `reimpute`. Each stage is a pure, content-addressed node; dependence
+  declarations (`design=`, `cluster=`, `block=`) live on `steps.input`.
+- **`Plan`** — immutable, hashable analysis descriptor. `plan.hash` is printed
+  on every result summary for pre-registration semantics; `plan.describe()`
+  reports the resolved method and any auto-resolution reason.
+- **`GraphResult`** — self-contained result object. Stores estimates, standard
+  errors, confidence intervals, per-method payload (gradient + Σ̂, or draws),
+  and `ψ^h` when available. `conf_int()` accepts corrections
+  (`bonferroni`, `sidak`, `sup-t`) but no `level=`.
+- **Oracle validation suite** — analytic closed-form tests plus R
+  `marginaleffects` / `survey` / `sandwich` goldens under `tests/oracle/`.
+- **Regression golden suite** — layer-4 checks in `tests/golden/` recorded from
+  the validated new engine, compared within the documented oracle tolerances so
+  they hold across the Python/numpy/BLAS matrix.
+- **Session-free banks** — `BankSet` owns resample indices, refit states, and
+  simulation draws per `(plan, branch, seed)`; replay makes results from one
+  estimator jointly composable.
+- **Doctrine dispatch** — `execute_query` calls the delta/simulation/bootstrap
+  kernels directly; there are no runtime fallbacks, κ-flips, or silent
+  reroutes.
+- **Soundness layer** — `CompileReport` with severity-routed predicates for
+  method/CI compatibility, tail counts, cluster counts, lonely PSU, and ESS.
+- **Tier-1 influence exposure** — `ModelAdapter.influence()` returns the
+  per-observation influence function `ψ^β` where `score_obs()` is available;
+  the engine computes `ψ^h = ψ^β @ ∇hᵀ`.
 
-### Fixed
-
-- Docstring wording in `InferenceConfig`: "K–R" corrected to "simulation"
-  (only delta/simulation/bootstrap exist).
-
-## [0.2.0] — 2026-05-31
-
-### Added
-
-- `SurveyDesign` and `Margins(survey_design=...)` for complex-survey
-  inference: design-weighted estimates with Taylor-linearization standard
-  errors (stratified, clustered, with optional finite-population correction)
-  on the delta and simulation paths, and stratified PSU resampling on the
-  bootstrap path. Numerically matches R `survey::svyglm` + `marginaleffects`.
-  Survey SEs are available for the statsmodels GLM and OLS/WLS adapters;
-  adapters without `score_obs()` raise a clear error pointing to the
-  bootstrap path.
-- `py.typed` marker (PEP 561) so downstream type checkers (mypy, pyright)
-  pick up the package's inline type annotations.
-
-### Fixed
-
-- `dydx` now applies session `weights=` when aggregating slopes (previously
-  the weighted average marginal effect silently returned the unweighted
-  value). Weight validation moved to session construction so it runs eagerly
-  rather than inside the differentiated kernel.
-
-### Internal
-
-- CI: a `typecheck` job runs mypy on the package. Reported, not enforced for
-  now (mirrors the coverage step); `[tool.mypy]` config in `pyproject.toml`.
-- `.gitignore`: ignore `.mypy_cache/` and the CI `mypy.log`.
-
-### Development
-
-- Expanded test coverage from 80% to 89%.
-- Added 200+ tests across adapters, result objects, and bootstrap inference
-
-## 0.1.2 - 2026-05-29
-
-### Internal
-
-- CI: GitHub Actions pipeline for lint (ruff check + format), a test matrix
-  across Python 3.10–3.14 (trimmed to 3.10/3.12/3.14 on PRs), a bare-install
-  job verifying optional backends stay lazily imported, a minimum-dependency-
-  version job (`uv --resolution lowest-direct`), per-backend isolation runs,
-  and a cache-backed docs build.
-- CI: release workflow publishing to PyPI on `v*` tags via Trusted Publishing
-  (OIDC, no stored token).
-- Dependabot: weekly updates for GitHub Actions and pip dependencies.
-- Repo-wide ruff lint/format pass and ruff configuration in `pyproject.toml`.
-
-## [0.1.1] — 2026-05-26
-
-### Added
-
-- `Margins.from_posterior()` for constructing sessions from Bayesian posterior
-  draw banks (MCMC samples treated as simulation draws).
-- `MarginsResult.contrast(C)` for testing linear hypotheses `C @ theta = 0`
-  on vector-valued results.
-- `MarginsResult.influence()` exposing per-observation jackknife influence
-  measures (DFBETA-style) for sensitivity diagnostics.
-- `pymargins.adjust()` for multiple-comparison correction on result tables
-  (Holm, Bonferroni, Benjamini–Hochberg FDR, and others via `statsmodels`).
-- Elasticity convenience methods on `MarginsResult`: `eyex()`, `eydx()`,
-  and `dyex()` for semi-elasticity and elasticity transformations.
-- `MarginsResult.to_disk()` / `MarginsResult.from_disk()` for lightweight
-  pickle-based persistence of result objects.
-- `Margins.rmst()` survival convenience wrapper for restricted mean survival
-  time contrasts.
-- New how-to guide: `docs/howto/influence.md` covering jackknife influence
-  diagnostics and leave-one-out sensitivity analysis.
-- Expanded how-to guides for elasticities, simultaneous confidence intervals,
-  and exporting results (Excel/pickle).
-
-### Fixed
-
-- Refreshed Jupyter notebook execution cache for ReadTheDocs builds.
-
-## [0.1.0] — 2026-05-23
-
-### Added
-
-- **Session-level inference-distribution caching.** Bootstrap and
-  simulation random objects are now materialized once per session and
-  reused across every subsequent call:
-  - **Bootstrap**: resample indices and refitted-model states are
-    harvested at first bootstrap-method use; later calls evaluate the
-    estimand over the cached states rather than re-fitting. A 10-point
-  survival curve now costs ~1 bootstrap pass, not 10.
-  - **Simulation**: β* draws are generated once and reused.
-  - Sessions freeze inference parameters (`method`, `n_boot`, `rng_seed`,
-    `n_sim`, `cluster`, `block_size`, `bootstrap_config`, `matching`)
-    after the cache is built; mutating them raises `RuntimeError`.
-  - Adapter-drift detection: if the underlying model is re-fitted after
-    the cache exists, the next call raises `RuntimeError`.
-  - `MarginsResult` exposes `n_boot_effective` and `n_boot_failed` so
-    callers know how many replicates succeeded.
-- **Multi-time prediction** for survival and other time-indexed adapters.
-  Scenarios can now carry a `prediction_time` key; the lifelines Cox-PH
-  survival adapter supports it via `with_prediction_time` shallow clones.
-  `contrasts()` and `evaluate()` correctly route each scenario through
-  its own predict function. The Rossi recidivism demo shows a
-  counterfactual survival-curve grid computed in one bootstrap pass.
-- Six end-to-end demos in `docs/demos/` using bundled datasets: Mroz LFP
-  (logit), Fair affairs (logit vs Poisson), Spector PSI (small-n
-  inference), Rossi recidivism (Cox PH), wage panel (entity FE), and
-  ANES96 (multinomial logit). Notebook-style (`myst-nb`), executed at
-  docs-build time. Surfaced as a top-level "Demos — end-to-end
-  analyses" section in the sidebar; the Williams (2012) replication
-  scripts move to a hidden archive page.
-- Optional `progress_bar=True` on `Margins(..., method="bootstrap")` to show
-  a TQDM progress bar during bootstrap refitting and evaluation.
-- Public `pymargins.adapters` module exposing every concrete adapter class
-  (e.g. `StatsmodelsGLMAdapter`, `LifelinesCoxPHAdapter`,
-  `SklearnBootstrapAdapter`) via lazy PEP 562 resolution.  This keeps
-  `import pymargins` cheap — optional third-party dependencies are loaded
-  only when an adapter is actually accessed.
-- Base adapter shapes (`ModelAdapter`, `GLMAdapter`,
-  `LinearPredictionAdapter`, `WrappedFDAdapter`, `BootstrapOnlyAdapter`),
-  `VariableInfo`, `InferenceMethod`, and `register_adapter` are also
-  re-exported from `pymargins.adapters` so custom-adapter authors have a
-  single import target.
-- `tests/test_adapters_facade.py` ensuring every concrete adapter is mapped
-  and resolved correctly.
-- `tests/test_session_bank_cache.py` covering session-level bootstrap-state
-  banks, simulation-draw banks, resample-index banks, cache invalidation,
-  adapter-drift detection, and frozen-attribute enforcement.
-
-### Fixed
-
-- Broken MyST cross-references in `docs/explanations/session_precommitment.md`
-  (links to `howto/bootstrap.md`, `howto/cluster_block_bootstrap.md`, and
-  `howto/matching.md`).
-- ReadTheDocs notebook execution now defaults to `nb_execution_mode="cache"`
-  so already-executed notebooks do not re-run on every RTD build.
-
-## [0.0.1] — 2026-05-17
-
-Initial public release on PyPI and Read the Docs.
-
-### Added
-
-- `Margins` session API with explicit analytical pre-commitment:
-  scale, variance estimator, confidence level, default evaluation
-  point, and inference method are fixed at construction.
-- Scale-specific constructors: `linear_scale`, `log_scale`,
-  `logit_scale`, `correlation_scale`, and `from_formula`.
-- Estimands: adjusted predictions, slopes (`dydx`), contrasts,
-  difference-in-differences, and arbitrary differentiable
-  `evaluate` expressions.
-- Scenario helpers: `pairwise`, `reference`, `at_levels`, `grid`,
-  `did`, `diff`, `all_pairwise`.
-- Inference: JAX-native delta method, Krinsky–Robb simulation, and
-  nonparametric bootstrap with cluster and block variants
-  (percentile/BCa/normal CIs, parallel refitting).
-- κ (kappa) nonlinearity diagnostic with automatic simulation
-  fallback; `Margins.diagnose()` pre-flight reporting.
-- Auto-detected model adapters for statsmodels (OLS/WLS/GLS, GLM,
-  discrete/count, zero-inflated, MNLogit, ordered, GEE, MixedLM, RLM,
-  QuantReg, PHReg), linearmodels (IV/2SLS, panel, absorbing,
-  Fama–MacBeth), lifelines (CoxPH, time-varying Cox, AFT families,
-  generalized gamma, piecewise exponential, cubic-spline), and
-  scikit-learn (via bootstrap).
-- `register_adapter` extension point for custom model backends.
-- pysmatch propensity-matching integration (`PysmatchClient`).
-- Polars input support.
-- Result objects with `summary()`, `to_frame()`, hypothesis testing
-  (`test`, `joint_test`), and `materialize()` for memory release.
-- Documentation site with tutorials, how-to guides, API reference,
-  and theory/design explanations.
-
-[Unreleased]: https://github.com/huntermills707/pymargins/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/huntermills707/pymargins/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/huntermills707/pymargins/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/huntermills707/pymargins/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/huntermills707/pymargins/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/huntermills707/pymargins/compare/v0.1.1...v0.1.2

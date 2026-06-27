@@ -9,7 +9,7 @@ import statsmodels.formula.api as smf
 
 jax.config.update("jax_enable_x64", True)
 
-from pymargins import Margins
+from pymargins import GComputation
 from pymargins._adapter import auto_detect_adapter
 from pymargins._adapters.statsmodels_discrete_binary import (
     StatsmodelsDiscreteBinaryAdapter,
@@ -183,7 +183,7 @@ def test_variable_metadata(fit_logit_formula):
 
 def test_margins_predict_logit(fit_logit_formula):
     adapter = StatsmodelsDiscreteBinaryAdapter(fit_logit_formula)
-    m = Margins.linear_scale(fit_logit_formula, adapter=adapter)
+    m = GComputation(fit_logit_formula, adapter=adapter, scale="response")
     res = m.predict()
     assert res.estimate.size == 1
     assert 0 < float(res.estimate) < 1
@@ -191,7 +191,7 @@ def test_margins_predict_logit(fit_logit_formula):
 
 def test_margins_dydx_logit(fit_logit_formula):
     adapter = StatsmodelsDiscreteBinaryAdapter(fit_logit_formula)
-    m = Margins.linear_scale(fit_logit_formula, adapter=adapter)
+    m = GComputation(fit_logit_formula, adapter=adapter, scale="response")
     res = m.dydx("age")
     assert res.estimate.size == 1
     assert np.isfinite(float(res.estimate))

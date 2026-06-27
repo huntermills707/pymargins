@@ -2,8 +2,8 @@ Mathematical motivation
 =======================
 
 This page derives, in one place, the statistics
-:class:`~pymargins.Margins` computes and the uncertainty attached to
-each. The motivation matches Stata's `margins-delta-method FAQ
+:class:`~pymargins.GComputation` computes and the uncertainty attached
+to each. The motivation matches Stata's `margins-delta-method FAQ
 <https://www.stata.com/support/faqs/statistics/compute-standard-errors-with-margins/>`_
 and Richard Williams' `Margins01 notes
 <https://academicweb.nd.edu/~rwilliam/stats/Margins01.pdf>`_; the goal
@@ -38,7 +38,7 @@ Three things to notice:
 2. Once :math:`G\widehat V G^\top` is in hand, *any* linear combination
    :math:`C\,g(\hat\beta)` has covariance :math:`C(G\widehat V G^\top)C^\top`
    — no further differentiation needed. That is why
-   :meth:`~pymargins.Margins.contrasts` is exact under the same
+   :meth:`~pymargins.GComputation.contrasts` is exact under the same
    approximation.
 3. ``pymargins`` computes :math:`G` by JAX autodiff when an autodiff
    path exists for the predict function, by autodiff over a custom-JVP
@@ -61,10 +61,10 @@ Internal to the library every estimand is a triple
 - :math:`\phi^{-1}` — forward transform; converts user-supplied null
   values onto the inference scale for hypothesis tests.
 
-The pair :math:`(\phi, \phi^{-1})` is **session-level**, not
-per-estimand: every call within one :class:`~pymargins.Margins`
-instance is on the same inference scale. That is what makes the
-session-level κ diagnostic and inter-call composability work.
+The pair :math:`(\phi, \phi^{-1})` is **estimator-level**, not
+per-estimand: every call within one :class:`~pymargins.GComputation`
+instance is on the same inference scale. That is what makes
+estimator-level composability work.
 
 The Williams (2012) statistic table reduces to a single primitive:
 
@@ -112,7 +112,7 @@ near-zero prediction, a ratio with a small denominator) Wald
 intervals can extend beyond the natural support or under-cover.
 
 ``pymargins`` exposes two alternatives behind the same ``method=``
-keyword on the session.
+keyword on the estimator.
 
 **Krinsky–Robb simulation** (``method="simulation"``). Draw
 :math:`S` parameter vectors :math:`\beta_s\sim N(\hat\beta,\widehat
@@ -145,10 +145,9 @@ the failure rate exceeds 5%.
 The κ curvature diagnostic
 --------------------------
 
-``pymargins`` computes Skovgaard's relative curvature κ for every
-estimand (when diagnostics are enabled) and auto-falls-back to
-simulation when κ exceeds the session threshold (default 0.3). This
-is a meaningful divergence from Stata's ``margins`` and
+``pymargins`` can compute Skovgaard's relative curvature κ for any
+estimand to judge whether the delta-method linearization is trustworthy.
+This is a meaningful divergence from Stata's ``margins`` and
 ``marginaleffects``, both of which always do delta and never tell you
 when delta is suspect.
 
@@ -167,12 +166,11 @@ and the auto-fallback policy.
 Inference scales (``phi``) and the chain rule
 ---------------------------------------------
 
-The :class:`~pymargins.Margins` constructor commits to a
-:math:`(\phi, \phi^{-1})` pair via either the classmethod helpers
-(``Margins.log_scale``, ``Margins.logit_scale``,
-``Margins.correlation_scale``,
-``Margins.linear_scale``) or by passing ``phi=`` and ``phi_inv=``
-directly.
+The :class:`~pymargins.GComputation` constructor commits to a
+:math:`(\phi, \phi^{-1})` pair via the ``scale=`` keyword
+(``scale="log"``, ``scale="logit"``, ``scale="response"`` or
+``scale="identity"``) or by passing an explicit ``(phi, phi_inv)``
+tuple.
 
 The chain rule fixes how :math:`\phi` propagates through the
 estimand:
@@ -186,7 +184,7 @@ estimand:
   level term (from the explicit :math:`\beta_k`).
 
 In practice you do not write the chain rule yourself: JAX does it for
-you. The session contract is just that you commit to one
+you. The estimator contract is just that you commit to one
 :math:`(\phi, \phi^{-1})` for the whole analysis.
 
 Why the response scale matters for DiD (Ai & Norton 2003)
@@ -205,7 +203,7 @@ difference-in-differences
 is a nonlinear function of every parameter and every covariate
 profile :math:`x_*`. You cannot read it off the interaction
 coefficient. The right tool is
-:meth:`~pymargins.Margins.contrasts` (or the
+:meth:`~pymargins.GComputation.contrasts` (or the
 :func:`~pymargins.did` scenario helper), which evaluates the four
 cells on the response scale with their joint delta-method covariance
 and forms the DiD as a contrast.

@@ -12,13 +12,12 @@ kernelspec:
 
 # Difference-in-differences on the response scale
 
-
 ```{code-cell} python
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
-from pymargins import Margins
+from pymargins import GComputation  # 0.4.0: Margins -> GComputation
 
 rng = np.random.default_rng(42)
 n = 4000
@@ -34,7 +33,7 @@ df["condX"] = rng.binomial(1, 1 / (1 + np.exp(-lp)))
 
 fit = smf.glm("condX ~ C(group) * C(preexist) + age", data=df,
               family=sm.families.Binomial()).fit()
-m = Margins.linear_scale(fit, at="overall")
+m = GComputation(fit, at="overall", scale="identity")
 ```
 
 
@@ -44,9 +43,9 @@ itself is on the link scale and does *not* answer the question
 (Ai & Norton, 2003).
 
 ```{code-cell} python
-from pymargins import Margins, did
+from pymargins import GComputation, did  # 0.4.0: Margins -> GComputation
 
-m = Margins.linear_scale(fit, vcov="HC3", at="overall")
+m = GComputation(fit, vcov="HC3", at="overall", scale="identity")
 
 scen, w = did(
     "group", "preexist",

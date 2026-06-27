@@ -41,7 +41,7 @@ Williams (2012) — Inference scales
 
 ``demo/williams_2012_demo_scales.py`` reruns the same analyses on
 the log, logit, and lift inference scales, demonstrating how a
-single session locks in :math:`(\phi, \phi^{-1})` for the whole
+single estimator locks in :math:`(\phi, \phi^{-1})` for the whole
 audit trail and how the κ diagnostic flags when the chosen scale is
 poorly linearized.
 
